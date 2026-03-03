@@ -1,1 +1,251 @@
-# trip-agent
+# Trip Agent
+
+여행 지역·기간·취향을 입력하면 **최저가 또는 마일리지** 항공편, **일정 3안**, **숙소 5개**를 제시하고, 전체 일정 확정 후 **예약 안내**까지 해주는 멀티 에이전트 기반 여행 플래너입니다.
+
+---
+
+## 1. 질의응답 배경 (설계 근거)
+
+### 1.1 요구사항 요약
+
+- **입력**: 여행 지역, 기간, 시작 무렵, 여행 취향, 보유 마일리지, 선호 좌석 클래스, 현지 이동 방법, 선호 숙소 형태
+- **출력 순서**:
+  1. 최저가 또는 마일리지 활용 항공편 (가격순 정렬)
+  2. 선택 항공 + 취향 기반 일정 3안
+  3. 숙박 필요 구간별 숙소 5개 비교·선택
+  4. 일정 확정 시 예약 안내
+
+### 1.2 Agent 구성 결정
+
+각 기능을 **전담 Agent**로 분리하고, **A2A (Agent-to-Agent)** 프로토콜로 에이전트 간 협업을, **MCP (Model Context Protocol)**로 외부 API(항공·숙소 등)를 연동하도록 설계했습니다.
+
+| 용도 | 프로토콜 | 이유 |
+|------|----------|------|
+| 외부 API/데이터 접근 | **MCP** | 항공·숙소 API를 Tools·Resources로 표준화 |
+| Agent 간 협업·조율 | **A2A** | Agent 간 능력 공유, 작업 위임, 상태 관리 |
+| UI 연동 | 둘 다 | MCP는 도구 제공, A2A는 백엔드 통신 |
+
+### 1.3 현지 이동 방법별 Agent 분리
+
+**렌트카**와 **대중교통**은 데이터 소스, 검색 방식, 고려 요소가 달라 **별도 Agent**로 분리했습니다.
+
+| 구분 | 렌트카 | 대중교통 |
+|------|--------|----------|
+| 데이터 소스 | Rentalcars, Kayak 등 | Google Transit, Rome2Rio, 현지 교통권 API |
+| 검색 방식 | 차종·일수·픽업·반납 | 노선·시간표·환승·교통권 |
+| 고려 요소 | 주유, 주차, 반납장 | 환승, 패스, 현지 앱 |
+
+사용자가 **현지 이동 방법**을 선택하면 Session Agent가:
+- `rental_car` → **Rental Car Agent** 호출
+- `public_transit` → **Public Transit Agent** 호출
+
+---
+
+## 2. 아키텍처 개요
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    Web UI (PC/모바일 반응형)                       │
+└────────────────────────────────┬─────────────────────────────────┘
+                                 │
+┌────────────────────────────────▼─────────────────────────────────┐
+│              Session & Input Agent (오케스트레이터)                 │
+│  · 입력 검증·정규화  · 하위 Agent 라우팅  · 결과 취합               │
+└────────────────────────────────┬─────────────────────────────────┘
+                                 │ A2A Protocol
+         ┌───────────────────────┼───────────────────────┐
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌──────────────────┐
+│ Flight Search   │    │ Itinerary       │    │ Accommodation     │
+│ Agent           │    │ Planner Agent   │    │ Agent             │
+└────────┬────────┘    └────────┬────────┘    └────────┬─────────┘
+         │                      │                       │
+         │  ┌──────────────────┴───────────┐           │
+         │  ▼                               ▼           │
+         │  ┌─────────────────┐  ┌──────────────────┐  │
+         │  │ Rental Car      │  │ Public Transit    │  │
+         │  │ Agent           │  │ Agent             │  │
+         │  └─────────────────┘  └──────────────────┘  │
+         │                      │                       │
+         └──────────────────────┼──────────────────────┘
+                                ▼
+                    ┌──────────────────────┐
+                    │  Booking Orchestrator│
+                    │  Agent               │
+                    └──────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  MCP Servers: Flight | Hotel | Rental Car | Public Transit        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 구성 요소
+
+| Agent | 역할 |
+|-------|------|
+| **Session & Input Agent** | 사용자 입력 검증, Flight → Itinerary → Accommodation → Rental/Transit → Booking 순차 호출 |
+| **Flight Search Agent** | 항공편 검색, 가격순 또는 마일리지순 정렬 |
+| **Itinerary Planner Agent** | 선택 항공 + 취향 기반 일정 3안 설계 (LLM 활용 가능) |
+| **Accommodation Agent** | 숙박 구간별 숙소 5개 후보 제시 |
+| **Rental Car Agent** | 현지 이동=렌트카 시 픽업/반납·가격·경로 제공 |
+| **Public Transit Agent** | 현지 이동=대중교통 시 노선·패스·경로 제공 |
+| **Booking Orchestrator Agent** | 일정 확정 후 예약 절차 안내 |
+
+---
+
+## 4. 구현 내용
+
+### 4.1 프로젝트 구조
+
+```
+trip-agent/
+├── agents/                    # A2A Agents
+│   ├── session/               # Session & Input Agent (오케스트레이터)
+│   ├── flight/                # Flight Search Agent
+│   ├── itinerary/             # Itinerary Planner Agent
+│   ├── accommodation/         # Accommodation Agent
+│   ├── rental_car/            # Rental Car Agent
+│   ├── public_transit/        # Public Transit Agent
+│   └── booking/               # Booking Orchestrator Agent
+├── mcp_servers/               # MCP Servers (Mock)
+│   ├── flight/                # search_flights, get_mileage_balance
+│   ├── hotel/                 # search_hotels, compare_hotels
+│   ├── rental_car/            # search_rentals, get_drive_routes
+│   └── transit/               # search_routes, get_transit_passes
+├── shared/
+│   ├── models/                # TravelInput, FlightResult, ItineraryOption 등
+│   └── utils/                 # MCPClient, A2AClient
+├── frontend/                  # 반응형 Web UI
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+├── main.py                    # Session Agent + Frontend 통합 서버
+├── config.py                  # 환경 변수 설정
+├── docker-compose.yml
+├── Dockerfile
+└── requirements.txt
+```
+
+### 4.2 기술 스택
+
+| 영역 | 기술 |
+|------|------|
+| Backend | Python 3.10+, a2a-sdk, mcp |
+| A2A | a2a-sdk[http-server], FastAPI/Starlette |
+| MCP | mcp (modelcontextprotocol) FastMCP |
+| Frontend | HTML, CSS, JavaScript (반응형) |
+| LLM | OpenAI API (Itinerary Agent, 선택) |
+
+### 4.3 주요 모델 (shared/models)
+
+- **TravelInput**: destination, origin, start_date, end_date, local_transport, accommodation_type, seat_class, use_miles, preference 등
+- **LocalTransportType**: `rental_car`, `public_transit`
+- **AccommodationType**: hotel, guesthouse, hostel, apartment, resort
+- **SeatClass**: economy, premium_economy, business, first
+- **FlightResult**, **ItineraryOption**, **AccommodationOption**, **RentalCarOption**, **TransitOption**
+
+### 4.4 Fallback 동작
+
+Session Agent는 하위 Agent(Flight, Itinerary 등)가 없을 때 **mock 서비스**로 직접 응답하여, 단일 프로세스만으로도 전체 플로우를 확인할 수 있습니다.
+
+---
+
+## 5. 실행 방법
+
+### 5.1 단일 프로세스 (권장: 빠른 확인용)
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+- http://localhost:9000 접속
+- 다른 Agent 없이도 Session Agent가 mock 데이터로 응답
+
+### 5.2 전체 에이전트 (Docker Compose)
+
+```bash
+docker compose up --build
+```
+
+- Session + Flight + Itinerary + Accommodation + Rental Car + Transit + Booking 7개 서비스 기동
+- http://localhost:9000 에서 웹 UI 접속
+
+### 5.3 개별 실행 (개발용)
+
+```bash
+# A2A 에이전트 (각각 별도 터미널)
+python -m agents.flight.server &       # 9001
+python -m agents.itinerary.server &    # 9002
+python -m agents.accommodation.server & # 9003
+python -m agents.rental_car.server &   # 9004
+python -m agents.public_transit.server & # 9005
+python -m agents.booking.server &      # 9006
+
+# Session Agent + Frontend
+python main.py                         # 9000
+```
+
+### 5.4 MCP 서버 (선택)
+
+```bash
+uv run --with mcp mcp_servers/flight/server.py   # 8001
+uv run --with mcp mcp_servers/hotel/server.py    # 8002
+# ...
+```
+
+---
+
+## 6. 환경 변수
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| OPENAI_API_KEY | | LLM 사용 시 (Itinerary 개선) |
+| FLIGHT_AGENT_URL | http://localhost:9001 | Flight Agent A2A URL |
+| ITINERARY_AGENT_URL | http://localhost:9002 | Itinerary Agent URL |
+| ACCOMMODATION_AGENT_URL | http://localhost:9003 | Accommodation Agent URL |
+| RENTAL_CAR_AGENT_URL | http://localhost:9004 | Rental Car Agent URL |
+| TRANSIT_AGENT_URL | http://localhost:9005 | Public Transit Agent URL |
+| BOOKING_AGENT_URL | http://localhost:9006 | Booking Agent URL |
+| FLIGHT_MCP_URL | http://localhost:8001/mcp | Flight MCP Server URL |
+| HOTEL_MCP_URL | http://localhost:8002/mcp | Hotel MCP Server URL |
+| RENTAL_CAR_MCP_URL | http://localhost:8003/mcp | Rental Car MCP Server URL |
+| TRANSIT_MCP_URL | http://localhost:8004/mcp | Transit MCP Server URL |
+
+---
+
+## 7. 사용 흐름
+
+1. **여행 정보 입력**: 출발지, 목적지, 기간, 현지 이동(렌트카/대중교통), 숙소 형태, 좌석 클래스, 마일리지 사용 여부 등
+2. **항공편 검색**: 가격순 또는 마일리지순 결과 확인 후 선택
+3. **일정 선택**: 3개 일정안 중 선택
+4. **숙소 선택**: 5개 후보 중 선택 (현지 이동 정보도 함께 표시)
+5. **일정 확정**: 예약 절차 안내
+
+---
+
+## 8. 주요 변경 사항 (Changelog)
+
+> 주요 변경 시 이 섹션을 업데이트합니다.
+
+| 날짜 | 변경 내용 |
+|------|-----------|
+| 2025-03-03 | 초기 구현 완료: 7개 A2A Agent, 4개 MCP Server, 반응형 Web UI, Docker Compose |
+| 2025-03-03 | DEPLOYMENT.md 추가: GitHub 업로드, Ubuntu 서버 배포, systemd, Nginx 가이드 |
+
+---
+
+## 9. 배포
+
+GitHub 업로드 및 Ubuntu 서버 서비스 배포 방법은 [DEPLOYMENT.md](DEPLOYMENT.md)를 참조하세요.
+
+---
+
+## 10. 참고
+
+- **구현 계획**: `.cursor/plans/` 또는 계획 파일 참조
+- **MCP**: [Model Context Protocol](https://modelcontextprotocol.io/)
+- **A2A**: [Agent2Agent Protocol](https://google.github.io/A2A/)

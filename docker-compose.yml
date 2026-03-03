@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  session:
+    build: .
+    command: ["python", "main.py"]
+    ports:
+      - "9000:9000"
+    environment:
+      - FLIGHT_AGENT_URL=http://flight:9001
+      - ITINERARY_AGENT_URL=http://itinerary:9002
+      - ACCOMMODATION_AGENT_URL=http://accommodation:9003
+      - RENTAL_CAR_AGENT_URL=http://rental_car:9004
+      - TRANSIT_AGENT_URL=http://transit:9005
+      - BOOKING_AGENT_URL=http://booking:9006
+
+  flight:
+    build: .
+    command: ["python", "-m", "agents.flight.server"]
+    ports:
+      - "9001:9001"
+
+  itinerary:
+    build: .
+    command: ["python", "-m", "agents.itinerary.server"]
+    ports:
+      - "9002:9002"
+
+  accommodation:
+    build: .
+    command: ["python", "-m", "agents.accommodation.server"]
+    ports:
+      - "9003:9003"
+
+  rental_car:
+    build: .
+    command: ["python", "-m", "agents.rental_car.server"]
+    ports:
+      - "9004:9004"
+
+  transit:
+    build: .
+    command: ["python", "-m", "agents.public_transit.server"]
+    ports:
+      - "9005:9005"
+
+  booking:
+    build: .
+    command: ["python", "-m", "agents.booking.server"]
+    ports:
+      - "9006:9006"
