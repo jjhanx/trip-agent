@@ -19,7 +19,14 @@ def main():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="confirm_booking", name="Confirm booking", tags=["booking"])],
+        skills=[
+            AgentSkill(
+                id="confirm_booking",
+                name="Confirm booking",
+                description="Confirm itinerary and provide booking guidance",
+                tags=["booking"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=BookingOrchestratorExecutor(),

@@ -23,7 +23,14 @@ def create_app():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="travel_planning", name="Travel planning", tags=["travel"])],
+        skills=[
+            AgentSkill(
+                id="travel_planning",
+                name="Travel planning",
+                description="Full travel planning: flights, itinerary, accommodation, local transport",
+                tags=["travel"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=SessionExecutor(),

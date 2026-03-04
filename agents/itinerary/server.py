@@ -19,7 +19,14 @@ def main():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="design_itinerary", name="Design itinerary", tags=["itinerary"])],
+        skills=[
+            AgentSkill(
+                id="design_itinerary",
+                name="Design itinerary",
+                description="Design travel itineraries based on flight selection and preferences",
+                tags=["itinerary"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=ItineraryPlannerExecutor(),

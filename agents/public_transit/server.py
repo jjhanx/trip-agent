@@ -19,7 +19,14 @@ def main():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="search_routes", name="Search transit routes", tags=["transit"])],
+        skills=[
+            AgentSkill(
+                id="search_routes",
+                name="Search transit routes",
+                description="Search public transit routes and passes",
+                tags=["transit"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=PublicTransitExecutor(),

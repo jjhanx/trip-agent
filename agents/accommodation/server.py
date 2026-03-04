@@ -19,7 +19,14 @@ def main():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="search_hotels", name="Search hotels", tags=["hotel"])],
+        skills=[
+            AgentSkill(
+                id="search_hotels",
+                name="Search hotels",
+                description="Search accommodations by location and type; returns up to 5 options",
+                tags=["hotel"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=AccommodationExecutor(),

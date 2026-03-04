@@ -19,7 +19,14 @@ def main():
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=True),
-        skills=[AgentSkill(id="search_rentals", name="Search rentals", tags=["rental"])],
+        skills=[
+            AgentSkill(
+                id="search_rentals",
+                name="Search rentals",
+                description="Search rental cars by pickup, dropoff, and dates",
+                tags=["rental"],
+            )
+        ],
     )
     request_handler = DefaultRequestHandler(
         agent_executor=RentalCarExecutor(),
