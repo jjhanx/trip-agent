@@ -137,6 +137,29 @@ docker compose version
 sudo apt install -y git
 ```
 
+### 2.5 방화벽 포트 설정
+
+외부에서 웹 UI에 접속하려면 포트를 열어야 합니다. **9000**만 열면 됩니다 (9001~9006은 Session Agent가 localhost로 호출하므로 외부 개방 불필요).
+
+**Ubuntu UFW:**
+
+```bash
+sudo ufw allow 9000/tcp
+sudo ufw reload
+sudo ufw status
+```
+
+**전체 포트(9000~9006)를 열어야 하는 경우:**
+
+```bash
+sudo ufw allow 9000:9006/tcp
+sudo ufw reload
+```
+
+**AWS / GCP / Azure 등 클라우드**: 보안 그룹(Inbound)에서 TCP 9000 허용. 9001~9006은 같은 서버 내부 통신이면 불필요.
+
+**Nginx 역방향 프록시 사용 시**: 80/443만 열고, 내부에서 9000으로 프록시하면 더 안전합니다. 상세 설명과 설정 방법은 [5. Nginx 역방향 프록시](#5-nginx-역방향-프록시-선택-프로덕션) 참고.
+
 ---
 
 ## 3. 프로젝트 클론 및 배포
@@ -159,7 +182,18 @@ cp .env.example .env
 nano .env   # 또는 vim .env
 ```
 
-LLM 사용 시 `OPENAI_API_KEY` 등 필요한 값 입력.
+**LLM 사용 시** 필요한 값 입력. Itinerary Agent는 OpenAI 호환 API를 사용합니다.
+
+- **OpenAI**: `OPENAI_API_KEY`만 설정, `LLM_MODEL`은 `gpt-4o-mini` 등
+- **Gemini 3.1 Pro (OpenRouter)**: [OpenRouter](https://openrouter.ai)에서 API 키 발급 후 아래처럼 설정
+
+```env
+OPENAI_API_KEY=sk-or-v1-xxxxxxxx
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=google/gemini-3.1-pro-preview
+```
+
+다른 모델(`google/gemini-2.5-pro`, `google/gemini-2.0-flash` 등)은 [OpenRouter 모델 목록](https://openrouter.ai/docs/features/models) 참고.
 
 ### 3.3 Docker Compose로 실행
 
@@ -237,6 +271,19 @@ docker compose up -d --build
 
 도메인을 쓰거나 80/443 포트로 서비스할 때 사용합니다.
 
+### Nginx 사용이 더 안전한 이유
+
+| 구분 | 9000 직접 노출 | Nginx 역방향 프록시 |
+|------|----------------|---------------------|
+| 외부 노출 포트 | 9000 (비표준) | 80, 443 (표준 웹 포트) |
+| HTTPS | 앱에서 별도 구성 | Nginx + Let's Encrypt로 간편 적용 |
+| Trip Agent 노출 | 외부에 직접 연결 | localhost만 사용, 외부 비노출 |
+| 보안 기능 | 앱별 구현 필요 | Rate limiting, 헤더 정리 등 Nginx에서 처리 |
+
+흐름: `[인터넷] → 80/443 → [Nginx] → localhost:9000 → [Trip Agent]`. 외부에서는 Nginx만 보이며, Trip Agent는 내부 통신만 합니다.
+
+---
+
 ### 5.1 Nginx 설치
 
 ```bash
@@ -245,11 +292,15 @@ sudo apt install -y nginx
 
 ### 5.2 사이트 설정
 
+#### A. 기본 설정 (필수)
+
+`sites-available`에 Trip Agent용 설정을 추가합니다.
+
 ```bash
 sudo nano /etc/nginx/sites-available/trip-agent
 ```
 
-내용 (도메인 예: `trip.yourdomain.com`):
+아래 내용을 그대로 넣고 `trip.yourdomain.com`을 본인 도메인으로 바꿉니다.
 
 ```nginx
 server {
@@ -272,6 +323,72 @@ server {
 }
 ```
 
+#### B. 보안 강화 (선택)
+
+Rate limiting(초당 요청 제한)과 요청 크기 제한을 쓰려면 두 파일을 만듭니다.
+
+**1단계: Rate limit 영역 정의**
+
+새 파일을 만들고 한 줄만 넣습니다. `nginx.conf`를 수정할 필요는 없습니다.
+
+```bash
+sudo nano /etc/nginx/conf.d/trip-rate-limit.conf
+```
+
+```nginx
+# Trip Agent용 rate limit: IP당 초당 10요청, 버스트 20까지 허용
+limit_req_zone $binary_remote_addr zone=trip_limit:10m rate=10r/s;
+```
+
+**2단계: 사이트 설정에 적용**
+
+`/etc/nginx/sites-available/trip-agent`을 아래처럼 수정합니다. (A 기본 설정에서 `client_max_body_size`와 `limit_req` 한 줄만 추가)
+
+```nginx
+server {
+    listen 80;
+    server_name trip.yourdomain.com;
+
+    client_max_body_size 1M;   # 요청 본문 최대 1MB
+
+    location / {
+        limit_req zone=trip_limit burst=20 nodelay;   # rate limit 적용
+        proxy_pass http://127.0.0.1:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+}
+```
+
+**용어 설명**:
+
+| 항목 | 의미 |
+|------|------|
+| `rate=10r/s` | IP당 초당 10개 요청으로 제한 |
+| `burst=20` | 갑작스러운 트래픽 시 최대 20개까지 버퍼로 허용 |
+| `nodelay` | 버퍼 대기 없이 곧바로 처리 (burst 구간에서도 즉시 응답) |
+
+> **참고**: Ubuntu 기본 `nginx.conf`는 `include /etc/nginx/conf.d/*.conf`로 `conf.d`를 불러옵니다. `nginx -t`에서 `trip_limit`을 찾을 수 없다는 오류가 나면 `nginx.conf`를 확인해야 합니다.
+
+**nginx.conf를 직접 수정해야 하는 경우**
+
+`conf.d` include가 없거나 `trip-rate-limit.conf`가 적용되지 않으면, `sudo nano /etc/nginx/nginx.conf`를 열고 `http {` 바로 아래에 다음 한 줄을 추가합니다:
+
+```nginx
+http {
+    limit_req_zone $binary_remote_addr zone=trip_limit:10m rate=10r/s;
+    # ... 아래 기존 내용 유지 ...
+}
+```
+
 ### 5.3 활성화 및 재시작
 
 ```bash
@@ -280,31 +397,154 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 5.4 HTTPS (Let's Encrypt)
+### 5.4 방화벽 (Nginx 사용 시)
+
+Nginx를 쓰면 **9000을 열지 않고** 80/443만 허용합니다.
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+# sudo ufw deny 9000/tcp   # 9000 닫기 (선택)
+sudo ufw reload
+```
+
+클라우드 보안 그룹에서도 80, 443만 열고 9000은 제거합니다.
+
+### 5.5 HTTPS (Let's Encrypt)
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d trip.yourdomain.com
 ```
 
-이후 `https://trip.yourdomain.com` 으로 접속 가능합니다.
+이후 `https://trip.yourdomain.com` 으로 접속 가능합니다. 인증서는 90일마다 자동 갱신됩니다.
 
 ---
 
-## 6. 배포 요약
+## 6. 가정/사무실 배포 (DuckDNS + KT 공유기)
+
+집이나 사무실에서 서버를 운영하고 **KT 공유기**와 **DuckDNS**를 사용할 때의 설정입니다. 클라우드 보안 그룹 대신 **공유기 포트포워딩**을 사용합니다.
+
+### 흐름
+
+```
+[인터넷] → DuckDNS(xxx.duckdns.org) → KT 공유기(공인 IP)
+    → 포트포워딩(80, 443) → 서버(192.168.x.x) → Nginx → Trip Agent(9000)
+```
+
+### 6.1 DuckDNS 설정
+
+1. [duckdns.org](https://www.duckdns.org) 로그인
+2. 도메인 생성 (예: `mytrip.duckdns.org`)
+3. 공유기 재시작 등으로 공인 IP가 바뀌면 DuckDNS에 자동 반영되도록 [DuckDNS 클라이언트](https://www.duckdns.org/spec.jsp) 설치 권장
+
+### 6.2 KT 공유기 포트포워딩
+
+1. PC에서 `192.168.0.1` 또는 `192.168.1.1` 접속 (KT 공유기 관리 화면)
+2. **포트포워딩** 메뉴로 이동
+3. 아래 규칙 추가 (내부 서버 IP는 `ip addr`로 확인):
+
+| 외부 포트 | 내부 IP | 내부 포트 | 프로토콜 |
+|-----------|---------|-----------|----------|
+| 80 | 192.168.x.x (서버) | 80 | TCP |
+| 443 | 192.168.x.x (서버) | 443 | TCP |
+
+9000은 포트포워딩하지 않습니다 (Nginx가 내부에서만 사용).
+
+### 6.3 서버 방화벽 (UFW)
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload
+```
+
+### 6.4 Nginx 사이트 설정
+
+`server_name`을 DuckDNS 도메인으로 설정합니다.
+
+```bash
+sudo nano /etc/nginx/sites-available/trip-agent
+```
+
+```nginx
+server {
+    listen 80;
+    server_name mytrip.duckdns.org;   # 본인 DuckDNS 도메인
+
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+}
+```
+
+활성화 및 재시작:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/trip-agent /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 6.5 HTTPS (Let's Encrypt)
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d mytrip.duckdns.org
+```
+
+이후 `https://mytrip.duckdns.org` 로 접속 가능합니다.
+
+### 6.6 CGNAT 여부 확인
+
+KT에서 **CGNAT**를 쓰면 공유기에 공인 IP가 없어 포트포워딩이 동작하지 않습니다. 이 경우:
+
+- KT에 **공인 IP 전환** 요청 (유료), 또는
+- [ngrok](https://ngrok.com), [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps) 같은 터널 서비스 사용
+
+---
+
+## 7. 배포 요약
+
+### 클라우드 서버
 
 | 단계 | 작업 |
 |------|------|
 | 1 | 로컬 `git init`, `.gitignore` 설정, `git add`/`commit` |
 | 2 | GitHub 저장소 생성 후 `git remote add`, `git push` |
 | 3 | Ubuntu 서버에 `apt update`, Docker 설치 |
-| 4 | `git clone` 후 `docker compose up -d --build` |
-| 5 | (선택) systemd 유닛 등록으로 부팅 시 자동 기동 |
-| 6 | (선택) Nginx 역방향 프록시, HTTPS 적용 |
+| 4 | 방화벽에서 포트 9000 허용 (UFW 또는 클라우드 보안 그룹) |
+| 5 | `git clone` 후 `docker compose up -d --build` |
+| 6 | (선택) systemd 유닛 등록으로 부팅 시 자동 기동 |
+| 7 | (선택) Nginx 역방향 프록시, 80/443만 개방, HTTPS 적용 |
+
+### 가정/사무실 (DuckDNS + KT 공유기)
+
+| 단계 | 작업 |
+|------|------|
+| 1 | DuckDNS 도메인 생성, 서버 내부 IP 확인 |
+| 2 | KT 공유기 포트포워딩: 80, 443 → 서버 IP |
+| 3 | UFW에서 80, 443 허용 |
+| 4 | Nginx `server_name`을 DuckDNS 도메인으로 설정 |
+| 5 | (선택) Let's Encrypt로 HTTPS 적용 |
 
 ---
 
-## 7. 트러블슈팅
+## 8. 트러블슈팅
+
+### 외부에서 접속이 안 될 때
+
+방화벽(UFW) 또는 클라우드 보안 그룹에서 **TCP 9000** 포트가 허용되었는지 확인하세요. [2.5 방화벽 포트 설정](#25-방화벽-포트-설정) 참고.
 
 ### 포트가 이미 사용 중일 때
 
@@ -324,6 +564,53 @@ sudo ss -tlnp | grep 9000
 docker compose build --no-cache
 docker compose up -d
 ```
+
+### 502 Bad Gateway (Nginx 사용 시)
+
+Nginx는 동작하지만 Trip Agent(9000 포트)에 연결할 수 없을 때 나옵니다.
+
+1. **Trip Agent 실행 여부 확인**:
+
+```bash
+sudo ss -tlnp | grep 9000
+```
+
+아무것도 안 나오면 Trip Agent가 떠 있지 않습니다.
+
+2. **Docker로 실행했다면**:
+
+```bash
+docker compose ps
+docker compose up -d --build
+```
+
+3. **호스트에서 직접 접속 테스트**:
+
+```bash
+curl http://127.0.0.1:9000
+```
+
+응답이 있으면 Trip Agent는 동작하는 것이고, Nginx 설정을 확인하세요.
+
+4. **Nginx 에러 로그**:
+
+```bash
+sudo tail -50 /var/log/nginx/error.log
+```
+
+`Connection refused` → Trip Agent 미실행. `docker compose up -d` 또는 `python main.py`로 기동하세요.
+
+### Docker "permission denied" 오류
+
+`permission denied while trying to connect to the docker API` 가 나오면:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+# 또는 로그아웃 후 재로그인
+```
+
+이후 `docker compose up -d --build` 다시 시도.
 
 ### 로그 확인
 

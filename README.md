@@ -137,7 +137,7 @@ trip-agent/
 | A2A | a2a-sdk[http-server], FastAPI/Starlette |
 | MCP | mcp (modelcontextprotocol) FastMCP |
 | Frontend | HTML, CSS, JavaScript (반응형) |
-| LLM | OpenAI API (Itinerary Agent, 선택) |
+| LLM | OpenAI API, OpenRouter (Gemini 3.1 Pro 등, Itinerary Agent) |
 
 ### 4.3 주요 모델 (shared/models)
 
@@ -201,9 +201,30 @@ uv run --with mcp mcp_servers/hotel/server.py    # 8002
 
 ## 6. 환경 변수
 
+### 6.1 LLM 설정 (Itinerary Agent)
+
+Itinerary Agent는 OpenAI 호환 API를 사용합니다. **OpenAI** 또는 **OpenRouter**를 통해 Gemini 3.1 Pro 등 다양한 모델을 사용할 수 있습니다.
+
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| OPENAI_API_KEY | | LLM 사용 시 (Itinerary 개선) |
+| OPENAI_API_KEY | | API 키 (OpenAI 또는 OpenRouter) |
+| OPENAI_BASE_URL | (없음) | OpenAI 외 다른 엔드포인트 사용 시 (예: OpenRouter) |
+| LLM_MODEL | gpt-4o-mini | 사용할 모델명 |
+
+**Gemini 3.1 Pro (OpenRouter 경유)** 예시:
+
+```env
+OPENAI_API_KEY=sk-or-v1-xxxxxxxx   # OpenRouter API 키 (https://openrouter.ai)
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=google/gemini-3.1-pro-preview
+```
+
+OpenRouter에서 API 키를 발급받고 `.env`에 위와 같이 설정하면 됩니다. 다른 모델(`google/gemini-2.5-pro`, `google/gemini-2.0-flash` 등)도 [OpenRouter 모델 목록](https://openrouter.ai/docs/features/models)에서 선택 가능합니다.
+
+### 6.2 A2A Agent / MCP
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
 | FLIGHT_AGENT_URL | http://localhost:9001 | Flight Agent A2A URL |
 | ITINERARY_AGENT_URL | http://localhost:9002 | Itinerary Agent URL |
 | ACCOMMODATION_AGENT_URL | http://localhost:9003 | Accommodation Agent URL |
@@ -235,12 +256,23 @@ uv run --with mcp mcp_servers/hotel/server.py    # 8002
 |------|-----------|
 | 2025-03-03 | 초기 구현 완료: 7개 A2A Agent, 4개 MCP Server, 반응형 Web UI, Docker Compose |
 | 2025-03-03 | DEPLOYMENT.md 추가: GitHub 업로드, Ubuntu 서버 배포, systemd, Nginx 가이드 |
+| 2025-03-03 | LLM 설정 안내 추가: OpenRouter 경유 Gemini 3.1 Pro 사용 방법 (README, DEPLOYMENT) |
+| 2025-03-03 | 방화벽/포트 설정 안내 추가: UFW, 클라우드 보안 그룹 (DEPLOYMENT 2.5, README) |
+| 2025-03-03 | Nginx 역방향 프록시 상세: 보안 이점, Rate limiting, 방화벽 80/443만 개방 (DEPLOYMENT §5) |
+| 2025-03-03 | 가정/사무실 배포: DuckDNS + KT 공유기 포트포워딩 + Nginx 설정 가이드 (DEPLOYMENT §6) |
+| 2025-03-03 | main.py: uvicorn 서버 실행 코드 추가 (502 Bad Gateway 수정) |
+| 2025-03-03 | 트러블슈팅: 502 Bad Gateway, Docker 권한 오류 상세 (DEPLOYMENT §8) |
+| 2025-03-03 | docker-compose: version 필드 제거 (Deprecated 경고 해소) |
 
 ---
 
 ## 9. 배포
 
 GitHub 업로드 및 Ubuntu 서버 서비스 배포 방법은 [DEPLOYMENT.md](DEPLOYMENT.md)를 참조하세요.
+
+- **포트**: 웹 UI는 9000, Agent는 9001~9006. 외부 접속 시 방화벽에서 9000 허용
+- **Nginx 역방향 프록시 (권장)**: 80/443만 열고, 내부에서 9000으로 프록시하면 HTTPS 적용이 쉽고 Trip Agent를 외부에 노출하지 않아 더 안전합니다. [§ 5장](DEPLOYMENT.md#5-nginx-역방향-프록시-선택-프로덕션)
+- **가정/사무실 (DuckDNS + KT 공유기)**: 클라우드 없이 집·사무실 서버에서 운영할 때는 공유기 포트포워딩(80, 443)과 DuckDNS 설정이 필요합니다. [§ 6장](DEPLOYMENT.md#6-가정사무실-배포-duckdns--kt-공유기)
 
 ---
 
