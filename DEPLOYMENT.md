@@ -602,7 +602,15 @@ sudo tail -50 /var/log/nginx/error.log
 
 ### 컨테이너가 바로 종료될 때 (Exited 1)
 
-`docker compose logs session` 등으로 에러 확인. **a2a-sdk API 불일치** (`ModuleNotFoundError`, `ImportError: MessagePart`) 시 최신 코드를 pull한 뒤 `docker compose up -d --build` 로 다시 빌드하세요.
+`docker compose ps -a` 에서 `Exited (1)` 이 보이면 `docker compose logs session` (또는 해당 서비스명)으로 에러 확인.
+
+| 에러 | 원인 | 해결 |
+|------|------|------|
+| `ModuleNotFoundError: a2a.server.events.event_factory` | a2a-sdk 0.3.x에서 모듈 제거 | `git pull` 후 `docker compose up -d --build` |
+| `ImportError: MessagePart from a2a.types` | API 변경 (MessagePart→Part/TextPart) | 위와 동일 |
+| `ValidationError: AgentSkill... description Field required` | AgentSkill에 `description` 필수 | 위와 동일 |
+
+**정상화 절차**: 최신 코드 pull → `docker compose down` → `docker compose up -d --build` → `docker compose ps -a`에서 모든 서비스 `Up` 확인.
 
 ### Docker "permission denied" 오류
 
@@ -615,6 +623,15 @@ newgrp docker
 ```
 
 이후 `docker compose up -d --build` 다시 시도.
+
+### 배포 정상화 체크리스트
+
+| 확인 항목 | 명령 |
+|----------|------|
+| 최신 코드 | `git log -1 --oneline` |
+| 모든 컨테이너 Up | `docker compose ps -a` (session, flight 등 7개 `Up`) |
+| 9000 포트 리스닝 | `ss -tlnp | grep 9000` |
+| 웹 UI 응답 | `curl http://127.0.0.1:9000` |
 
 ### 로그 확인
 
