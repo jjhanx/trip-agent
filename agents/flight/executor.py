@@ -4,9 +4,9 @@ import json
 
 from a2a.server.agent_execution import RequestContext
 from a2a.server.events import EventQueue
-from a2a.server.events.event_factory import new_agent_text_message
 
 from agents.base_agent import BaseAgentExecutor
+from shared.utils import new_agent_text_message
 from config import Settings
 from shared.models import TravelInput
 from shared.utils import MCPClient

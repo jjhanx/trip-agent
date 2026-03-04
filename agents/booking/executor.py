@@ -6,14 +6,7 @@ from a2a.server.agent_execution import RequestContext
 from a2a.server.events import EventQueue
 
 from agents.base_agent import BaseAgentExecutor
-
-try:
-    from a2a.server.events.event_factory import new_agent_text_message
-except ImportError:
-    from a2a.types import Message, MessagePart
-
-    def new_agent_text_message(text: str) -> Message:
-        return Message(role="agent", parts=[MessagePart(type="text", text=text)])
+from shared.utils import new_agent_text_message
 
 
 class BookingOrchestratorExecutor(BaseAgentExecutor):

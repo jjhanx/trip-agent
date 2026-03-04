@@ -11,15 +11,7 @@ from a2a.server.events import EventQueue
 from agents.base_agent import BaseAgentExecutor
 from config import Settings
 from shared.models import TravelInput, LocalTransportType
-from shared.utils import A2AClient
-
-try:
-    from a2a.server.events.event_factory import new_agent_text_message
-except ImportError:
-    from a2a.types import Message, MessagePart
-
-    def new_agent_text_message(text: str) -> Message:
-        return Message(role="agent", parts=[MessagePart(type="text", text=text)])
+from shared.utils import A2AClient, new_agent_text_message
 
 
 class SessionExecutor(BaseAgentExecutor):

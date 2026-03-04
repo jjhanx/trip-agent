@@ -600,6 +600,10 @@ sudo tail -50 /var/log/nginx/error.log
 
 `Connection refused` → Trip Agent 미실행. `docker compose up -d` 또는 `python main.py`로 기동하세요.
 
+### 컨테이너가 바로 종료될 때 (Exited 1)
+
+`docker compose logs session` 등으로 에러 확인. **a2a-sdk API 불일치** (`ModuleNotFoundError`, `ImportError: MessagePart`) 시 최신 코드를 pull한 뒤 `docker compose up -d --build` 로 다시 빌드하세요.
+
 ### Docker "permission denied" 오류
 
 `permission denied while trying to connect to the docker API` 가 나오면:
