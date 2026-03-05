@@ -39,6 +39,18 @@ class SessionExecutor(BaseAgentExecutor):
         context: RequestContext,
         event_queue: EventQueue,
     ) -> None:
+        try:
+            await self._execute(context, event_queue)
+        except Exception as e:
+            await event_queue.enqueue_event(
+                new_agent_text_message(json.dumps({"error": str(e)}, ensure_ascii=False))
+            )
+
+    async def _execute(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+    ) -> None:
         user_input = context.get_user_input()
         if not user_input:
             await event_queue.enqueue_event(new_agent_text_message("입력이 없습니다."))
@@ -175,9 +187,11 @@ class SessionExecutor(BaseAgentExecutor):
         else:
             from mcp_servers.flight.services import mock_search_flights
 
+            origin = travel.origin_airport_code or travel.origin
+            destination = travel.destination_airport_code or travel.destination
             flights = mock_search_flights(
-                travel.origin,
-                travel.destination,
+                origin,
+                destination,
                 travel.start_date.isoformat(),
                 travel.end_date.isoformat(),
                 travel.seat_class.value,

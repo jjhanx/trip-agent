@@ -64,8 +64,17 @@ async function callAgent(payload) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.error) throw new Error(data.error.message || 'Agent error');
-  const msg = data.result?.message?.parts?.[0]?.text;
-  if (!msg) throw new Error('No response');
+  let msg = data.result?.message?.parts?.[0]?.text;
+  if (!msg && data.result?.message?.parts?.[0]) {
+    const p = data.result.message.parts[0];
+    msg = p.text ?? (typeof p === 'string' ? p : null);
+  }
+  if (!msg && data.result?.artifacts?.[0]?.parts?.[0])
+    msg = data.result.artifacts[0].parts[0].text ?? data.result.artifacts[0].parts[0].content;
+  if (!msg) {
+    const hint = data.result ? JSON.stringify(data.result).slice(0, 200) : 'empty';
+    throw new Error('No response. Backend returned: ' + hint);
+  }
   try {
     return JSON.parse(msg);
   } catch {
