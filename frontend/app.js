@@ -83,6 +83,9 @@ function buildTravelInput() {
   if (p3 && p3 !== p1 && p3 !== p2) accommodation_priority.push(p3);
 
   const flex = parseInt(form.date_flexibility_days?.value, 10);
+  const male = parseInt(form.travelers_male?.value, 10) || 0;
+  const female = parseInt(form.travelers_female?.value, 10) || 0;
+  const children = parseInt(form.travelers_children?.value, 10) || 0;
   const input = {
     origin: form.origin.value,
     destination: form.destination.value,
@@ -100,6 +103,7 @@ function buildTravelInput() {
       pace: form.pace.value,
       budget_level: form.budget_level.value,
     },
+    travelers: { male: Math.max(0, male), female: Math.max(0, female), children: Math.max(0, children) },
   };
   if (state.origin_airport_code)
     input.origin_airport_code = state.origin_airport_code;

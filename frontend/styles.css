@@ -136,6 +136,23 @@ header p {
 .airport-item .code { font-weight: 700; font-size: 1.1rem; }
 .airport-item .name { color: var(--muted); font-size: 0.9rem; }
 
+.traveler-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.traveler-row span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.traveler-row input {
+  width: 3.5rem;
+  text-align: center;
+}
+
 .date-row {
   display: flex;
   gap: 0.5rem;

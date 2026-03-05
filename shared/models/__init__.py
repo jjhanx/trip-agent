@@ -3,6 +3,7 @@
 from .schemas import (
     TravelInput,
     TravelPreference,
+    TravelerComposition,
     FlightResult,
     ItineraryOption,
     AccommodationOption,
@@ -16,6 +17,7 @@ from .schemas import (
 __all__ = [
     "TravelInput",
     "TravelPreference",
+    "TravelerComposition",
     "FlightResult",
     "ItineraryOption",
     "AccommodationOption",

@@ -84,6 +84,15 @@
             <p class="calendar-hint">날짜를 클릭하여 선택하세요.</p>
           </div>
           <div class="form-row">
+            <label>일행 구성
+              <div class="traveler-row">
+                <span>남성 <input type="number" name="travelers_male" value="1" min="0" max="20"></span>
+                <span>여성 <input type="number" name="travelers_female" value="0" min="0" max="20"></span>
+                <span>아동 <input type="number" name="travelers_children" value="0" min="0" max="20"></span>
+              </div>
+            </label>
+          </div>
+          <div class="form-row">
             <label>날짜 유연성 (±일)
               <input type="number" name="date_flexibility_days" placeholder="0" min="0" max="14" title="최저가 검색 시 허용 일수">
             </label>

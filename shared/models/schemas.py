@@ -37,6 +37,14 @@ class SeatClass(str, Enum):
     FIRST = "first"
 
 
+class TravelerComposition(BaseModel):
+    """일행 구성 (성인 남·여, 아동)."""
+
+    male: int = Field(default=1, ge=0, description="성인 남성 인원")
+    female: int = Field(default=0, ge=0, description="성인 여성 인원")
+    children: int = Field(default=0, ge=0, description="아동 인원")
+
+
 class TravelPreference(BaseModel):
     """여행 취향."""
 
@@ -85,6 +93,10 @@ class TravelInput(BaseModel):
     accommodation_priority: list[AccommodationType] = Field(
         default_factory=lambda: [AccommodationType.HOTEL],
         description="숙소 형태 선호 우선순위 (최대 3개, 혼합 후보 제시)",
+    )
+    travelers: TravelerComposition = Field(
+        default_factory=TravelerComposition,
+        description="일행 구성 (성인 남·여, 아동)",
     )
 
 
