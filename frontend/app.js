@@ -64,21 +64,35 @@ async function callAgent(payload) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.error) throw new Error(data.error.message || 'Agent error');
-  let msg = data.result?.message?.parts?.[0]?.text;
-  if (!msg && data.result?.message?.parts?.[0]) {
-    const p = data.result.message.parts[0];
-    msg = p.text ?? (typeof p === 'string' ? p : null);
+  const r = data.result;
+  let msg = r?.message?.parts?.[0]?.text ?? r?.parts?.[0]?.text;
+  if (!msg && r?.parts?.[0]) {
+    const p = r.parts[0];
+    msg = p.text ?? p.content ?? (typeof p === 'string' ? p : null);
   }
-  if (!msg && data.result?.artifacts?.[0]?.parts?.[0])
-    msg = data.result.artifacts[0].parts[0].text ?? data.result.artifacts[0].parts[0].content;
+  if (!msg && r?.artifacts?.[0]?.parts?.[0])
+    msg = r.artifacts[0].parts[0].text ?? r.artifacts[0].parts[0].content;
   if (!msg) {
-    const hint = data.result ? JSON.stringify(data.result).slice(0, 200) : 'empty';
+    const hint = r ? JSON.stringify(r).slice(0, 200) : 'empty';
     throw new Error('No response. Backend returned: ' + hint);
   }
+  function extractText(str) {
+    if (typeof str !== 'string') return str;
+    try {
+      const o = JSON.parse(str);
+      if (o && typeof o === 'object') {
+        const inner = o.parts?.[0]?.text ?? o.message?.parts?.[0]?.text;
+        if (inner) return extractText(inner);
+        return str;
+      }
+    } catch { /* not JSON */ }
+    return str;
+  }
+  const content = extractText(msg);
   try {
-    return JSON.parse(msg);
+    return JSON.parse(content);
   } catch {
-    return { raw: msg };
+    return { raw: content };
   }
 }
 
