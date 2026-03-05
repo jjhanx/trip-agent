@@ -15,14 +15,38 @@
 
     <main>
       <nav id="step-indicator" class="step-indicator" aria-label="여행 일정 설계 단계">
-        <ol>
-          <li data-step="input" class="active"><span>1</span> 여행 정보</li>
-          <li data-step="flights"><span>2</span> 항공편</li>
-          <li data-step="itineraries"><span>3</span> 일정</li>
-          <li data-step="accommodation"><span>4</span> 숙소</li>
-          <li data-step="confirm"><span>5</span> 확정</li>
-        </ol>
+        <div class="step-flow">
+          <div class="step-node" data-step="input"><span class="num">1</span>여행 정보</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="flights"><span class="num">2</span>항공편 선택</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="rental"><span class="num">3</span>렌트카/대중교통</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="itineraries"><span class="num">4</span>여행 일정</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="accommodation"><span class="num">5</span>숙소 선택</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="confirm"><span class="num">6</span>일정 확정</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="booking"><span class="num">7</span>예약 안내</div>
+        </div>
       </nav>
+
+      <section id="step-origin-airports" class="card hidden">
+        <h2>출발지 공항 선택</h2>
+        <p class="muted">입력한 출발지에서 지상·해상 8시간 이내 접근 가능한 공항입니다.</p>
+        <div id="origin-airports-list" class="airport-list"></div>
+        <button id="btn-next-origin-airports">다음</button>
+        <button id="btn-back-origin-airports" class="secondary">뒤로</button>
+      </section>
+
+      <section id="step-destination-airports" class="card hidden">
+        <h2>목적지 공항 선택</h2>
+        <p class="muted">목적지에서 8시간 이내 공항 (출발 공항 기준 비행시간 짧은 순)</p>
+        <div id="destination-airports-list" class="airport-list"></div>
+        <button id="btn-next-destination-airports">다음</button>
+        <button id="btn-back-destination-airports" class="secondary">뒤로</button>
+      </section>
 
       <section id="step-input" class="card">
         <h2>1. 여행 정보 입력</h2>
@@ -31,9 +55,33 @@
             <label>출발지 <input type="text" name="origin" placeholder="예: ICN, 서울" required></label>
             <label>목적지 <input type="text" name="destination" placeholder="예: KIX, 오사카" required></label>
           </div>
+          <div id="selected-airports" class="form-row hidden">
+            <span id="origin-airport-display"></span>
+            <span id="destination-airport-display"></span>
+          </div>
           <div class="form-row">
-            <label>출발일 <input type="date" name="start_date" required></label>
-            <label>귀환일 <input type="date" name="end_date" required></label>
+            <label>출발일
+              <div class="date-row">
+                <input type="text" name="start_date" id="start_date_input" placeholder="YYYY-MM-DD" required readonly>
+                <button type="button" id="btn-calendar-start" class="calendar-btn" title="달력">📅</button>
+              </div>
+            </label>
+            <label>귀환일
+              <div class="date-row">
+                <input type="text" name="end_date" id="end_date_input" placeholder="YYYY-MM-DD" required readonly>
+                <button type="button" id="btn-calendar-end" class="calendar-btn" title="달력">📅</button>
+              </div>
+            </label>
+          </div>
+          <div id="calendar-picker" class="calendar-picker hidden">
+            <div class="calendar-header">
+              <button type="button" id="calendar-prev">◀</button>
+              <span id="calendar-month"></span>
+              <button type="button" id="calendar-next">▶</button>
+            </div>
+            <div class="calendar-weekdays">일 월 화 수 목 금 토</div>
+            <div id="calendar-days" class="calendar-days"></div>
+            <p class="calendar-hint">날짜를 클릭하여 선택하세요.</p>
           </div>
           <div class="form-row">
             <label>날짜 유연성 (±일)
@@ -144,6 +192,7 @@
       </section>
     </main>
   </div>
+  <script src="airports.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

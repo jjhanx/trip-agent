@@ -3,6 +3,8 @@
 const API_BASE = window.location.origin + '/a2a';
 let state = {
   travelInput: null,
+  origin_airport_code: null,
+  destination_airport_code: null,
   flights: [],
   selectedFlight: null,
   itineraries: [],
@@ -17,10 +19,12 @@ function $$(sel) { return document.querySelectorAll(sel); }
 
 const STEP_IDS = {
   'step-input': 'input',
+  'step-origin-airports': 'input',
+  'step-destination-airports': 'input',
   'step-flights': 'flights',
   'step-itineraries': 'itineraries',
   'step-accommodation': 'accommodation',
-  'step-confirm': 'confirm',
+  'step-confirm': 'booking',
 };
 
 function show(id) {
@@ -29,8 +33,8 @@ function show(id) {
   if (el) el.classList.remove('hidden');
   const step = STEP_IDS[id];
   if (step) {
-    $$('#step-indicator li').forEach(li => {
-      li.classList.toggle('active', li.dataset.step === step);
+    $$('#step-indicator .step-node').forEach(node => {
+      node.classList.toggle('active', node.dataset.step === step);
     });
   }
 }
@@ -79,7 +83,7 @@ function buildTravelInput() {
   if (p3 && p3 !== p1 && p3 !== p2) accommodation_priority.push(p3);
 
   const flex = parseInt(form.date_flexibility_days?.value, 10);
-  return {
+  const input = {
     origin: form.origin.value,
     destination: form.destination.value,
     start_date: form.start_date.value,
@@ -97,10 +101,62 @@ function buildTravelInput() {
       budget_level: form.budget_level.value,
     },
   };
+  if (state.origin_airport_code)
+    input.origin_airport_code = state.origin_airport_code;
+  if (state.destination_airport_code)
+    input.destination_airport_code = state.destination_airport_code;
+  return input;
 }
 
-$('#travel-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
+function needOriginAirport() {
+  const origin = $('#travel-form').origin?.value?.trim() || '';
+  return origin && !isAirportCode(origin) && getAirportsForCity(origin);
+}
+
+function needDestAirport() {
+  const dest = $('#travel-form').destination?.value?.trim() || '';
+  return dest && !isAirportCode(dest) && getAirportsForCity(dest);
+}
+
+function renderOriginAirports() {
+  const origin = $('#travel-form').origin?.value?.trim() || '';
+  const airports = getAirportsForCity(origin) || [];
+  const list = $('#origin-airports-list');
+  list.innerHTML = airports.map(a => `
+    <div class="airport-item" data-code="${a.code}">
+      <span><span class="code">${a.code}</span> <span class="name">${a.name}</span></span>
+      <span>접근 ${a.drive_hours}h 이내</span>
+    </div>
+  `).join('');
+  list.querySelectorAll('.airport-item').forEach(el => {
+    el.addEventListener('click', () => {
+      list.querySelectorAll('.airport-item').forEach(x => x.classList.remove('selected'));
+      el.classList.add('selected');
+      state.origin_airport_code = el.dataset.code;
+    });
+  });
+}
+
+function renderDestAirports() {
+  const dest = $('#travel-form').destination?.value?.trim() || '';
+  const originCode = state.origin_airport_code || $('#travel-form').origin?.value?.trim() || '';
+  const airports = getDestAirportsForOrigin(originCode, dest) || getAirportsForCity(dest) || [];
+  const list = $('#destination-airports-list');
+  list.innerHTML = airports.map(a => `
+    <div class="airport-item" data-code="${a.code}">
+      <span><span class="code">${a.code}</span> <span class="name">${a.name}</span></span>
+    </div>
+  `).join('');
+  list.querySelectorAll('.airport-item').forEach(el => {
+    el.addEventListener('click', () => {
+      list.querySelectorAll('.airport-item').forEach(x => x.classList.remove('selected'));
+      el.classList.add('selected');
+      state.destination_airport_code = el.dataset.code;
+    });
+  });
+}
+
+async function doFlightSearch() {
   state.travelInput = buildTravelInput();
   show('loading');
   try {
@@ -116,6 +172,52 @@ $('#travel-form').addEventListener('submit', async (e) => {
   } catch (err) {
     showError(err.message);
   }
+}
+
+$('#travel-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  if (needOriginAirport() && !state.origin_airport_code) {
+    renderOriginAirports();
+    show('step-origin-airports');
+    return;
+  }
+  if (needDestAirport() && !state.destination_airport_code) {
+    renderDestAirports();
+    show('step-destination-airports');
+    return;
+  }
+
+  await doFlightSearch();
+});
+
+$('#btn-back-origin-airports').addEventListener('click', () => {
+  state.origin_airport_code = null;
+  show('step-input');
+});
+
+$('#btn-back-destination-airports').addEventListener('click', () => {
+  state.destination_airport_code = null;
+  if (needOriginAirport()) show('step-origin-airports');
+  else {
+    state.origin_airport_code = null;
+    show('step-input');
+  }
+});
+
+$('#btn-next-origin-airports').addEventListener('click', () => {
+  if (!state.origin_airport_code) { alert('공항을 선택해 주세요.'); return; }
+  if (needDestAirport() && !state.destination_airport_code) {
+    renderDestAirports();
+    show('step-destination-airports');
+  } else {
+    doFlightSearch();
+  }
+});
+
+$('#btn-next-destination-airports').addEventListener('click', () => {
+  if (!state.destination_airport_code) { alert('공항을 선택해 주세요.'); return; }
+  doFlightSearch();
 });
 
 function renderFlights(flights) {
@@ -136,7 +238,11 @@ function renderFlights(flights) {
   });
 }
 
-$('#btn-back-flights').addEventListener('click', () => show('step-input'));
+$('#btn-back-flights').addEventListener('click', () => {
+  state.origin_airport_code = null;
+  state.destination_airport_code = null;
+  show('step-input');
+});
 
 $('#btn-next-flights').addEventListener('click', async () => {
   if (!state.selectedFlight) { alert('항공편을 선택해 주세요.'); return; }
@@ -235,4 +341,89 @@ $('#btn-confirm-booking').addEventListener('click', async () => {
   } catch (err) {
     showError(err.message);
   }
+});
+
+/* --- 달력 선택 --- */
+let calendarTarget = null;
+let calendarDate = new Date();
+
+function renderCalendar() {
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const startDay = first.getDay();
+  const daysInMonth = last.getDate();
+
+  $('#calendar-month').textContent = `${year}년 ${month + 1}월`;
+
+  const startInput = $('#start_date_input')?.value;
+  const endInput = $('#end_date_input')?.value;
+  const selectedStart = startInput ? new Date(startInput + 'T12:00:00') : null;
+  const selectedEnd = endInput ? new Date(endInput + 'T12:00:00') : null;
+
+  let html = '';
+  for (let i = 0; i < startDay; i++) {
+    const d = new Date(year, month, -startDay + i + 1);
+    const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    html += `<span class="other-month" data-date="${ymd}">${d.getDate()}</span>`;
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d);
+    const ymd = `${year}-${String(month + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    let cls = '';
+    if (selectedStart && date.getTime() === selectedStart.getTime()) cls = 'selected';
+    if (selectedEnd && date.getTime() === selectedEnd.getTime()) cls = 'selected';
+    html += `<span data-date="${ymd}" ${cls ? `class="${cls}"` : ''}>${d}</span>`;
+  }
+  const totalCells = startDay + daysInMonth;
+  const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 0; i < remaining; i++) {
+    const nextDate = new Date(year, month + 1, i + 1);
+    const ymd = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}-${String(nextDate.getDate()).padStart(2,'0')}`;
+    html += `<span class="other-month" data-date="${ymd}">${nextDate.getDate()}</span>`;
+  }
+
+  $('#calendar-days').innerHTML = html;
+  $('#calendar-days').querySelectorAll('span[data-date]').forEach(span => {
+    span.addEventListener('click', () => {
+      const ymd = span.dataset.date;
+      if (!ymd) return;
+      if (calendarTarget === 'start') {
+        $('#start_date_input').value = ymd;
+      } else if (calendarTarget === 'end') {
+        $('#end_date_input').value = ymd;
+      }
+      calendarTarget = null;
+      $('#calendar-picker').classList.add('hidden');
+      renderCalendar();
+    });
+  });
+}
+
+function openCalendar(target) {
+  calendarTarget = target;
+  const input = target === 'start' ? $('#start_date_input') : $('#end_date_input');
+  const val = input?.value;
+  if (val) {
+    const [y, m] = val.split('-').map(Number);
+    calendarDate = new Date(y, m - 1, 1);
+  } else {
+    calendarDate = new Date();
+  }
+  renderCalendar();
+  $('#calendar-picker').classList.remove('hidden');
+}
+
+$('#btn-calendar-start').addEventListener('click', () => openCalendar('start'));
+$('#btn-calendar-end').addEventListener('click', () => openCalendar('end'));
+
+$('#calendar-prev').addEventListener('click', () => {
+  calendarDate.setMonth(calendarDate.getMonth() - 1);
+  renderCalendar();
+});
+
+$('#calendar-next').addEventListener('click', () => {
+  calendarDate.setMonth(calendarDate.getMonth() + 1);
+  renderCalendar();
 });
