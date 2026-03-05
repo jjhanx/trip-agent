@@ -33,6 +33,7 @@ const CITY_AIRPORTS = {
   '싱가포르': [{ code: 'SIN', name: '창이공항', drive_hours: 0.5 }],
   '홍콩': [{ code: 'HKG', name: '홍콩국제공항', drive_hours: 0.5 }],
   '돌로미티': [
+    { code: 'MXP', name: '밀라노 말펜사', drive_hours: 3.5 },
     { code: 'VCE', name: '베니스 마르코폴로', drive_hours: 2 },
     { code: 'VRN', name: '베로나', drive_hours: 2 },
     { code: 'INN', name: '인스부르크', drive_hours: 2 },
@@ -41,6 +42,7 @@ const CITY_AIRPORTS = {
     { code: 'BZO', name: '볼차노', drive_hours: 1.5 },
   ],
   '도로미티': [
+    { code: 'MXP', name: '밀라노 말펜사', drive_hours: 3.5 },
     { code: 'VCE', name: '베니스 마르코폴로', drive_hours: 2 },
     { code: 'VRN', name: '베로나', drive_hours: 2 },
     { code: 'INN', name: '인스부르크', drive_hours: 2 },
@@ -48,6 +50,41 @@ const CITY_AIRPORTS = {
     { code: 'MUC', name: '뮌헨', drive_hours: 4 },
     { code: 'BZO', name: '볼차노', drive_hours: 1.5 },
   ],
+};
+
+/**
+ * 출발 공항 → 목적지 공항별 운항 정보
+ * direct: 직항 여부, mileage: 해당 공항 직항이 있는 마일리지 프로그램 (skypass=대한항공 등)
+ */
+const FLIGHT_INFO = {
+  ICN: {
+    KIX: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    NRT: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    HND: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    BKK: { hours: 5, direct: true, mileage: ['skypass', 'asiana'] },
+    SIN: { hours: 6, direct: true, mileage: ['skypass', 'asiana'] },
+    HKG: { hours: 4, direct: true, mileage: ['skypass', 'asiana'] },
+    PUS: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] },
+    CJU: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] },
+    MXP: { hours: 12, direct: true, mileage: ['skypass'] },
+    MUC: { hours: 11, direct: true, mileage: ['skypass', 'miles_and_more'] },
+    VCE: { hours: 12, direct: false, mileage: [] },
+    VRN: { hours: 13, direct: false, mileage: [] },
+    INN: { hours: 11, direct: false, mileage: [] },
+    TSF: { hours: 12, direct: false, mileage: [] },
+    BZO: { hours: 12, direct: false, mileage: [] },
+  },
+  GMP: {
+    KIX: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    NRT: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    HND: { hours: 2, direct: true, mileage: ['skypass', 'asiana'] },
+    PUS: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] },
+    CJU: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] },
+    VCE: { hours: 12, direct: false, mileage: [] },
+    MUC: { hours: 11, direct: false, mileage: [] },
+    MXP: { hours: 12, direct: false, mileage: [] },
+  },
+  PUS: { ICN: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] }, GMP: { hours: 1, direct: true, mileage: [] }, KIX: { hours: 2, direct: true, mileage: [] }, CJU: { hours: 1, direct: true, mileage: [] } },
 };
 
 /** 3자리 공항 코드인지 확인 */
@@ -64,18 +101,35 @@ function getAirportsForCity(name) {
   return key ? CITY_AIRPORTS[key] : null;
 }
 
-/** 목적지 공항 목록 (출발 공항 기준 비행시간 짧은 순 Mock) */
-function getDestAirportsForOrigin(originCode, destCityName) {
+/** 마일리지 프로그램명 → 정규화 키 (skypass, asiana, miles_and_more 등) */
+function normalizeMileageProgram(name) {
+  if (!name || typeof name !== 'string') return '';
+  const n = name.toLowerCase().replace(/\s/g, '');
+  if (n.includes('skypass') || n.includes('대한항공')) return 'skypass';
+  if (n.includes('asiana') || n.includes('아시아나')) return 'asiana';
+  if (n.includes('milesandmore') || n.includes('miles_and_more') || n.includes('루프트한자')) return 'miles_and_more';
+  return n || '';
+}
+
+/**
+ * 목적지 공항 목록
+ * 정렬: 1) 직항 우선 2) 사용자 마일리지 프로그램 직항 있으면 우선 3) 비행시간 짧은 순
+ */
+function getDestAirportsForOrigin(originCode, destCityName, options) {
   const dest = getAirportsForCity(destCityName);
   if (!dest) return null;
-  // Mock: origin에 따라 정렬. 실제로는 비행시간 API 호출
-  const flightTime = {
-    ICN: { KIX: 2, NRT: 2, HND: 2, BKK: 5, SIN: 6, HKG: 4, PUS: 1, CJU: 1, VCE: 12, MUC: 11, VRN: 12, INN: 11, TSF: 12, BZO: 12 },
-    GMP: { KIX: 2, NRT: 2, HND: 2, PUS: 1, CJU: 1, VCE: 12, MUC: 11 },
-    PUS: { ICN: 1, GMP: 1, KIX: 2, CJU: 1 },
-  };
-  const times = flightTime[originCode] || {};
-  return [...dest].sort(
-    (a, b) => (times[a.code] ?? 99) - (times[b.code] ?? 99)
-  );
+  const info = FLIGHT_INFO[originCode] || {};
+  const useMiles = options?.useMiles === true;
+  const mileageKey = normalizeMileageProgram(options?.mileageProgram);
+
+  return [...dest].sort((a, b) => {
+    const fa = info[a.code] || { hours: 99, direct: false, mileage: [] };
+    const fb = info[b.code] || { hours: 99, direct: false, mileage: [] };
+    const aHasMileage = mileageKey && fa.mileage.includes(mileageKey);
+    const bHasMileage = mileageKey && fb.mileage.includes(mileageKey);
+
+    if (fa.direct !== fb.direct) return fa.direct ? -1 : 1;
+    if (useMiles && aHasMileage !== bHasMileage) return aHasMileage ? -1 : 1;
+    return fa.hours - fb.hours;
+  });
 }

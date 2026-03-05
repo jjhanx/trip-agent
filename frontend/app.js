@@ -142,15 +142,29 @@ function renderOriginAirports() {
 }
 
 function renderDestAirports() {
-  const dest = $('#travel-form').destination?.value?.trim() || '';
-  const originCode = state.origin_airport_code || $('#travel-form').origin?.value?.trim() || '';
-  const airports = getDestAirportsForOrigin(originCode, dest) || getAirportsForCity(dest) || [];
+  const form = $('#travel-form');
+  const dest = form.destination?.value?.trim() || '';
+  const originCode = state.origin_airport_code || form.origin?.value?.trim() || '';
+  const options = {
+    useMiles: form.use_miles?.checked ?? false,
+    mileageProgram: form.mileage_program?.value?.trim() || '',
+  };
+  const airports = getDestAirportsForOrigin(originCode, dest, options) || getAirportsForCity(dest) || [];
+  const info = (typeof FLIGHT_INFO !== 'undefined' && FLIGHT_INFO[originCode]) || {};
+  const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(options.mileageProgram) : '';
   const list = $('#destination-airports-list');
-  list.innerHTML = airports.map(a => `
+  list.innerHTML = airports.map(a => {
+    const fa = info[a.code] || {};
+    const badges = [];
+    if (fa.direct) badges.push('<span class="airport-badge direct">직항</span>');
+    if (options.useMiles && mileageKey && fa.mileage?.includes(mileageKey)) badges.push('<span class="airport-badge mileage">마일리지</span>');
+    return `
     <div class="airport-item" data-code="${a.code}">
-      <span><span class="code">${a.code}</span> <span class="name">${a.name}</span></span>
+      <span><span class="code">${a.code}</span> <span class="name">${a.name}</span> ${badges.join('')}</span>
+      ${fa.hours ? `<span class="airport-meta">약 ${fa.hours}h</span>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
   list.querySelectorAll('.airport-item').forEach(el => {
     el.addEventListener('click', () => {
       list.querySelectorAll('.airport-item').forEach(x => x.classList.remove('selected'));
