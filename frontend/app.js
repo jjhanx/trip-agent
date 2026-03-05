@@ -1,6 +1,6 @@
 /* Trip Agent - Web UI */
 
-const API_BASE = window.location.origin + '/a2a';
+const API_BASE = window.location.origin + '/a2a/';
 let state = {
   travelInput: null,
   origin_airport_code: null,
