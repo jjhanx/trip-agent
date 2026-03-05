@@ -230,6 +230,7 @@ header p {
 }
 
 .calendar-days span.empty { cursor: default; }
+.calendar-days span.disabled { opacity: 0.35; pointer-events: none; cursor: not-allowed; }
 
 .calendar-hint {
   margin: 0.75rem 0 0;

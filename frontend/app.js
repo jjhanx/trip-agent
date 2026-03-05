@@ -1,6 +1,69 @@
 /* Trip Agent - Web UI */
 
 const API_BASE = window.location.origin + '/a2a/';
+const STORAGE_KEY = 'trip-agent-form';
+
+function loadFormFromStorage() {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (!s) return;
+    const data = JSON.parse(s);
+    const form = $('#travel-form');
+    if (!form) return;
+    const set = (name, v) => { const el = form[name]; if (el && v != null) el.value = String(v); };
+    const setCheck = (name, v) => { const el = form[name]; if (el) el.checked = !!v; };
+    if (data.origin) set('origin', data.origin);
+    if (data.destination) set('destination', data.destination);
+    if (data.start_date) set('start_date', data.start_date);
+    if (data.end_date) set('end_date', data.end_date);
+    if (data.travelers_male != null) set('travelers_male', data.travelers_male);
+    if (data.travelers_female != null) set('travelers_female', data.travelers_female);
+    if (data.travelers_children != null) set('travelers_children', data.travelers_children);
+    if (data.date_flexibility_days != null) set('date_flexibility_days', data.date_flexibility_days);
+    if (data.local_transport) set('local_transport', data.local_transport);
+    if (data.accommodation_priority_1) set('accommodation_priority_1', data.accommodation_priority_1);
+    if (data.accommodation_priority_2) set('accommodation_priority_2', data.accommodation_priority_2);
+    if (data.accommodation_priority_3) set('accommodation_priority_3', data.accommodation_priority_3);
+    if (data.seat_class) set('seat_class', data.seat_class);
+    if (data.pace) set('pace', data.pace);
+    if (data.budget_level) set('budget_level', data.budget_level);
+    if (data.mileage_balance != null) set('mileage_balance', data.mileage_balance);
+    if (data.mileage_program != null) set('mileage_program', data.mileage_program);
+    setCheck('use_miles', data.use_miles);
+    if (data.origin_airport_code) state.origin_airport_code = data.origin_airport_code;
+    if (data.destination_airport_code) state.destination_airport_code = data.destination_airport_code;
+  } catch (_) { /* ignore */ }
+}
+
+function saveFormToStorage() {
+  try {
+    const form = $('#travel-form');
+    if (!form) return;
+    const data = {
+      origin: form.origin?.value,
+      destination: form.destination?.value,
+      start_date: form.start_date?.value,
+      end_date: form.end_date?.value,
+      travelers_male: form.travelers_male?.value,
+      travelers_female: form.travelers_female?.value,
+      travelers_children: form.travelers_children?.value,
+      date_flexibility_days: form.date_flexibility_days?.value,
+      local_transport: form.local_transport?.value,
+      accommodation_priority_1: form.accommodation_priority_1?.value,
+      accommodation_priority_2: form.accommodation_priority_2?.value,
+      accommodation_priority_3: form.accommodation_priority_3?.value,
+      seat_class: form.seat_class?.value,
+      pace: form.pace?.value,
+      budget_level: form.budget_level?.value,
+      mileage_balance: form.mileage_balance?.value,
+      mileage_program: form.mileage_program?.value,
+      use_miles: form.use_miles?.checked,
+      origin_airport_code: state.origin_airport_code,
+      destination_airport_code: state.destination_airport_code,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (_) { /* ignore */ }
+}
 let state = {
   travelInput: null,
   origin_airport_code: null,
@@ -160,6 +223,7 @@ function renderOriginAirports() {
       list.querySelectorAll('.airport-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
       state.origin_airport_code = el.dataset.code;
+      saveFormToStorage();
     });
   });
 }
@@ -193,6 +257,7 @@ function renderDestAirports() {
       list.querySelectorAll('.airport-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
       state.destination_airport_code = el.dataset.code;
+      saveFormToStorage();
     });
   });
 }
@@ -217,6 +282,13 @@ async function doFlightSearch() {
 
 $('#travel-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+
+  const startVal = $('#travel-form').start_date?.value;
+  const endVal = $('#travel-form').end_date?.value;
+  if (startVal && endVal && endVal < startVal) {
+    alert('귀환일은 출발일 이후로 선택해 주세요.');
+    return;
+  }
 
   if (needOriginAirport() && !state.origin_airport_code) {
     renderOriginAirports();
@@ -261,15 +333,29 @@ $('#btn-next-destination-airports').addEventListener('click', () => {
   doFlightSearch();
 });
 
+function fmtFlightDateTime(iso) {
+  if (!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return iso;
+  return `${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
+}
+
 function renderFlights(flights) {
   const list = $('#flights-list');
-  list.innerHTML = flights.map((f, i) => `
+  list.innerHTML = flights.map((f, i) => {
+    const route = `${f.origin || ''} → ${f.destination || ''}`;
+    const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
+    const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';
+    const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+    return `
     <div class="option-item" data-idx="${i}">
       <h3>${f.airline || '항공사'} ${f.flight_number || ''}</h3>
-      <p>${f.departure || ''} - ${f.arrival || ''}</p>
-      <p class="price">${f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일'}</p>
+      <p class="flight-route">${route}</p>
+      <p class="flight-time">${timeRange}${duration}</p>
+      <p class="price">${price}</p>
     </div>
-  `).join('');
+  `;
+  }).join('');
   list.querySelectorAll('.option-item').forEach(el => {
     el.addEventListener('click', () => {
       list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
@@ -426,17 +512,27 @@ function renderCalendar() {
   }
 
   $('#calendar-days').innerHTML = html;
+  const startVal = $('#start_date_input')?.value;
+  const endVal = $('#end_date_input')?.value;
+
   $('#calendar-days').querySelectorAll('span[data-date]').forEach(span => {
+    const ymd = span.dataset.date;
+    if (!ymd) return;
+    if (calendarTarget === 'end' && startVal) {
+      if (ymd < startVal) span.classList.add('disabled');
+    }
     span.addEventListener('click', () => {
-      const ymd = span.dataset.date;
-      if (!ymd) return;
+      if (span.classList.contains('disabled')) return;
       if (calendarTarget === 'start') {
         $('#start_date_input').value = ymd;
+        if (endVal && ymd > endVal) $('#end_date_input').value = '';
       } else if (calendarTarget === 'end') {
+        if (startVal && ymd < startVal) return;
         $('#end_date_input').value = ymd;
       }
       calendarTarget = null;
       $('#calendar-picker').classList.add('hidden');
+      saveFormToStorage();
       renderCalendar();
     });
   });
@@ -460,12 +556,19 @@ function openCalendar(target) {
   $('#calendar-picker').classList.remove('hidden');
 }
 
-function initStepIndicator() { show('step-input'); }
+function initStepIndicator() {
+  show('step-input');
+  loadFormFromStorage();
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initStepIndicator);
 } else {
   initStepIndicator();
 }
+
+$('#travel-form')?.addEventListener('input', saveFormToStorage);
+$('#travel-form')?.addEventListener('change', saveFormToStorage);
 
 $('#btn-calendar-start').addEventListener('click', () => openCalendar('start'));
 $('#btn-calendar-end').addEventListener('click', () => openCalendar('end'));
