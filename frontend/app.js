@@ -404,7 +404,11 @@ function renderCalendar() {
 function openCalendar(target) {
   calendarTarget = target;
   const input = target === 'start' ? $('#start_date_input') : $('#end_date_input');
-  const val = input?.value;
+  let val = input?.value;
+  if (target === 'end' && !val) {
+    const startVal = $('#start_date_input')?.value;
+    if (startVal) val = startVal;
+  }
   if (val) {
     const [y, m] = val.split('-').map(Number);
     calendarDate = new Date(y, m - 1, 1);
