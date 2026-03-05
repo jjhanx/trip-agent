@@ -47,7 +47,7 @@ function showError(msg) {
 async function callAgent(payload) {
   const resp = await fetch(API_BASE, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: crypto.randomUUID(),
@@ -421,6 +421,13 @@ function openCalendar(target) {
   }
   renderCalendar();
   $('#calendar-picker').classList.remove('hidden');
+}
+
+function initStepIndicator() { show('step-input'); }
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initStepIndicator);
+} else {
+  initStepIndicator();
 }
 
 $('#btn-calendar-start').addEventListener('click', () => openCalendar('start'));

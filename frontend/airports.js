@@ -32,6 +32,22 @@ const CITY_AIRPORTS = {
   ],
   '싱가포르': [{ code: 'SIN', name: '창이공항', drive_hours: 0.5 }],
   '홍콩': [{ code: 'HKG', name: '홍콩국제공항', drive_hours: 0.5 }],
+  '돌로미티': [
+    { code: 'VCE', name: '베니스 마르코폴로', drive_hours: 2 },
+    { code: 'VRN', name: '베로나', drive_hours: 2 },
+    { code: 'INN', name: '인스부르크', drive_hours: 2 },
+    { code: 'TSF', name: '베니스 트레비소', drive_hours: 2.5 },
+    { code: 'MUC', name: '뮌헨', drive_hours: 4 },
+    { code: 'BZO', name: '볼차노', drive_hours: 1.5 },
+  ],
+  '도로미티': [
+    { code: 'VCE', name: '베니스 마르코폴로', drive_hours: 2 },
+    { code: 'VRN', name: '베로나', drive_hours: 2 },
+    { code: 'INN', name: '인스부르크', drive_hours: 2 },
+    { code: 'TSF', name: '베니스 트레비소', drive_hours: 2.5 },
+    { code: 'MUC', name: '뮌헨', drive_hours: 4 },
+    { code: 'BZO', name: '볼차노', drive_hours: 1.5 },
+  ],
 };
 
 /** 3자리 공항 코드인지 확인 */
@@ -54,8 +70,8 @@ function getDestAirportsForOrigin(originCode, destCityName) {
   if (!dest) return null;
   // Mock: origin에 따라 정렬. 실제로는 비행시간 API 호출
   const flightTime = {
-    ICN: { KIX: 2, NRT: 2, HND: 2, BKK: 5, SIN: 6, HKG: 4, PUS: 1, CJU: 1 },
-    GMP: { KIX: 2, NRT: 2, HND: 2, PUS: 1, CJU: 1 },
+    ICN: { KIX: 2, NRT: 2, HND: 2, BKK: 5, SIN: 6, HKG: 4, PUS: 1, CJU: 1, VCE: 12, MUC: 11, VRN: 12, INN: 11, TSF: 12, BZO: 12 },
+    GMP: { KIX: 2, NRT: 2, HND: 2, PUS: 1, CJU: 1, VCE: 12, MUC: 11 },
     PUS: { ICN: 1, GMP: 1, KIX: 2, CJU: 1 },
   };
   const times = flightTime[originCode] || {};
