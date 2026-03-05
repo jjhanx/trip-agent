@@ -32,6 +32,7 @@ class AccommodationExecutor(BaseAgentExecutor):
             check_in = data.get("check_in", "")
             check_out = data.get("check_out", "")
             accommodation_type = data.get("accommodation_type", "hotel")
+            accommodation_priority = data.get("accommodation_priority")
         except Exception as e:
             await event_queue.enqueue_event(new_agent_text_message(f"입력 오류: {e}"))
             return
@@ -50,7 +51,7 @@ class AccommodationExecutor(BaseAgentExecutor):
         except Exception:
             from mcp_servers.hotel.services import mock_search_hotels
 
-            hotels = mock_search_hotels(location, accommodation_type)
+            hotels = mock_search_hotels(location, accommodation_type, accommodation_priority)
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(hotels[:5], ensure_ascii=False))
         )

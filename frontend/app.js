@@ -15,10 +15,24 @@ let state = {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
+const STEP_IDS = {
+  'step-input': 'input',
+  'step-flights': 'flights',
+  'step-itineraries': 'itineraries',
+  'step-accommodation': 'accommodation',
+  'step-confirm': 'confirm',
+};
+
 function show(id) {
   $$('section').forEach(s => s.classList.add('hidden'));
   const el = $(`#${id}`);
   if (el) el.classList.remove('hidden');
+  const step = STEP_IDS[id];
+  if (step) {
+    $$('#step-indicator li').forEach(li => {
+      li.classList.toggle('active', li.dataset.step === step);
+    });
+  }
 }
 
 function showError(msg) {
@@ -57,14 +71,23 @@ async function callAgent(payload) {
 
 function buildTravelInput() {
   const form = $('#travel-form');
+  const p1 = form.accommodation_priority_1?.value || 'hotel';
+  const p2 = form.accommodation_priority_2?.value;
+  const p3 = form.accommodation_priority_3?.value;
+  const accommodation_priority = [p1];
+  if (p2 && p2 !== p1) accommodation_priority.push(p2);
+  if (p3 && p3 !== p1 && p3 !== p2) accommodation_priority.push(p3);
+
+  const flex = parseInt(form.date_flexibility_days?.value, 10);
   return {
     origin: form.origin.value,
     destination: form.destination.value,
     start_date: form.start_date.value,
     end_date: form.end_date.value,
-    start_time_preference: form.start_time_preference.value || null,
+    date_flexibility_days: isNaN(flex) || flex <= 0 ? null : flex,
     local_transport: form.local_transport.value,
-    accommodation_type: form.accommodation_type.value,
+    accommodation_type: p1,
+    accommodation_priority,
     seat_class: form.seat_class.value,
     use_miles: form.use_miles.checked,
     mileage_balance: parseInt(form.mileage_balance.value) || 0,

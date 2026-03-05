@@ -1,18 +1,28 @@
 """Hotel search logic - shared by MCP server and agents."""
 
+ACCOMMODATION_TYPES = [
+    "hotel", "guesthouse", "hostel", "apartment", "resort",
+    "villa", "bnb", "hotel_with_kitchen", "mountain_lodge",
+]
 
-def mock_search_hotels(location: str, accommodation_type: str = "hotel") -> list[dict]:
-    """Generate mock hotel results."""
-    types = ["hotel", "guesthouse", "hostel", "apartment", "resort"]
-    at = accommodation_type if accommodation_type in types else "hotel"
-    return [
+
+def mock_search_hotels(
+    location: str,
+    accommodation_type: str = "hotel",
+    accommodation_priority: list[str] | None = None,
+) -> list[dict]:
+    """Generate mock hotel results. accommodation_priority: 선호 3순위, 혼합 후보 제시."""
+    priority = accommodation_priority or [accommodation_type]
+    valid = [p for p in priority if p in ACCOMMODATION_TYPES] or ["hotel"]
+    # 5개 결과를 우선순위 순으로 혼합
+    types_for_results = (valid * 2)[:5]
+    base_hotels = [
         {
             "hotel_id": "HT001",
             "name": "Central Plaza Hotel",
             "location": location,
             "price_per_night_krw": 120000,
             "rating": 4.5,
-            "accommodation_type": at,
             "amenities": ["wifi", "breakfast", "parking"],
         },
         {
@@ -21,7 +31,6 @@ def mock_search_hotels(location: str, accommodation_type: str = "hotel") -> list
             "location": location,
             "price_per_night_krw": 95000,
             "rating": 4.2,
-            "accommodation_type": at,
             "amenities": ["wifi", "breakfast"],
         },
         {
@@ -30,7 +39,6 @@ def mock_search_hotels(location: str, accommodation_type: str = "hotel") -> list
             "location": location,
             "price_per_night_krw": 180000,
             "rating": 4.8,
-            "accommodation_type": at,
             "amenities": ["wifi", "breakfast", "pool", "spa"],
         },
         {
@@ -39,7 +47,6 @@ def mock_search_hotels(location: str, accommodation_type: str = "hotel") -> list
             "location": location,
             "price_per_night_krw": 45000,
             "rating": 4.0,
-            "accommodation_type": at,
             "amenities": ["wifi", "kitchen"],
         },
         {
@@ -48,7 +55,10 @@ def mock_search_hotels(location: str, accommodation_type: str = "hotel") -> list
             "location": location,
             "price_per_night_krw": 150000,
             "rating": 4.6,
-            "accommodation_type": at,
             "amenities": ["wifi", "breakfast", "parking", "garden"],
         },
+    ]
+    return [
+        {**h, "accommodation_type": t}
+        for h, t in zip(base_hotels, types_for_results)
     ]

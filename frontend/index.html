@@ -14,47 +14,80 @@
     </header>
 
     <main>
+      <nav id="step-indicator" class="step-indicator" aria-label="여행 일정 설계 단계">
+        <ol>
+          <li data-step="input" class="active"><span>1</span> 여행 정보</li>
+          <li data-step="flights"><span>2</span> 항공편</li>
+          <li data-step="itineraries"><span>3</span> 일정</li>
+          <li data-step="accommodation"><span>4</span> 숙소</li>
+          <li data-step="confirm"><span>5</span> 확정</li>
+        </ol>
+      </nav>
+
       <section id="step-input" class="card">
         <h2>1. 여행 정보 입력</h2>
         <form id="travel-form">
           <div class="form-row">
-            <label>출발지 <input type="text" name="origin" placeholder="예: ICN" required></label>
+            <label>출발지 <input type="text" name="origin" placeholder="예: ICN, 서울" required></label>
             <label>목적지 <input type="text" name="destination" placeholder="예: KIX, 오사카" required></label>
           </div>
           <div class="form-row">
             <label>출발일 <input type="date" name="start_date" required></label>
-            <label>귀국일 <input type="date" name="end_date" required></label>
+            <label>귀환일 <input type="date" name="end_date" required></label>
           </div>
           <div class="form-row">
-            <label>출발 시간 선호
-              <select name="start_time_preference">
-                <option value="">선택</option>
-                <option value="morning">아침</option>
-                <option value="afternoon">오후</option>
-                <option value="evening">저녁</option>
-              </select>
+            <label>날짜 유연성 (±일)
+              <input type="number" name="date_flexibility_days" placeholder="0" min="0" max="14" title="최저가 검색 시 허용 일수">
             </label>
             <label>현지 이동 <select name="local_transport" required>
               <option value="rental_car">렌트카</option>
               <option value="public_transit">대중교통</option>
             </select></label>
           </div>
-          <div class="form-row">
-            <label>숙소 형태 <select name="accommodation_type">
+          <div class="form-row accommodation-priority">
+            <label>숙소 선호 1순위 <select name="accommodation_priority_1">
               <option value="hotel">호텔</option>
+              <option value="resort">리조트</option>
+              <option value="apartment">아파트</option>
               <option value="guesthouse">게스트하우스</option>
               <option value="hostel">호스텔</option>
-              <option value="apartment">아파트</option>
-              <option value="resort">리조트</option>
+              <option value="villa">별장</option>
+              <option value="bnb">B&B</option>
+              <option value="hotel_with_kitchen">부엌 있는 호텔</option>
+              <option value="mountain_lodge">산장</option>
             </select></label>
+            <label>2순위 <select name="accommodation_priority_2">
+              <option value="">선택</option>
+              <option value="hotel">호텔</option>
+              <option value="resort">리조트</option>
+              <option value="apartment">아파트</option>
+              <option value="guesthouse">게스트하우스</option>
+              <option value="hostel">호스텔</option>
+              <option value="villa">별장</option>
+              <option value="bnb">B&B</option>
+              <option value="hotel_with_kitchen">부엌 있는 호텔</option>
+              <option value="mountain_lodge">산장</option>
+            </select></label>
+            <label>3순위 <select name="accommodation_priority_3">
+              <option value="">선택</option>
+              <option value="hotel">호텔</option>
+              <option value="resort">리조트</option>
+              <option value="apartment">아파트</option>
+              <option value="guesthouse">게스트하우스</option>
+              <option value="hostel">호스텔</option>
+              <option value="villa">별장</option>
+              <option value="bnb">B&B</option>
+              <option value="hotel_with_kitchen">부엌 있는 호텔</option>
+              <option value="mountain_lodge">산장</option>
+            </select></label>
+          </div>
+          <div class="form-row">
             <label>좌석 클래스 <select name="seat_class">
               <option value="economy">이코노미</option>
               <option value="premium_economy">프리미엄 이코노미</option>
               <option value="business">비즈니스</option>
               <option value="first">퍼스트</option>
             </select></label>
-          </div>
-          <div class="form-row">
             <label>마일리지 사용 <input type="checkbox" name="use_miles" value="true"></label>
             <label>보유 마일리지 <input type="number" name="mileage_balance" value="0" min="0"></label>
             <label>마일리지 프로그램 <input type="text" name="mileage_program" placeholder="예: Skypass"></label>
@@ -71,7 +104,7 @@
               <option value="luxury">고급</option>
             </select></label>
           </div>
-          <button type="submit" id="btn-search">항공편 검색</button>
+          <button type="submit" id="btn-next-input">다음</button>
         </form>
       </section>
 

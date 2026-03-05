@@ -85,11 +85,13 @@ class SessionExecutor(BaseAgentExecutor):
             return
 
         if selected_flight and selected_itinerary:
+            acc_priority = [t.value for t in travel.accommodation_priority] if travel.accommodation_priority else [travel.accommodation_type.value]
             acc_payload = {
                 "location": travel.destination,
                 "check_in": travel.start_date.isoformat(),
                 "check_out": travel.end_date.isoformat(),
                 "accommodation_type": travel.accommodation_type.value,
+                "accommodation_priority": acc_priority,
             }
             acc_resp = await self._call_agent("accommodation", acc_payload)
             if not acc_resp:

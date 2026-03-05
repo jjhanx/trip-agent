@@ -15,13 +15,17 @@ class LocalTransportType(str, Enum):
 
 
 class AccommodationType(str, Enum):
-    """숙소 형태."""
+    """숙소 형태 (별장, B&B, 부엌 있는 호텔, 산장 등 포함)."""
 
     HOTEL = "hotel"
     GUESTHOUSE = "guesthouse"
     HOSTEL = "hostel"
     APARTMENT = "apartment"
     RESORT = "resort"
+    VILLA = "villa"
+    BNB = "bnb"
+    HOTEL_WITH_KITCHEN = "hotel_with_kitchen"
+    MOUNTAIN_LODGE = "mountain_lodge"
 
 
 class SeatClass(str, Enum):
@@ -43,13 +47,32 @@ class TravelPreference(BaseModel):
 
 
 class TravelInput(BaseModel):
-    """사용자 여행 입력."""
+    """사용자 여행 입력.
 
-    destination: str = Field(..., description="여행 지역")
-    origin: str = Field(..., description="출발지")
+    - origin/destination: 공항 코드 또는 도시/관광지 이름. 8시간 이상 거리 시
+      origin_airport_code, destination_airport_code로 선택된 공항 사용.
+    - end_date: '귀국일'이 아닌 '귀환일' (국내 여행 등 포함).
+    - date_flexibility_days: +/- 허용 일수 (최저가 검색 등).
+    - accommodation_priority: 선호 숙소 형태 3순위 (혼합 후보 제시).
+    - start_time_preference: 별도 질문하지 않음. 도착 빠를수록 현지 선택폭 고려.
+    """
+
+    destination: str = Field(..., description="목적지 (공항 코드 또는 도시/관광지)")
+    origin: str = Field(..., description="출발지 (공항 코드 또는 도시/관광지)")
     start_date: date = Field(..., description="출발일")
-    end_date: date = Field(..., description="귀국일")
-    start_time_preference: str | None = Field(None, description="출발 시간 선호 (morning, afternoon, evening)")
+    end_date: date = Field(..., description="귀환일")
+    date_flexibility_days: int | None = Field(
+        None, description="날짜 유연성: +/- 허용 일수 (최저가 검색 등)"
+    )
+    origin_airport_code: str | None = Field(
+        None, description="선택된 출발 공항 코드 (8시간 이내 접근 가능 공항 중 선택)"
+    )
+    destination_airport_code: str | None = Field(
+        None, description="선택된 도착 공항 코드"
+    )
+    start_time_preference: str | None = Field(
+        None, description="출발 시간 선호 (미질문, 일정 설계 시 조기 도착 우선 고려)"
+    )
     preference: TravelPreference = Field(default_factory=TravelPreference)
     mileage_balance: int = Field(default=0, description="보유 마일리지")
     mileage_program: str | None = Field(None, description="마일리지 프로그램명")
@@ -57,7 +80,11 @@ class TravelInput(BaseModel):
     use_miles: bool = Field(default=False, description="마일리지 사용 여부")
     local_transport: LocalTransportType = Field(..., description="현지 이동 방법")
     accommodation_type: AccommodationType = Field(
-        default=AccommodationType.HOTEL, description="선호 숙소 형태"
+        default=AccommodationType.HOTEL, description="선호 숙소 형태 (1순위)"
+    )
+    accommodation_priority: list[AccommodationType] = Field(
+        default_factory=lambda: [AccommodationType.HOTEL],
+        description="숙소 형태 선호 우선순위 (최대 3개, 혼합 후보 제시)",
     )
 
 
