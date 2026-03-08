@@ -344,7 +344,20 @@ function fmtFlightDateTime(iso) {
 function renderFlights(flights, warnings) {
   const list = $('#flights-list');
   const warnEl = $('#flight-warnings');
+  const mockEl = $('#flight-mock-notice');
   const warns = warnings || [];
+  const isMock = warns.some(w => /mock/i.test(String(w))) ||
+    (Array.isArray(flights) && flights.some(f => f?.source === 'mock'));
+
+  if (mockEl) {
+    if (isMock) {
+      mockEl.textContent = '예시(Mock) 데이터입니다. 실제 예약·가격과 무관합니다.';
+      mockEl.classList.remove('hidden');
+    } else {
+      mockEl.textContent = '';
+      mockEl.classList.add('hidden');
+    }
+  }
   if (warnEl) {
     if (warns.length) {
       warnEl.innerHTML = warns.map(w => `<p class="api-warning">⚠️ ${w}</p>`).join('');
@@ -354,7 +367,7 @@ function renderFlights(flights, warnings) {
       warnEl.classList.add('hidden');
     }
   }
-  list.innerHTML = flights.map((f, i) => {
+  list.innerHTML = (flights || []).map((f, i) => {
     const route = `${f.origin || ''} → ${f.destination || ''}`;
     const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
     const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';

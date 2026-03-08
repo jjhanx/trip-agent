@@ -1,6 +1,7 @@
 """Flight search logic - multi-API (Amadeus, Kiwi, RapidAPI) + mock fallback."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from mcp_servers.flight.api_clients import (
     search_amadeus,
@@ -96,19 +97,28 @@ def multi_source_search_flights(
         "rapidapi_key": rapidapi_key,
     }
 
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    async def _run():
+        return await _search_all_apis(
+            origin, destination, start_date, end_date, seat_class, use_miles, config
+        )
 
-    flights, warnings = loop.run_until_complete(
-        _search_all_apis(origin, destination, start_date, end_date, seat_class, use_miles, config)
-    )
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        flights, warnings = asyncio.run(_run())
+    else:
+        # uvicorn 등 이미 실행 중인 이벤트 루프 내에서는 별도 스레드에서 실행
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, _run())
+            flights, warnings = future.result()
 
     if not flights:
-        mock = _get_mock()
-        flights = mock(origin, destination, start_date, end_date, seat_class, use_miles)
+        from mcp_servers.flight.mock_fallback import mock_search_flights
+        flights = mock_search_flights(
+            origin, destination, start_date, end_date, seat_class, use_miles
+        )
         warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
 
     return flights, warnings
