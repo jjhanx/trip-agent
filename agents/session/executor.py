@@ -200,6 +200,7 @@ class SessionExecutor(BaseAgentExecutor):
                 travel.use_miles,
                 amadeus_client_id=s.amadeus_client_id,
                 amadeus_client_secret=s.amadeus_client_secret,
+                amadeus_base_url=s.amadeus_base_url,
                 kiwi_api_key=s.kiwi_api_key,
                 rapidapi_key=s.rapidapi_key,
             )

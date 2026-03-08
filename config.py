@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Flight API keys (Amadeus, Kiwi Tequila, RapidAPI Skyscanner) - 무료 한도 관리
     amadeus_client_id: str = ""
     amadeus_client_secret: str = ""
+    amadeus_base_url: str = "https://test.api.amadeus.com"  # Test 환경 기본값, 프로덕션: https://api.amadeus.com
     kiwi_api_key: str = ""
     rapidapi_key: str = ""
 

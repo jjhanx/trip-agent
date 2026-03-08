@@ -14,6 +14,7 @@ def _get_config():
     return {
         "amadeus_client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
         "amadeus_client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
+        "amadeus_base_url": os.environ.get("AMADEUS_BASE_URL", "https://test.api.amadeus.com"),
         "kiwi_api_key": os.environ.get("KIWI_API_KEY", ""),
         "rapidapi_key": os.environ.get("RAPIDAPI_KEY", ""),
     }
@@ -47,6 +48,7 @@ def search_flights(
         origin, destination, start_date, end_date, seat_class, use_miles,
         amadeus_client_id=cfg["amadeus_client_id"],
         amadeus_client_secret=cfg["amadeus_client_secret"],
+        amadeus_base_url=cfg["amadeus_base_url"],
         kiwi_api_key=cfg["kiwi_api_key"],
         rapidapi_key=cfg["rapidapi_key"],
     )

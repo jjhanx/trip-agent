@@ -25,10 +25,12 @@ async def _search_all_apis(
     tasks = []
 
     if config.get("amadeus_client_id") and config.get("amadeus_client_secret"):
+        base = config.get("amadeus_base_url") or None
         tasks.append(
             search_amadeus(
                 origin, destination, start_date, end_date,
                 config["amadeus_client_id"], config["amadeus_client_secret"],
+                base_url=base,
             )
         )
     if config.get("kiwi_api_key"):
@@ -82,6 +84,7 @@ def multi_source_search_flights(
     use_miles: bool = False,
     amadeus_client_id: str = "",
     amadeus_client_secret: str = "",
+    amadeus_base_url: str = "",
     kiwi_api_key: str = "",
     rapidapi_key: str = "",
 ) -> tuple[list[dict], list[str]]:
@@ -93,6 +96,7 @@ def multi_source_search_flights(
     config = {
         "amadeus_client_id": amadeus_client_id,
         "amadeus_client_secret": amadeus_client_secret,
+        "amadeus_base_url": amadeus_base_url or "",
         "kiwi_api_key": kiwi_api_key,
         "rapidapi_key": rapidapi_key,
     }

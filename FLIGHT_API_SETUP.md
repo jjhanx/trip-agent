@@ -31,7 +31,13 @@
    - **API Secret** = `AMADEUS_CLIENT_SECRET`
 3. Secret은 한 번만 표시되므로 반드시 복사해 두세요.
 
-### 1.3 무료 한도
+### 1.3 API 환경 (Test / Production)
+
+- **신규 가입 시**: 기본으로 **Test 환경** (`test.api.amadeus.com`)만 활성화됨
+- **401 인증 실패**가 나면 `.env`에 `AMADEUS_BASE_URL=https://test.api.amadeus.com` 추가 후 재시도
+- 프로덕션 승인 후: `AMADEUS_BASE_URL=https://api.amadeus.com` 로 변경 (미설정 시 Test가 기본값)
+
+### 1.4 무료 한도
 
 - 월 **2,000회** Flight Offers Search
 - 본 프로젝트의 `usage_tracker`가 한도 도달 시 자동 중단·경고 표시

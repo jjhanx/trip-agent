@@ -45,6 +45,11 @@ def _normalize_flight(
     }
 
 
+def _amadeus_base() -> str:
+    import os
+    return (os.environ.get("AMADEUS_BASE_URL") or "https://test.api.amadeus.com").rstrip("/")
+
+
 async def search_amadeus(
     origin: str,
     destination: str,
@@ -52,6 +57,7 @@ async def search_amadeus(
     end_date: str,
     client_id: str,
     client_secret: str,
+    base_url: str | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Amadeus Flight Offers Search.
@@ -85,7 +91,7 @@ async def search_amadeus(
 
         # Flight search (outbound only - Amadeus free tier)
         resp = await client.get(
-            "https://api.amadeus.com/v1/shopping/flight-offers",
+            f"{base}/v1/shopping/flight-offers",
             headers={"Authorization": f"Bearer {token}"},
             params={
                 "originLocationCode": origin.upper()[:3],
