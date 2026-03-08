@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     rental_car_mcp_url: str = "http://localhost:8003/mcp"
     transit_mcp_url: str = "http://localhost:8004/mcp"
 
+    # Flight API keys (Amadeus, Kiwi Tequila, RapidAPI Skyscanner) - 무료 한도 관리
+    amadeus_client_id: str = ""
+    amadeus_client_secret: str = ""
+    kiwi_api_key: str = ""
+    rapidapi_key: str = ""
+
     # A2A agent URLs (for Session Agent to call other agents)
     flight_agent_url: str = "http://localhost:9001"
     itinerary_agent_url: str = "http://localhost:9002"

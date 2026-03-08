@@ -35,6 +35,9 @@ Thumbs.db
 .env
 .env.local
 
+# API usage tracking (local)
+data/
+
 # Logs
 *.log
 

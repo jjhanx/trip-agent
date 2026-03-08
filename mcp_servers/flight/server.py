@@ -1,12 +1,22 @@
-"""Flight MCP Server - 항공편 검색 Tools."""
+"""Flight MCP Server - 항공편 검색 Tools (Amadeus + Kiwi + RapidAPI)."""
 
 import json
+import os
 
 from mcp.server.fastmcp import FastMCP
 
-from mcp_servers.flight.services import mock_search_flights
+from mcp_servers.flight.services import multi_source_search_flights
 
 mcp = FastMCP("flight-search", port=8001)
+
+
+def _get_config():
+    return {
+        "amadeus_client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
+        "amadeus_client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
+        "kiwi_api_key": os.environ.get("KIWI_API_KEY", ""),
+        "rapidapi_key": os.environ.get("RAPIDAPI_KEY", ""),
+    }
 
 
 @mcp.tool()
@@ -19,6 +29,7 @@ def search_flights(
     use_miles: bool = False,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
+    Amadeus, Kiwi, RapidAPI(Skyscanner) 사용. 무료 한도 초과 시 해당 API는 건너뛰고 경고 반환.
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
@@ -29,14 +40,17 @@ def search_flights(
         use_miles: Whether to search mileage redemption options
 
     Returns:
-        JSON array of flight options sorted by price
+        JSON object with "flights" array and "warnings" array
     """
-    flights = mock_search_flights(origin, destination, start_date, end_date, seat_class, use_miles)
-    if use_miles:
-        flights.sort(key=lambda x: x.get("miles_required") or 999999)
-    else:
-        flights.sort(key=lambda x: x.get("price_krw") or 999999)
-    return json.dumps(flights, ensure_ascii=False)
+    cfg = _get_config()
+    flights, warnings = multi_source_search_flights(
+        origin, destination, start_date, end_date, seat_class, use_miles,
+        amadeus_client_id=cfg["amadeus_client_id"],
+        amadeus_client_secret=cfg["amadeus_client_secret"],
+        kiwi_api_key=cfg["kiwi_api_key"],
+        rapidapi_key=cfg["rapidapi_key"],
+    )
+    return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 
 
 @mcp.tool()

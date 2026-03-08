@@ -272,8 +272,9 @@ async function doFlightSearch() {
     if (!Array.isArray(flights) && typeof data === 'object' && !data.step) {
       flights = [data];
     }
+    const warnings = data?.warnings || [];
     state.flights = flights;
-    renderFlights(flights);
+    renderFlights(flights, warnings);
     show('step-flights');
   } catch (err) {
     showError(err.message);
@@ -340,8 +341,19 @@ function fmtFlightDateTime(iso) {
   return `${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
 }
 
-function renderFlights(flights) {
+function renderFlights(flights, warnings) {
   const list = $('#flights-list');
+  const warnEl = $('#flight-warnings');
+  const warns = warnings || [];
+  if (warnEl) {
+    if (warns.length) {
+      warnEl.innerHTML = warns.map(w => `<p class="api-warning">⚠️ ${w}</p>`).join('');
+      warnEl.classList.remove('hidden');
+    } else {
+      warnEl.innerHTML = '';
+      warnEl.classList.add('hidden');
+    }
+  }
   list.innerHTML = flights.map((f, i) => {
     const route = `${f.origin || ''} → ${f.destination || ''}`;
     const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;

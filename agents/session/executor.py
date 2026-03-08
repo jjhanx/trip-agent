@@ -185,22 +185,29 @@ class SessionExecutor(BaseAgentExecutor):
         if flight_resp:
             await event_queue.enqueue_event(new_agent_text_message(flight_resp))
         else:
-            from mcp_servers.flight.services import mock_search_flights
+            from config import Settings
+            from mcp_servers.flight.services import multi_source_search_flights
 
+            s = Settings()
             origin = travel.origin_airport_code or travel.origin
             destination = travel.destination_airport_code or travel.destination
-            flights = mock_search_flights(
+            flights, warnings = multi_source_search_flights(
                 origin,
                 destination,
                 travel.start_date.isoformat(),
                 travel.end_date.isoformat(),
                 travel.seat_class.value,
                 travel.use_miles,
+                amadeus_client_id=s.amadeus_client_id,
+                amadeus_client_secret=s.amadeus_client_secret,
+                kiwi_api_key=s.kiwi_api_key,
+                rapidapi_key=s.rapidapi_key,
             )
             if travel.use_miles:
                 flights.sort(key=lambda x: x.get("miles_required") or 999999)
             else:
                 flights.sort(key=lambda x: x.get("price_krw") or 999999)
+            out = {"flights": flights, "warnings": warnings}
             await event_queue.enqueue_event(
-                new_agent_text_message(json.dumps(flights, ensure_ascii=False))
+                new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

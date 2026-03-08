@@ -1,19 +1,117 @@
-"""Flight search logic - shared by MCP server and agents."""
+"""Flight search logic - multi-API (Amadeus, Kiwi, RapidAPI) + mock fallback."""
 
-from datetime import datetime, timedelta
+import asyncio
 
-# 국내선(한국↔한국) 구간
-DOMESTIC_PAIRS = {
-    ("ICN", "CJU"), ("CJU", "ICN"),
-    ("ICN", "PUS"), ("PUS", "ICN"),
-    ("GMP", "CJU"), ("CJU", "GMP"),
-    ("GMP", "PUS"), ("PUS", "GMP"),
-}
+from mcp_servers.flight.api_clients import (
+    search_amadeus,
+    search_kiwi,
+    search_rapidapi_skyscanner,
+)
 
 
-def _is_domestic(origin: str, destination: str) -> bool:
-    o, d = (origin or "").upper()[:3], (destination or "").upper()[:3]
-    return (o, d) in DOMESTIC_PAIRS or (o in ("ICN", "GMP", "PUS", "CJU") and d in ("ICN", "GMP", "PUS", "CJU") and o != d)
+async def _search_all_apis(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    seat_class: str,
+    use_miles: bool,
+    config: dict,
+) -> tuple[list[dict], list[str]]:
+    """병렬로 Amadeus, Kiwi, RapidAPI 호출. 한도 초과 시 해당 API는 건너뜀."""
+    warnings: list[str] = []
+    all_flights: list[dict] = []
+    tasks = []
+
+    if config.get("amadeus_client_id") and config.get("amadeus_client_secret"):
+        tasks.append(
+            search_amadeus(
+                origin, destination, start_date, end_date,
+                config["amadeus_client_id"], config["amadeus_client_secret"],
+            )
+        )
+    if config.get("kiwi_api_key"):
+        tasks.append(
+            search_kiwi(origin, destination, start_date, end_date, config["kiwi_api_key"])
+        )
+    if config.get("rapidapi_key"):
+        tasks.append(
+            search_rapidapi_skyscanner(
+                origin, destination, start_date, end_date, config["rapidapi_key"]
+            )
+        )
+
+    if not tasks:
+        return [], ["API 키가 설정되지 않았습니다. .env 참고."]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            warnings.append(f"API 오류: {r}")
+            continue
+        flights, w = r
+        warnings.extend(w)
+        all_flights.extend(flights)
+
+    # 중복 제거 (airline+flight_number+departure 기준)
+    seen = set()
+    unique = []
+    for f in all_flights:
+        key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    # 가격순 정렬
+    if use_miles:
+        unique.sort(key=lambda x: x.get("miles_required") or 999999)
+    else:
+        unique.sort(key=lambda x: x.get("price_krw") or 999999)
+
+    return unique[:15], warnings
+
+
+def multi_source_search_flights(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    seat_class: str = "economy",
+    use_miles: bool = False,
+    amadeus_client_id: str = "",
+    amadeus_client_secret: str = "",
+    kiwi_api_key: str = "",
+    rapidapi_key: str = "",
+) -> tuple[list[dict], list[str]]:
+    """
+    Amadeus + Kiwi + RapidAPI 연동 검색.
+    무료 한도 초과 전에 중단, 경고 반환.
+    Returns (flights, warnings)
+    """
+    config = {
+        "amadeus_client_id": amadeus_client_id,
+        "amadeus_client_secret": amadeus_client_secret,
+        "kiwi_api_key": kiwi_api_key,
+        "rapidapi_key": rapidapi_key,
+    }
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    flights, warnings = loop.run_until_complete(
+        _search_all_apis(origin, destination, start_date, end_date, seat_class, use_miles, config)
+    )
+
+    if not flights:
+        mock = _get_mock()
+        flights = mock(origin, destination, start_date, end_date, seat_class, use_miles)
+        warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
+
+    return flights, warnings
 
 
 def mock_search_flights(
@@ -24,42 +122,6 @@ def mock_search_flights(
     seat_class: str = "economy",
     use_miles: bool = False,
 ) -> list[dict]:
-    """Generate mock flight results (노선별 현실적 정보)."""
-    is_domestic = _is_domestic(origin, destination)
-    base_price = 450000 if seat_class == "economy" else 1200000
-
-    if is_domestic:
-        # 국내선: 대한항공, 아시아나, 제주항공
-        return [
-            {"flight_id": "FL001", "airline": "Korean Air", "flight_number": "KE123",
-             "departure": f"{start_date}T08:00", "arrival": f"{start_date}T09:30",
-             "origin": origin, "destination": destination, "duration_hours": 1.5,
-             "price_krw": base_price, "miles_required": 15000 if use_miles else None, "seat_class": seat_class},
-            {"flight_id": "FL002", "airline": "Asiana", "flight_number": "OZ456",
-             "departure": f"{start_date}T14:00", "arrival": f"{start_date}T15:30",
-             "origin": origin, "destination": destination, "duration_hours": 1.5,
-             "price_krw": base_price + 30000, "miles_required": 18000 if use_miles else None, "seat_class": seat_class},
-            {"flight_id": "FL003", "airline": "Jeju Air", "flight_number": "7C789",
-             "departure": f"{start_date}T11:00", "arrival": f"{start_date}T12:20",
-             "origin": origin, "destination": destination, "duration_hours": 1.3,
-             "price_krw": base_price - 80000, "miles_required": None, "seat_class": seat_class},
-        ]
-
-    # 국제선 장거리: 대한항공, 아시아나 (제주항공 없음)
-    return [
-        {"flight_id": "FL001", "airline": "Korean Air", "flight_number": "KE925",
-         "departure": f"{start_date}T00:30", "arrival": f"{start_date}T07:30",
-         "origin": origin, "destination": destination, "duration_hours": 12,
-         "price_krw": 1250000 if seat_class == "economy" else 3200000,
-         "miles_required": 65000 if use_miles else None, "seat_class": seat_class},
-        {"flight_id": "FL002", "airline": "Asiana", "flight_number": "OZ542",
-         "departure": f"{start_date}T23:00", "arrival": f"{(datetime.strptime(start_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')}T11:00",
-         "origin": origin, "destination": destination, "duration_hours": 12,
-         "price_krw": 1180000 if seat_class == "economy" else 3000000,
-         "miles_required": 62000 if use_miles else None, "seat_class": seat_class},
-        {"flight_id": "FL003", "airline": "Korean Air", "flight_number": "KE927",
-         "departure": f"{start_date}T13:00", "arrival": f"{start_date}T20:00",
-         "origin": origin, "destination": destination, "duration_hours": 12,
-         "price_krw": 1320000 if seat_class == "economy" else 3500000,
-         "miles_required": 70000 if use_miles else None, "seat_class": seat_class},
-    ]
+    """Mock fallback (기존 로직)."""
+    from mcp_servers.flight.mock_fallback import mock_search_flights as m
+    return m(origin, destination, start_date, end_date, seat_class, use_miles)
