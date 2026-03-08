@@ -19,4 +19,6 @@ alwaysApply: true
 
 ## GitHub 반영
 
-수정이 완료되면 변경사항을 커밋하고 `git push`로 GitHub에 반영한다.
+수정이 완료되면 **반드시** 다음을 수행한다.
+- `git add` → `git commit` → `git push origin main`
+- 수정 사항이 있을 때마다 즉시 GitHub에 업데이트한다.
