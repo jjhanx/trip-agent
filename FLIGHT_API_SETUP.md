@@ -14,22 +14,36 @@
 
 1. **[developers.amadeus.com](https://developers.amadeus.com)** 접속
 2. **Sign Up** → 이메일·비밀번호로 계정 생성 (이메일 인증)
-3. 로그인 후 상단 **"My Self-Service"** 또는 **"Dashboard"** 클릭
-4. **"Create new app"** 선택
-5. 앱 정보 입력:
-   - **App name**: 예) `Trip Agent Dev`
-   - **Description**: 예) `항공편 검색 테스트`
-   - **API**: **Flight Create Orders** 또는 **Flight Offers Search** 체크
-   - (선택) **Callback URL**: 로컬 개발 시 비워둬도 됨
-6. **Create** 클릭
+3. 로그인 후 **"My Self-Service Workspace"** → **"My apps"** → **"Create new app"**
+4. 앱 이름 입력 (예: `Trip Agent Dev`) 후 **Create** 클릭
+5. **API 선택 체크박스는 없음** — Self-Service 앱은 한 번 생성하면 동일 키로 여러 API 사용 가능
 
 ### 1.2 Client ID / Secret 확인
 
-1. 생성된 앱 목록에서 해당 앱 클릭
-2. **API Key** 또는 **Credentials** 탭에서:
-   - **API Key** = `AMADEUS_CLIENT_ID`
-   - **API Secret** = `AMADEUS_CLIENT_SECRET`
+1. 생성된 앱 클릭 → **"App Keys"** 또는 **"API Key"** 탭
+2. **API Key** = `AMADEUS_CLIENT_ID`, **API Secret** = `AMADEUS_CLIENT_SECRET`
 3. Secret은 한 번만 표시되므로 반드시 복사해 두세요.
+
+### 1.2.1 Credentials 검증 (선택)
+
+Quick Start 예제는 **Flight Inspiration Search** (`/v1/shopping/flight-destinations`)를 사용합니다. 우리 앱은 **Flight Offers Search** (`/v1/shopping/flight-offers`)를 사용하며, **같은 API Key로 둘 다 호출 가능**합니다. 먼저 credentials가 정상인지 확인하려면:
+
+```bash
+# 1. 토큰 발급 (client_id, client_secret을 실제 값으로 교체)
+curl "https://test.api.amadeus.com/v1/security/oauth2/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=YOUR_API_KEY&client_secret=YOUR_API_SECRET"
+
+# 응답에 "access_token"이 있으면 성공
+```
+
+```bash
+# 2. Flight Inspiration Search 호출 (위에서 받은 access_token 사용)
+curl 'https://test.api.amadeus.com/v1/shopping/flight-destinations?origin=PAR&maxPrice=200' \
+  -H 'Authorization: Bearer 여기에_access_token_붙여넣기'
+```
+
+1번에서 토큰을 받으면 credentials는 정상입니다. 이 경우 `.env` 설정과 Trip Agent 재시작 후 다시 시도하세요.
 
 ### 1.3 API 환경 (Test / Production)
 
@@ -46,11 +60,11 @@
 
 - **자동 재시도**: 401 발생 시 Test↔Production URL을 자동으로 바꿔 한 번 더 시도합니다.
 - **확인 사항**:
-  1. Amadeus Self-Service에서 앱에 **Flight Offers Search** 또는 **Flight Create Orders** API가 체크되어 있는지
-  2. API Key / Secret 앞뒤 공백·따옴표 없는지
-  3. Test 환경: `AMADEUS_BASE_URL=https://test.api.amadeus.com` (기본값)
+  1. **§1.2.1** curl로 토큰 발급이 되는지 확인. 성공하면 credentials는 유효함
+  2. `.env`에 API Key / Secret 앞뒤 공백·따옴표 없는지 (예: `AMADEUS_CLIENT_ID=abc123` 형태)
+  3. Test 환경: `AMADEUS_BASE_URL=https://test.api.amadeus.com` (기본값, 미설정 시 자동)
   4. Production 사용: `AMADEUS_BASE_URL=https://api.amadeus.com` (프로덕션 승인 후)
-  5. [developers.amadeus.com](https://developers.amadeus.com) → My Self-Service → 해당 앱 → API 권한 확인
+  5. credentials가 만료·revoke되었다면 Amadeus 대시보드에서 앱을 새로 만들고 새 키로 시도
 
 ---
 
