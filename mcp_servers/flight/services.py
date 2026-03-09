@@ -16,7 +16,7 @@ def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
         return frozenset()
     key = str(mileage_program).lower().replace(" ", "").replace("_", "")
     if "skypass" in key or "대한항공" in key:
-        return frozenset({"korean air", "ke", "koreanair"})
+        return frozenset({"korean air", "ke", "koreanair", "koreanairlines", "korean air lines"})
     if "asiana" in key or "아시아나" in key:
         return frozenset({"asiana", "oz", "asiana airlines"})
     if "milesandmore" in key or "miles_and_more" in key or "루프트한자" in key:
@@ -30,7 +30,9 @@ def _is_preferred_airline(flight: dict, preferred: frozenset[str]) -> bool:
         return False
     airline = (flight.get("airline") or "").lower().replace(" ", "").replace("-", "")
     fn = (flight.get("flight_number") or "").upper()[:2]
-    return airline in preferred or fn in {x.upper() for x in preferred if len(x) <= 3}
+    return airline in preferred or fn in {x.upper() for x in preferred if len(x) <= 3} or any(
+        p in airline for p in preferred if len(p) > 3
+    )  # "koreanair" in "koreanairlines"
 
 
 async def _search_all_apis(
@@ -91,8 +93,25 @@ async def _search_all_apis(
             seen.add(key)
             unique.append(f)
 
-    # 마일리지 선호 항공사 우선: 선호 항공사 전편 먼저, 그다음 나머지. 각 그룹 내 가격순
+    # 마일리지 선호 시: API 결과에 선호 항공사가 0건이면 mock에서 해당 항공사만 보충
     preferred_airlines = _get_preferred_airlines(mileage_program)
+    if preferred_airlines:
+        preferred_in_results = [f for f in unique if _is_preferred_airline(f, preferred_airlines)]
+        if not preferred_in_results:
+            from mcp_servers.flight.mock_fallback import mock_search_flights
+
+            mock_all = mock_search_flights(origin, destination, start_date, end_date, seat_class, use_miles)
+            mock_preferred = [f for f in mock_all if _is_preferred_airline(f, preferred_airlines)]
+            for f in mock_preferred:
+                f["mileage_eligible"] = True
+                f["source"] = "mock_reference"  # API에 없어 참고용 추가
+            if mock_preferred:
+                unique = mock_preferred + unique
+                warnings.append(
+                    "선호 항공사 일정이 API에 없어 참고용 예시를 추가했습니다. 실제 예약·가격은 항공사 사이트에서 확인하세요."
+                )
+
+    # 마일리지 선호 항공사 우선: 선호 항공사 전편 먼저, 그다음 나머지. 각 그룹 내 가격순
     if preferred_airlines:
         preferred = [f for f in unique if _is_preferred_airline(f, preferred_airlines)]
         others = [f for f in unique if not _is_preferred_airline(f, preferred_airlines)]
@@ -103,7 +122,7 @@ async def _search_all_apis(
         price_key = (lambda x: x.get("miles_required") or 999999) if use_miles else (lambda x: x.get("price_krw") or 999999)
         preferred.sort(key=price_key)
         others.sort(key=price_key)
-        unique = preferred + others  # 선호 항공사 전편 + 나머지, 제한 없이 모두 반환
+        unique = preferred + others
     else:
         if use_miles:
             unique.sort(key=lambda x: x.get("miles_required") or 999999)

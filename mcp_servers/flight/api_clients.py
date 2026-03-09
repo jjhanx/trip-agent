@@ -87,7 +87,7 @@ async def search_flightapi(
     segments_by_id = {s["id"]: s for s in data.get("segments", [])}
 
     flights = []
-    for it in data["itineraries"][:10]:
+    for it in data["itineraries"][:25]:  # 25건으로 확대 (LCC 위주 10건에서 KE/OZ 등 품사 누락 방지)
         leg_ids = it.get("leg_ids", [])
         if not leg_ids:
             continue
@@ -258,7 +258,7 @@ async def search_rapidapi_skyscanner(
         quotes = data.get("Quotes", [])
 
         flights = []
-        for q in quotes[:10]:
+        for q in quotes[:25]:  # 25건으로 확대
             out = q.get("OutboundLeg", {})
             cids = out.get("CarrierIds", [])
             cid = cids[0] if cids else None
