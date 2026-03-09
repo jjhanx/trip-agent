@@ -126,12 +126,13 @@ def multi_source_search_flights(
         flights = mock_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles
         )
-        # API 정상 연결됐으나 0건 → 예약 기간 밖 가능성. 그 외(인증실패 등)는 일반 메시지
-        has_auth_error = any(
-            "인증" in w or "API 키가" in w or "토큰" in w
+        # API 정상 연결됐으나 0건 → 예약 기간 밖 가능성. 그 외(인증/검색 실패 등)는 일반 메시지
+        api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
+        has_api_error = any(
+            any(kw in w for kw in api_error_keywords)
             for w in warnings
         )
-        if api_responded_ok and not has_auth_error:
+        if api_responded_ok and not has_api_error:
             warnings.append(
                 "아직 예약 가능한 기간이 아닙니다. "
                 "(항공편 예약은 보통 출발일 기준 약 11개월 전부터 열립니다.) "
