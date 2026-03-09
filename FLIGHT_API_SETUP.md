@@ -42,6 +42,16 @@
 - 월 **2,000회** Flight Offers Search
 - 본 프로젝트의 `usage_tracker`가 한도 도달 시 자동 중단·경고 표시
 
+### 1.5 401 오류 해결
+
+- **자동 재시도**: 401 발생 시 Test↔Production URL을 자동으로 바꿔 한 번 더 시도합니다.
+- **확인 사항**:
+  1. Amadeus Self-Service에서 앱에 **Flight Offers Search** 또는 **Flight Create Orders** API가 체크되어 있는지
+  2. API Key / Secret 앞뒤 공백·따옴표 없는지
+  3. Test 환경: `AMADEUS_BASE_URL=https://test.api.amadeus.com` (기본값)
+  4. Production 사용: `AMADEUS_BASE_URL=https://api.amadeus.com` (프로덕션 승인 후)
+  5. [developers.amadeus.com](https://developers.amadeus.com) → My Self-Service → 해당 앱 → API 권한 확인
+
 ---
 
 ## 2. Kiwi Tequila (선택, 초대제)

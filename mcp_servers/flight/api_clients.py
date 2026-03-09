@@ -72,39 +72,55 @@ async def search_amadeus(
         warnings.append(warn)
 
     base = (base_url or _amadeus_base()).rstrip("/")
+    test_base = "https://test.api.amadeus.com"
+    prod_base = "https://api.amadeus.com"
+    bases_to_try = [base]
+    if base == test_base:
+        bases_to_try.append(prod_base)  # 401 시 프로덕션도 시도
+    elif base == prod_base:
+        bases_to_try.append(test_base)  # 401 시 테스트도 시도
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # OAuth token
-        token_resp = await client.post(
-            f"{base}/v1/security/oauth2/token",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-        )
-        if token_resp.status_code != 200:
-            return [], warnings + [f"Amadeus 인증 실패: {token_resp.status_code}"]
+        last_error: str | None = None
+        for try_base in bases_to_try:
+            token_resp = await client.post(
+                f"{try_base}/v1/security/oauth2/token",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+            )
+            if token_resp.status_code != 200:
+                last_error = f"Amadeus 인증 실패: {token_resp.status_code}"
+                continue
+            token = token_resp.json().get("access_token")
+            if not token:
+                last_error = "Amadeus 토큰 획득 실패"
+                continue
 
-        token = token_resp.json().get("access_token")
-        if not token:
-            return [], warnings + ["Amadeus 토큰 획득 실패"]
-
-        # Flight search (outbound only - Amadeus free tier)
-        resp = await client.get(
-            f"{base}/v1/shopping/flight-offers",
-            headers={"Authorization": f"Bearer {token}"},
-            params={
-                "originLocationCode": origin.upper()[:3],
-                "destinationLocationCode": destination.upper()[:3],
-                "departureDate": start_date,
-                "adults": 1,
-                "max": 10,
-            },
-        )
-
-        if resp.status_code != 200:
-            return [], warnings + [f"Amadeus 검색 실패: {resp.status_code}"]
+            resp = await client.get(
+                f"{try_base}/v1/shopping/flight-offers",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "originLocationCode": origin.upper()[:3],
+                    "destinationLocationCode": destination.upper()[:3],
+                    "departureDate": start_date,
+                    "adults": 1,
+                    "max": 10,
+                },
+            )
+            if resp.status_code == 200:
+                break
+            last_error = f"Amadeus 검색 실패: {resp.status_code}"
+            if resp.status_code != 401:
+                break
+        else:
+            msg = last_error or "Amadeus 오류"
+            if "401" in msg:
+                msg += " (Client ID/Secret·앱 권한·Test/Production URL 확인: FLIGHT_API_SETUP.md)"
+            return [], warnings + [msg]
 
         try:
             data = resp.json()
