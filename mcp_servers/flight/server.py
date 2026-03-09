@@ -5,7 +5,10 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from mcp_servers.flight.services import multi_source_search_flights
+from mcp_servers.flight.services import (
+    multi_source_search_flights,
+    multi_source_search_flights_multi_dest,
+)
 
 mcp = FastMCP("flight-search", port=8001)
 
@@ -27,6 +30,7 @@ def search_flights(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
+    destination_airports: list[str] | None = None,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
     flightapi.io, Kiwi, RapidAPI 사용. mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
@@ -39,18 +43,33 @@ def search_flights(
         seat_class: economy, premium_economy, business, first
         use_miles: Whether to search mileage redemption options
         mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
+        destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
 
     Returns:
         JSON object with "flights" array and "warnings" array
     """
     cfg = _get_config()
-    flights, warnings = multi_source_search_flights(
-        origin, destination, start_date, end_date, seat_class, use_miles,
-        mileage_program=mileage_program or None,
-        kiwi_api_key=cfg["kiwi_api_key"],
-        rapidapi_key=cfg["rapidapi_key"],
-        flightapi_key=cfg["flightapi_key"],
-    )
+    if destination_airports and len(destination_airports) > 0:
+        flights, warnings = multi_source_search_flights_multi_dest(
+            origin,
+            destination_airports[:4],
+            start_date,
+            end_date,
+            seat_class,
+            use_miles,
+            mileage_program=mileage_program or None,
+            kiwi_api_key=cfg["kiwi_api_key"],
+            rapidapi_key=cfg["rapidapi_key"],
+            flightapi_key=cfg["flightapi_key"],
+        )
+    else:
+        flights, warnings = multi_source_search_flights(
+            origin, destination, start_date, end_date, seat_class, use_miles,
+            mileage_program=mileage_program or None,
+            kiwi_api_key=cfg["kiwi_api_key"],
+            rapidapi_key=cfg["rapidapi_key"],
+            flightapi_key=cfg["flightapi_key"],
+        )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 
 

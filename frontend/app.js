@@ -195,6 +195,17 @@ function buildTravelInput() {
     input.origin_airport_code = state.origin_airport_code;
   if (state.destination_airport_code)
     input.destination_airport_code = state.destination_airport_code;
+  // 마일리지 선호 시 다중 공항 검색: 직항 있는 공항 우선 (돌로미티+Skypass → MXP 최우선)
+  const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(form.mileage_program?.value) : '';
+  if (mileageKey && needDestAirport()) {
+    const originCode = state.origin_airport_code || form.origin?.value?.trim() || '';
+    const airports = getDestAirportsForOrigin(originCode, form.destination?.value?.trim(), {
+      useMiles: form.use_miles?.checked,
+      mileageProgram: form.mileage_program?.value,
+    });
+    if (airports && airports.length > 1)
+      input.destination_airports = airports.map(a => a.code);
+  }
   return input;
 }
 
@@ -240,11 +251,14 @@ function renderDestAirports() {
   const info = (typeof FLIGHT_INFO !== 'undefined' && FLIGHT_INFO[originCode]) || {};
   const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(options.mileageProgram) : '';
   const list = $('#destination-airports-list');
-  list.innerHTML = airports.map(a => {
+  const sortedCodes = airports.map(a => a.code);
+  list.innerHTML = airports.map((a, i) => {
     const fa = info[a.code] || {};
     const badges = [];
     if (fa.direct) badges.push('<span class="airport-badge direct">직항</span>');
-    if (options.useMiles && mileageKey && fa.mileage?.includes(mileageKey)) badges.push('<span class="airport-badge mileage">마일리지</span>');
+    if (mileageKey && fa.mileage?.includes(mileageKey)) badges.push('<span class="airport-badge mileage">마일리지</span>');
+    if (mileageKey && fa.direct && fa.mileage?.includes(mileageKey) && i === 0)
+      badges.push('<span class="airport-badge recommend">권장</span>');
     return `
     <div class="airport-item" data-code="${a.code}">
       <span><span class="code">${a.code}</span> <span class="name">${a.name}</span> ${badges.join('')}</span>
@@ -368,7 +382,8 @@ function renderFlights(flights, warnings) {
     }
   }
   list.innerHTML = (flights || []).map((f, i) => {
-    const route = `${f.origin || ''} → ${f.destination || ''}`;
+    const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+    const route = `${f.origin || ''} → ${destLabel}`;
     const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
     const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';
     const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';

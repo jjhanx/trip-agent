@@ -210,6 +210,62 @@ def multi_source_search_flights(
     return flights, warnings
 
 
+def multi_source_search_flights_multi_dest(
+    origin: str,
+    destination_airports: list[str],
+    start_date: str,
+    end_date: str,
+    seat_class: str = "economy",
+    use_miles: bool = False,
+    mileage_program: str | None = None,
+    kiwi_api_key: str = "",
+    rapidapi_key: str = "",
+    flightapi_key: str = "",
+) -> tuple[list[dict], list[str]]:
+    """
+    다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
+    정렬: 1) 마일리지 직항 공항·선호 항공사 2) 가격순
+    """
+    airport_labels = {"MXP": "밀라노", "MUC": "뮌헨", "VCE": "베니스", "VRN": "베로나", "INN": "인스부르크", "TSF": "베니스", "BZO": "볼차노"}
+    all_flights: list[dict] = []
+    all_warnings: list[str] = []
+    preferred_airlines = _get_preferred_airlines(mileage_program)
+    price_key = (lambda x: x.get("miles_required") or 999999) if use_miles else (lambda x: x.get("price_krw") or 999999)
+
+    for i, dest in enumerate(destination_airports):
+        flights, warnings = multi_source_search_flights(
+            origin, dest, start_date, end_date, seat_class, use_miles,
+            mileage_program=mileage_program,
+            kiwi_api_key=kiwi_api_key, rapidapi_key=rapidapi_key, flightapi_key=flightapi_key,
+        )
+        label = airport_labels.get(dest, dest)
+        for f in flights:
+            f["destination_airport"] = dest
+            f["destination_label"] = label
+            f["airport_priority"] = i  # 직항 우선순 (0=MXP 등)
+        all_flights.extend(flights)
+        all_warnings.extend(warnings)
+
+    # 중복 제거 (같은 편이 여러 공항에 나올 수 있음 - 목적지 공항 기준으로 구분)
+    seen: set[tuple] = set()
+    unique = []
+    for f in all_flights:
+        key = (f.get("airline"), f.get("flight_number"), f.get("departure"), f.get("destination"))
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    # 정렬: 1) 직항 우선 공항(MXP 등) + 선호 항공사 2) 공항 우선순위 3) 가격
+    def sort_key(f: dict) -> tuple:
+        is_pref = _is_preferred_airline(f, preferred_airlines) if preferred_airlines else False
+        ap = f.get("airport_priority", 99)
+        pk = price_key(f)
+        return (0 if is_pref else 1, ap, pk)
+
+    unique.sort(key=sort_key)
+    return unique, list(dict.fromkeys(all_warnings))  # 중복 경고 제거
+
+
 def mock_search_flights(
     origin: str,
     destination: str,

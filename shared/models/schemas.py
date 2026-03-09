@@ -78,6 +78,9 @@ class TravelInput(BaseModel):
     destination_airport_code: str | None = Field(
         None, description="선택된 도착 공항 코드"
     )
+    destination_airports: list[str] | None = Field(
+        None, description="검색할 도착 공항 목록 (마일리지 직항 우선순, 다중 검색 시)"
+    )
     start_time_preference: str | None = Field(
         None, description="출발 시간 선호 (미질문, 일정 설계 시 조기 도착 우선 고려)"
     )

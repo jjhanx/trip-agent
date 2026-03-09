@@ -113,23 +113,26 @@ function normalizeMileageProgram(name) {
 
 /**
  * 목적지 공항 목록
- * 정렬: 1) 직항 우선 2) 사용자 마일리지 프로그램 직항 있으면 우선 3) 비행시간 짧은 순
+ * 정렬: 1) 마일리지 직항 공항 최우선 2) 직항 우선 3) 비행시간 짧은 순
+ * (mileageProgram만 있어도 마일리지 직항 우선 - 적립 생각 시 use_miles 불필요)
  */
 function getDestAirportsForOrigin(originCode, destCityName, options) {
   const dest = getAirportsForCity(destCityName);
   if (!dest) return null;
   const info = FLIGHT_INFO[originCode] || {};
-  const useMiles = options?.useMiles === true;
   const mileageKey = normalizeMileageProgram(options?.mileageProgram);
 
   return [...dest].sort((a, b) => {
     const fa = info[a.code] || { hours: 99, direct: false, mileage: [] };
     const fb = info[b.code] || { hours: 99, direct: false, mileage: [] };
-    const aHasMileage = mileageKey && fa.mileage.includes(mileageKey);
-    const bHasMileage = mileageKey && fb.mileage.includes(mileageKey);
+    const aHasMileageDirect = mileageKey && fa.direct && fa.mileage.includes(mileageKey);
+    const bHasMileageDirect = mileageKey && fb.direct && fb.mileage.includes(mileageKey);
 
+    // 1) 마일리지 직항 공항 최우선 (돌로미티+Skypass → MXP 1순위)
+    if (aHasMileageDirect !== bHasMileageDirect) return aHasMileageDirect ? -1 : 1;
+    // 2) 직항 우선
     if (fa.direct !== fb.direct) return fa.direct ? -1 : 1;
-    if (useMiles && aHasMileage !== bHasMileage) return aHasMileage ? -1 : 1;
+    // 3) 비행시간 짧은 순
     return fa.hours - fb.hours;
   });
 }

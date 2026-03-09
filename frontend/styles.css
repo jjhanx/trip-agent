@@ -138,6 +138,7 @@ header p {
 .airport-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.35rem; }
 .airport-badge.direct { background: rgba(56, 189, 248, 0.25); color: var(--accent); }
 .airport-badge.mileage { background: rgba(34, 197, 94, 0.25); color: #22c55e; }
+.airport-badge.recommend { background: rgba(56, 189, 248, 0.35); color: var(--accent); font-weight: 700; }
 .flight-badge.mileage { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.35rem; background: rgba(34, 197, 94, 0.25); color: #22c55e; font-weight: 600; }
 .airport-meta { font-size: 0.85rem; color: var(--muted); }
 
