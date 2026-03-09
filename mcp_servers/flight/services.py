@@ -18,8 +18,10 @@ async def _search_all_apis(
     seat_class: str,
     use_miles: bool,
     config: dict,
-) -> tuple[list[dict], list[str]]:
-    """병렬로 Amadeus, Kiwi, RapidAPI 호출. 한도 초과 시 해당 API는 건너뜀."""
+) -> tuple[list[dict], list[str], bool]:
+    """병렬로 Amadeus, Kiwi, RapidAPI 호출. 한도 초과 시 해당 API는 건너뜀.
+    Returns (flights, warnings, api_responded_ok).
+    api_responded_ok: 최소 1개 API가 예외 없이 정상 응답했는지 (0건이어도 OK)."""
     warnings: list[str] = []
     all_flights: list[dict] = []
     tasks = []
@@ -45,9 +47,10 @@ async def _search_all_apis(
         )
 
     if not tasks:
-        return [], ["API 키가 설정되지 않았습니다. .env 참고."]
+        return [], ["API 키가 설정되지 않았습니다. .env 참고."], False
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    api_responded_ok = any(not isinstance(r, Exception) for r in results)
 
     for i, r in enumerate(results):
         if isinstance(r, Exception):
@@ -72,7 +75,7 @@ async def _search_all_apis(
     else:
         unique.sort(key=lambda x: x.get("price_krw") or 999999)
 
-    return unique[:15], warnings
+    return unique[:15], warnings, api_responded_ok
 
 
 def multi_source_search_flights(
@@ -111,20 +114,31 @@ def multi_source_search_flights(
     except RuntimeError:
         loop = None
     if loop is None:
-        flights, warnings = asyncio.run(_run())
+        flights, warnings, api_responded_ok = asyncio.run(_run())
     else:
         # uvicorn 등 이미 실행 중인 이벤트 루프 내에서는 별도 스레드에서 실행
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _run())
-            flights, warnings = future.result()
+            flights, warnings, api_responded_ok = future.result()
 
     if not flights:
         from mcp_servers.flight.mock_fallback import mock_search_flights
         flights = mock_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles
         )
-        warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
-
+        # API 정상 연결됐으나 0건 → 예약 기간 밖 가능성. 그 외(인증실패 등)는 일반 메시지
+        has_auth_error = any(
+            "인증" in w or "API 키가" in w or "토큰" in w
+            for w in warnings
+        )
+        if api_responded_ok and not has_auth_error:
+            warnings.append(
+                "아직 예약 가능한 기간이 아닙니다. "
+                "(항공편 예약은 보통 출발일 기준 약 11개월 전부터 열립니다.) "
+                "예시(Mock) 데이터로 보여드립니다."
+            )
+        else:
+            warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
     return flights, warnings
 
 

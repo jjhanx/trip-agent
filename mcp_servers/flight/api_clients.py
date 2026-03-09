@@ -71,10 +71,11 @@ async def search_amadeus(
     if warn:
         warnings.append(warn)
 
+    base = (base_url or _amadeus_base()).rstrip("/")
     async with httpx.AsyncClient(timeout=30.0) as client:
         # OAuth token
         token_resp = await client.post(
-            "https://api.amadeus.com/v1/security/oauth2/token",
+            f"{base}/v1/security/oauth2/token",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data={
                 "grant_type": "client_credentials",
