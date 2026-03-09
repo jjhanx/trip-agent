@@ -180,6 +180,12 @@ async def search_amadeus(
                 if body.get("data"):
                     break
             last_error = f"Amadeus 검색 실패: {resp.status_code}"
+            if resp.status_code in (401, 403):
+                flights_insp, warn_insp = await _amadeus_flight_inspiration(
+                    client, try_base, token, origin, destination, start_date, end_date,
+                )
+                if flights_insp:
+                    return flights_insp, warnings + warn_insp
             if resp.status_code not in (401, 200):
                 break
         else:
