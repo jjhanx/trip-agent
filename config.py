@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     amadeus_base_url: str = "https://test.api.amadeus.com"  # Test 환경 기본값, 프로덕션: https://api.amadeus.com
     kiwi_api_key: str = ""
     rapidapi_key: str = ""
+    flightapi_key: str = ""  # flightapi.io (100회/월 무료)
 
     # A2A agent URLs (for Session Agent to call other agents)
     flight_agent_url: str = "http://localhost:9001"

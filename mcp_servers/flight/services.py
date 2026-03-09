@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mcp_servers.flight.api_clients import (
     search_amadeus,
+    search_flightapi,
     search_kiwi,
     search_rapidapi_skyscanner,
 )
@@ -43,6 +44,13 @@ async def _search_all_apis(
         tasks.append(
             search_rapidapi_skyscanner(
                 origin, destination, start_date, end_date, config["rapidapi_key"]
+            )
+        )
+    if config.get("flightapi_key"):
+        tasks.append(
+            search_flightapi(
+                origin, destination, start_date, end_date,
+                config["flightapi_key"], seat_class,
             )
         )
 
@@ -90,6 +98,7 @@ def multi_source_search_flights(
     amadeus_base_url: str = "",
     kiwi_api_key: str = "",
     rapidapi_key: str = "",
+    flightapi_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
     Amadeus + Kiwi + RapidAPI 연동 검색.
@@ -102,6 +111,7 @@ def multi_source_search_flights(
         "amadeus_base_url": amadeus_base_url or "",
         "kiwi_api_key": kiwi_api_key,
         "rapidapi_key": rapidapi_key,
+        "flightapi_key": flightapi_key,
     }
 
     async def _run():

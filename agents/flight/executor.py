@@ -83,6 +83,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 amadeus_base_url=s.amadeus_base_url,
                 kiwi_api_key=s.kiwi_api_key,
                 rapidapi_key=s.rapidapi_key,
+                flightapi_key=s.flightapi_key,
             )
             if travel.use_miles:
                 flights.sort(key=lambda x: x.get("miles_required") or 999999)

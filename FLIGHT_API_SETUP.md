@@ -95,12 +95,36 @@ curl 'https://test.api.amadeus.com/v1/shopping/flight-destinations?origin=PAR&ma
 
 ---
 
-## 3. RapidAPI Skyscanner (제공 중단)
+## 3. RapidAPI / flightapi.io (대안)
 
-RapidAPI에서 Skyscanner Flight Search API가 **현재 제공되지 않거나 검색되지 않습니다**. 해당 API를 사용할 수 없는 상태입니다.
+### 3.1 flightapi.io (직접 연동)
 
-- `RAPIDAPI_KEY`는 설정하지 않아도 됩니다.
-- 향후 RapidAPI에 다른 항공편 API가 추가되면 코드 수정 후 연동 가능합니다.
+[flightapi.io](https://www.flightapi.io/) — 100회/월 무료. RapidAPI의 "Flight Price Comparison"과 동일 백엔드.
+
+1. **[flightapi.io](https://www.flightapi.io/)** 접속 → Sign Up
+2. **Dashboard** → **API Keys** → Create / 복사
+3. `.env`에 `FLIGHTAPI_KEY=발급받은키` 추가
+4. Round Trip API 사용 (출발지↔도착지 왕복 검색)
+
+### 3.2 RapidAPI 항공편 API (수동 연동)
+
+RapidAPI [flight 검색](https://rapidapi.com/search/flight)에서 다음 API들이 있습니다. 각 API는 구독 후 X-RapidAPI-Key로 호출 가능하며, 엔드포인트·파라미터가 API마다 다릅니다.
+
+| API | 무료 한도 | 비고 |
+|-----|----------|------|
+| [Flight Price Comparison](https://rapidapi.com/manthankool/api/flight-price-comparison) | 100회/월 | flightapi.io와 동일, RapidAPI 경유 |
+| [Compare Flight Prices](https://rapidapi.com/obryan-software-obryan-software-default/api/compare-flight-prices) | 플랜별 | 별도 엔드포인트 |
+| [Multi Site Flight Search](https://rapidapi.com/airlineconsolidator/api/multi-site-flight-search) | 플랜별 | |
+| [Google Flights APIs](https://rapidapi.com/collection/google-flights-api) | 제공자별 | 컬렉션(여러 API) |
+
+- **Booking.com**: RapidAPI에 래퍼가 있으나 항공편은 주로 숙소 위주. 항공 전용 API는 제한적.
+- **Google Flights**: 공식 API가 없고, RapidAPI의 Google Flights 관련 API들은 스크래핑/비공식 래퍼일 수 있음.
+
+원하는 RapidAPI 항공 API를 선택한 뒤, 해당 API 문서의 엔드포인트·파라미터에 맞춰 `mcp_servers/flight/api_clients.py`에 클라이언트를 추가하면 됩니다.
+
+### 3.3 Skyscanner (과거)
+
+RapidAPI Skyscanner Flight Search API는 **제공이 중단**된 상태입니다.
 
 ---
 
@@ -122,6 +146,8 @@ cp .env.example .env
 # Flight APIs (무료 한도 초과 전 자동 중단)
 AMADEUS_CLIENT_ID=여기에_Amadeus_API_Key_붙여넣기
 AMADEUS_CLIENT_SECRET=여기에_Amadeus_API_Secret_붙여넣기
+# flightapi.io (100회/월 무료) - Amadeus 대안
+FLIGHTAPI_KEY=여기에_flightapi_키_붙여넣기
 # KIWI_API_KEY=  (초대제, 미보유 시 비워둠)
 # RAPIDAPI_KEY=  (Skyscanner API 제공 중단, 비워둠)
 ```
@@ -163,6 +189,7 @@ AMADEUS_CLIENT_SECRET=QrStUvWxYz1234567890AbCdEf
 | 서비스 | 가입 URL | 발급 항목 | .env 변수 | 비고 |
 |--------|----------|-----------|-----------|------|
 | **Amadeus** | [developers.amadeus.com](https://developers.amadeus.com) | API Key, API Secret | AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET | **권장** · 월 2,000회 무료 |
+| **flightapi.io** | [flightapi.io](https://www.flightapi.io) | API Key | FLIGHTAPI_KEY | **대안** · 100회/월 무료 |
 | Kiwi Tequila | [tequila.kiwi.com](https://tequila.kiwi.com) | API Key | KIWI_API_KEY | 초대제, 일반 가입 어려움 |
 | RapidAPI Skyscanner | — | — | RAPIDAPI_KEY | **제공 중단** (RapidAPI에서 검색 불가) |
 

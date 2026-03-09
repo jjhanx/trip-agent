@@ -17,6 +17,7 @@ def _get_config():
         "amadeus_base_url": os.environ.get("AMADEUS_BASE_URL", "https://test.api.amadeus.com"),
         "kiwi_api_key": os.environ.get("KIWI_API_KEY", ""),
         "rapidapi_key": os.environ.get("RAPIDAPI_KEY", ""),
+        "flightapi_key": os.environ.get("FLIGHTAPI_KEY", ""),
     }
 
 
@@ -51,6 +52,7 @@ def search_flights(
         amadeus_base_url=cfg["amadeus_base_url"],
         kiwi_api_key=cfg["kiwi_api_key"],
         rapidapi_key=cfg["rapidapi_key"],
+        flightapi_key=cfg["flightapi_key"],
     )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 

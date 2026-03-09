@@ -9,6 +9,7 @@ LIMITS = {
     "amadeus": {"monthly": 1800, "warn_at": 1500},  # 2000 중 200 여유
     "kiwi": {"per_minute": 90, "warn_at": 70},  # 100 중 10 여유
     "rapidapi": {"monthly": 90, "warn_at": 70},  # 100 중 10 여유
+    "flightapi": {"monthly": 90, "warn_at": 70},  # 100 중 10 여유 (flightapi.io 무료)
 }
 
 _USAGE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "flight_api_usage.json"
@@ -21,12 +22,12 @@ def _ensure_data_dir():
 def _load_usage() -> dict:
     _ensure_data_dir()
     if not _USAGE_FILE.exists():
-        return {"amadeus": [], "kiwi": [], "rapidapi": [], "warnings_shown": []}
+        return {"amadeus": [], "kiwi": [], "rapidapi": [], "flightapi": [], "warnings_shown": []}
     try:
         with open(_USAGE_FILE, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"amadeus": [], "kiwi": [], "rapidapi": [], "warnings_shown": []}
+        return {"amadeus": [], "kiwi": [], "rapidapi": [], "flightapi": [], "warnings_shown": []}
 
 
 def _save_usage(data: dict):
@@ -104,6 +105,26 @@ def record_rapidapi():
     _save_usage(data)
 
 
+def can_use_flightapi() -> tuple[bool, str | None]:
+    data = _load_usage()
+    month = _current_month()
+    count = sum(1 for t in data.get("flightapi", []) if t.startswith(month))
+    limit = LIMITS["flightapi"]["monthly"]
+    warn_at = LIMITS["flightapi"]["warn_at"]
+    if count >= limit:
+        return False, f"FlightAPI 월 한도({limit}회) 초과."
+    if count >= warn_at:
+        return True, f"FlightAPI 한도 경고: {count}/{limit}회."
+    return True, None
+
+
+def record_flightapi():
+    data = _load_usage()
+    data.setdefault("flightapi", []).append(_current_minute())
+    data["flightapi"] = data["flightapi"][-5000:]
+    _save_usage(data)
+
+
 def get_usage_summary() -> dict:
     """현재 사용량 요약."""
     data = _load_usage()
@@ -121,5 +142,9 @@ def get_usage_summary() -> dict:
         "rapidapi": {
             "month": sum(1 for t in data.get("rapidapi", []) if t.startswith(month)),
             "limit": LIMITS["rapidapi"]["monthly"],
+        },
+        "flightapi": {
+            "month": sum(1 for t in data.get("flightapi", []) if t.startswith(month)),
+            "limit": LIMITS["flightapi"]["monthly"],
         },
     }

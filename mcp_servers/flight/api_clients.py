@@ -7,9 +7,11 @@ import httpx
 
 from mcp_servers.flight.usage_tracker import (
     can_use_amadeus,
+    can_use_flightapi,
     can_use_kiwi,
     can_use_rapidapi,
     record_amadeus,
+    record_flightapi,
     record_kiwi,
     record_rapidapi,
 )
@@ -100,6 +102,86 @@ async def _amadeus_flight_inspiration(
     record_amadeus()
     warn = "Flight Offers Search 권한 없음. Flight Inspiration Search(목적지·가격)로 대체합니다. 편명 정보는 없습니다."
     return flights, [warn]
+
+
+async def search_flightapi(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    api_key: str,
+    seat_class: str = "economy",
+) -> tuple[list[dict], list[str]]:
+    """
+    flightapi.io Round Trip API. 100회/월 무료.
+    Returns (flights, warnings)
+    """
+    can_use, warn = can_use_flightapi()
+    if not can_use:
+        return [], [warn or "FlightAPI 한도 초과"]
+
+    warnings: list[str] = []
+    if warn:
+        warnings.append(warn)
+
+    cabin_map = {"economy": "Economy", "premium_economy": "Premium_Economy", "business": "Business", "first": "First"}
+    cabin = cabin_map.get(seat_class.lower(), "Economy")
+    o, d = origin.upper()[:3], destination.upper()[:3]
+    url = f"https://api.flightapi.io/roundtrip/{api_key}/{o}/{d}/{start_date}/{end_date}/1/0/0/{cabin}/USD"
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(url)
+    if resp.status_code != 200:
+        return [], warnings + [f"FlightAPI 검색 실패: {resp.status_code}"]
+    try:
+        data = resp.json()
+    except Exception:
+        return [], warnings + ["FlightAPI 응답 파싱 실패"]
+
+    if "itineraries" not in data or not data["itineraries"]:
+        return [], warnings
+
+    carriers_map = {str(c.get("id")): c.get("name", "") for c in data.get("carriers", [])}
+    legs_by_id = {lg["id"]: lg for lg in data.get("legs", [])}
+    segments_by_id = {s["id"]: s for s in data.get("segments", [])}
+
+    flights = []
+    for it in data["itineraries"][:10]:
+        leg_ids = it.get("leg_ids", [])
+        if not leg_ids:
+            continue
+        leg = legs_by_id.get(leg_ids[0])
+        if not leg:
+            continue
+        seg_ids = leg.get("segment_ids", [])
+        seg = segments_by_id.get(seg_ids[0]) if seg_ids else None
+        price_usd = it.get("cheapest_price", {}).get("amount") or 0
+        price_krw = int(float(price_usd) * 1450)
+        dep = leg.get("departure", start_date + "T00:00")[:19]
+        arr = leg.get("arrival", end_date + "T00:00")[:19]
+        dur_mins = leg.get("duration", 0)
+        dur_h = round(dur_mins / 60, 1) if dur_mins else None
+        carrier_id = str(seg.get("marketing_carrier_id", "")) if seg else ""
+        airline = carriers_map.get(carrier_id, carrier_id or "—")
+        fn = seg.get("marketing_flight_number", "") if seg else ""
+        flights.append(
+            _normalize_flight(
+                airline=airline,
+                flight_number=fn,
+                departure=dep,
+                arrival=arr,
+                origin=o,
+                destination=d,
+                price_krw=price_krw,
+                miles_required=None,
+                duration_hours=dur_h,
+                flight_id=it.get("id", ""),
+                seat_class=seat_class,
+            )
+        )
+
+    record_flightapi()
+    return flights, warnings
 
 
 async def search_amadeus(
