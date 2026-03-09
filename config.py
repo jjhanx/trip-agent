@@ -19,10 +19,7 @@ class Settings(BaseSettings):
     rental_car_mcp_url: str = "http://localhost:8003/mcp"
     transit_mcp_url: str = "http://localhost:8004/mcp"
 
-    # Flight API keys (Amadeus, Kiwi Tequila, RapidAPI Skyscanner) - 무료 한도 관리
-    amadeus_client_id: str = ""
-    amadeus_client_secret: str = ""
-    amadeus_base_url: str = "https://test.api.amadeus.com"  # Test 환경 기본값, 프로덕션: https://api.amadeus.com
+    # Flight API keys (Kiwi, RapidAPI, flightapi.io) - 무료 한도 관리
     kiwi_api_key: str = ""
     rapidapi_key: str = ""
     flightapi_key: str = ""  # flightapi.io (100회/월 무료)

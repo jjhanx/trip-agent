@@ -1,4 +1,4 @@
-"""Flight MCP Server - 항공편 검색 Tools (Amadeus + Kiwi + RapidAPI)."""
+"""Flight MCP Server - 항공편 검색 Tools (flightapi.io, Kiwi, RapidAPI)."""
 
 import json
 import os
@@ -12,9 +12,6 @@ mcp = FastMCP("flight-search", port=8001)
 
 def _get_config():
     return {
-        "amadeus_client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
-        "amadeus_client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
-        "amadeus_base_url": os.environ.get("AMADEUS_BASE_URL", "https://test.api.amadeus.com"),
         "kiwi_api_key": os.environ.get("KIWI_API_KEY", ""),
         "rapidapi_key": os.environ.get("RAPIDAPI_KEY", ""),
         "flightapi_key": os.environ.get("FLIGHTAPI_KEY", ""),
@@ -29,9 +26,10 @@ def search_flights(
     end_date: str,
     seat_class: str = "economy",
     use_miles: bool = False,
+    mileage_program: str | None = None,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    Amadeus, Kiwi, RapidAPI(Skyscanner) 사용. 무료 한도 초과 시 해당 API는 건너뛰고 경고 반환.
+    flightapi.io, Kiwi, RapidAPI 사용. mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
@@ -40,6 +38,7 @@ def search_flights(
         end_date: Return date (YYYY-MM-DD)
         seat_class: economy, premium_economy, business, first
         use_miles: Whether to search mileage redemption options
+        mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
 
     Returns:
         JSON object with "flights" array and "warnings" array
@@ -47,9 +46,7 @@ def search_flights(
     cfg = _get_config()
     flights, warnings = multi_source_search_flights(
         origin, destination, start_date, end_date, seat_class, use_miles,
-        amadeus_client_id=cfg["amadeus_client_id"],
-        amadeus_client_secret=cfg["amadeus_client_secret"],
-        amadeus_base_url=cfg["amadeus_base_url"],
+        mileage_program=mileage_program or None,
         kiwi_api_key=cfg["kiwi_api_key"],
         rapidapi_key=cfg["rapidapi_key"],
         flightapi_key=cfg["flightapi_key"],

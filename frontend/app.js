@@ -372,9 +372,10 @@ function renderFlights(flights, warnings) {
     const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
     const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';
     const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+    const mileageBadge = f.mileage_eligible ? '<span class="flight-badge mileage">마일리지 적립</span>' : '';
     return `
     <div class="option-item" data-idx="${i}">
-      <h3>${f.airline || '항공사'} ${f.flight_number || ''}</h3>
+      <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}</h3>
       <p class="flight-route">${route}</p>
       <p class="flight-time">${timeRange}${duration}</p>
       <p class="price">${price}</p>

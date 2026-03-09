@@ -1,24 +1,29 @@
 ---
-description: README 업데이트 및 GitHub 반영 규칙
+description: 수정 시 관련 문서·GitHub 반영 규칙
 globs: 
 alwaysApply: true
 ---
 
-# README 및 GitHub 업데이트
+# 수정 시 관련 문서 및 GitHub 업데이트
 
-코드 수정·기능 추가가 있을 때 반드시 다음을 수행한다.
+코드 수정·기능 추가가 있을 때 **반드시** 다음을 수행한다.
 
-## README 업데이트
+## 1. 관련 문서 업데이트
 
+### README.md
 - **새 Agent / MCP 서버 추가**: 구성 요소, 프로젝트 구조, 환경 변수 반영
 - **API·엔드포인트 변경**: 실행 방법, 환경 변수 수정
 - **아키텍처 변경**: 아키텍처 개요, 흐름도 수정
 - **기능 추가·제거**: 사용 흐름, 구현 내용 수정
+- **8. 주요 변경 사항 (Changelog)** 섹션에 날짜와 변경 내용 추가
 
-**8. 주요 변경 사항 (Changelog)** 섹션에 날짜와 변경 내용을 추가한다.
+### 관련 전용 문서
+- **Flight API 변경** → `FLIGHT_API_SETUP.md`, `README.md` §6.2
+- **배포/환경 설정 변경** → `DEPLOYMENT.md`, `.env.example`
+- **새 의존성·설치 방법** → `requirements.txt`, `README.md` §5
 
-## GitHub 반영
+## 2. GitHub 반영
 
 수정이 완료되면 **반드시** 다음을 수행한다.
-- `git add` → `git commit` → `git push origin main`
+- `git add` → `git commit -m "설명"` → `git push origin main`
 - 수정 사항이 있을 때마다 즉시 GitHub에 업데이트한다.

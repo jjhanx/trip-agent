@@ -37,17 +37,17 @@ class FlightSearchExecutor(BaseAgentExecutor):
         try:
             origin = travel.origin_airport_code or travel.origin
             dest = travel.destination_airport_code or travel.destination
-            result = await self.mcp.call_tool(
-                "search_flights",
-                {
-                    "origin": origin,
-                    "destination": dest,
-                    "start_date": travel.start_date.isoformat(),
-                    "end_date": travel.end_date.isoformat(),
-                    "seat_class": travel.seat_class.value,
-                    "use_miles": travel.use_miles,
-                },
-            )
+            params = {
+                "origin": origin,
+                "destination": dest,
+                "start_date": travel.start_date.isoformat(),
+                "end_date": travel.end_date.isoformat(),
+                "seat_class": travel.seat_class.value,
+                "use_miles": travel.use_miles,
+            }
+            if travel.mileage_program:
+                params["mileage_program"] = travel.mileage_program
+            result = await self.mcp.call_tool("search_flights", params)
             text = result.get("text", json.dumps(result))
             parsed = json.loads(text) if isinstance(text, str) else text
             if isinstance(parsed, dict):
@@ -68,7 +68,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
         except Exception:
             # Fallback: multi_source or mock when MCP unavailable
             from config import Settings
-            from mcp_servers.flight.services import multi_source_search_flights, mock_search_flights
+            from mcp_servers.flight.services import multi_source_search_flights
 
             s = Settings()
             flights, warnings = multi_source_search_flights(
@@ -78,9 +78,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 travel.end_date.isoformat(),
                 travel.seat_class.value,
                 travel.use_miles,
-                amadeus_client_id=s.amadeus_client_id,
-                amadeus_client_secret=s.amadeus_client_secret,
-                amadeus_base_url=s.amadeus_base_url,
+                mileage_program=travel.mileage_program,
                 kiwi_api_key=s.kiwi_api_key,
                 rapidapi_key=s.rapidapi_key,
                 flightapi_key=s.flightapi_key,
