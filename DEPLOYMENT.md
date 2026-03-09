@@ -602,13 +602,36 @@ sudo tail -50 /var/log/nginx/error.log
 
 ### 컨테이너가 바로 종료될 때 (Exited 1)
 
-`docker compose ps -a` 에서 `Exited (1)` 이 보이면 `docker compose logs session` (또는 해당 서비스명)으로 에러 확인.
+`docker compose ps -a` 에서 `Exited (1)` 이 보이면 **로그를 먼저 확인**하세요.
+
+```bash
+# session 로그 (502 원인 - 웹 UI 서비스)
+docker compose logs session
+
+# 다른 실패 서비스 로그
+docker compose logs flight
+docker compose logs accommodation
+docker compose logs itinerary
+```
+
+로그 맨 아래의 **Traceback/Error** 메시지가 해결 단서입니다.
 
 | 에러 | 원인 | 해결 |
 |------|------|------|
 | `ModuleNotFoundError: a2a.server.events.event_factory` | a2a-sdk 0.3.x에서 모듈 제거 | `git pull` 후 `docker compose up -d --build` |
 | `ImportError: MessagePart from a2a.types` | API 변경 (MessagePart→Part/TextPart) | 위와 동일 |
 | `ValidationError: AgentSkill... description Field required` | AgentSkill에 `description` 필수 | 위와 동일 |
+| `ModuleNotFoundError` (기타) | 의존성 미설치 | `docker compose build --no-cache` 후 재시작 |
+
+**진단용 임시 실행** (로그에서 원인을 찾기 어려울 때):
+
+```bash
+docker compose run --rm session python -c "
+from main import create_app
+create_app()
+print('OK')
+"
+```
 
 **정상화 절차**: 최신 코드 pull → `docker compose down` → `docker compose up -d --build` → `docker compose ps -a`에서 모든 서비스 `Up` 확인.
 
