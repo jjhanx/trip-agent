@@ -65,6 +65,7 @@ curl 'https://test.api.amadeus.com/v1/shopping/flight-destinations?origin=PAR&ma
   3. Test 환경: `AMADEUS_BASE_URL=https://test.api.amadeus.com` (기본값, 미설정 시 자동)
   4. Production 사용: `AMADEUS_BASE_URL=https://api.amadeus.com` (프로덕션 승인 후)
   5. credentials가 만료·revoke되었다면 Amadeus 대시보드에서 앱을 새로 만들고 새 키로 시도
+  6. **서버에서 직접 curl 테스트**: Trip Agent가 돌아가는 Ubuntu 서버에서 §1.2.1 curl을 실행해 보세요. 로컬 PC에서는 되는데 서버에서는 401이면 `.env`가 서버에 제대로 로드되지 않았을 수 있음 (경로·권한·Docker env_file 등)
 
 ### 1.6 "no apiproduct match found" 오류
 

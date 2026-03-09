@@ -186,6 +186,7 @@ async def search_amadeus(
                 )
                 if flights_insp:
                     return flights_insp, warnings + warn_insp
+                last_error += " Flight Inspiration도 동일 오류."
             if resp.status_code not in (401, 200):
                 break
         else:
