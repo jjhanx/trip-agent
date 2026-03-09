@@ -26,7 +26,7 @@
 
 ### 1.2.1 Credentials 검증 (선택)
 
-Quick Start 예제는 **Flight Inspiration Search** (`/v1/shopping/flight-destinations`)를 사용합니다. 우리 앱은 **Flight Offers Search** (`/v1/shopping/flight-offers`)를 사용하며, **같은 API Key로 둘 다 호출 가능**합니다. 먼저 credentials가 정상인지 확인하려면:
+Quick Start 예제는 **Flight Inspiration Search** (`/v1/shopping/flight-destinations`)를 사용합니다. 우리 앱은 **Flight Offers Search** (`/v1/shopping/flight-offers`)를 사용합니다. 먼저 credentials가 정상인지 확인하려면:
 
 ```bash
 # 1. 토큰 발급 (client_id, client_secret을 실제 값으로 교체)
@@ -43,7 +43,7 @@ curl 'https://test.api.amadeus.com/v1/shopping/flight-destinations?origin=PAR&ma
   -H 'Authorization: Bearer 여기에_access_token_붙여넣기'
 ```
 
-1번에서 토큰을 받으면 credentials는 정상입니다. 이 경우 `.env` 설정과 Trip Agent 재시작 후 다시 시도하세요.
+1번에서 토큰을 받으면 credentials는 정상입니다. **단, 토큰 성공 ≠ Flight Offers Search 사용 가능** — §1.6 참조.
 
 ### 1.3 API 환경 (Test / Production)
 
@@ -65,6 +65,22 @@ curl 'https://test.api.amadeus.com/v1/shopping/flight-destinations?origin=PAR&ma
   3. Test 환경: `AMADEUS_BASE_URL=https://test.api.amadeus.com` (기본값, 미설정 시 자동)
   4. Production 사용: `AMADEUS_BASE_URL=https://api.amadeus.com` (프로덕션 승인 후)
   5. credentials가 만료·revoke되었다면 Amadeus 대시보드에서 앱을 새로 만들고 새 키로 시도
+
+### 1.6 "no apiproduct match found" 오류
+
+토큰은 받지만 `flight-offers` 호출 시 아래 오류가 나면:
+
+```json
+{"fault":{"faultstring":"Invalid API call as no apiproduct match found","detail":{"errorcode":"keymanagement.service.InvalidAPICallAsNoApiProductMatchFound"}}}
+```
+
+**원인**: 해당 앱에 **Flight Offers Search** API 제품이 연결되어 있지 않음. (토큰·Flight Inspiration Search는 가능해도 Flight Offers Search는 별도 API 제품)
+
+**대응 방법**:
+1. **Trip Agent 자동 대체**: 이 오류 발생 시 **Flight Inspiration Search**로 자동 전환합니다. 목적지·가격 정보만 표시되고 편명은 없습니다. (Mock보다 실제 API 데이터 사용)
+2. **새 앱 생성**: My Self-Service → Create new app → 새 앱으로 API Key/Secret 발급. 일부 앱은 Flight Offers Search가 기본 포함될 수 있음
+3. **기존 앱 설정 확인**: 해당 앱 → Settings / API Products / Subscriptions 등에서 Flight Offers Search 추가·구독 여부 확인 (UI는 버전에 따라 상이할 수 있음)
+4. **Amadeus 지원 문의**: [developers.amadeus.com/support](https://developers.amadeus.com/support) — "Add Flight Offers Search API to my app" 요청
 
 ---
 

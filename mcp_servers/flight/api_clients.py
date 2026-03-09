@@ -50,6 +50,58 @@ def _amadeus_base() -> str:
     return (os.environ.get("AMADEUS_BASE_URL") or "https://test.api.amadeus.com").rstrip("/")
 
 
+async def _amadeus_flight_inspiration(
+    client: httpx.AsyncClient,
+    base: str,
+    token: str,
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+) -> tuple[list[dict], list[str]]:
+    """Flight Offers Search 권한 없을 때 Flight Inspiration Search로 대체. (출발지→목적지 경로·가격만)"""
+    o, d = origin.upper()[:3], destination.upper()[:3]
+    resp = await client.get(
+        f"{base}/v1/shopping/flight-destinations",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"origin": o, "departureDate": start_date, "maxPrice": 3000},
+    )
+    if resp.status_code != 200:
+        return [], [f"Flight Inspiration 검색 실패: {resp.status_code}"]
+    try:
+        data = resp.json()
+    except Exception:
+        return [], ["Flight Inspiration 응답 파싱 실패"]
+    items = data.get("data", [])
+    filtered = [x for x in items if x.get("destination", "").upper() == d]
+    if not filtered:
+        filtered = items[:8]
+    flights = []
+    for i, x in enumerate(filtered[:10]):
+        dest = x.get("destination", "")
+        dep_d = x.get("departureDate", start_date)
+        ret_d = x.get("returnDate", end_date)
+        price_eur = float(x.get("price", {}).get("total", 0) or 0)
+        price_krw = int(price_eur * 1450)
+        flights.append(
+            _normalize_flight(
+                airline="(Inspiration)",
+                flight_number="",
+                departure=f"{dep_d}T00:00",
+                arrival=f"{ret_d}T00:00",
+                origin=o,
+                destination=dest,
+                price_krw=price_krw if price_krw else None,
+                miles_required=None,
+                duration_hours=None,
+                flight_id=f"insp_{o}_{dest}_{i}",
+            )
+        )
+    record_amadeus()
+    warn = "Flight Offers Search 권한 없음. Flight Inspiration Search(목적지·가격)로 대체합니다. 편명 정보는 없습니다."
+    return flights, [warn]
+
+
 async def search_amadeus(
     origin: str,
     destination: str,
@@ -112,9 +164,23 @@ async def search_amadeus(
                 },
             )
             if resp.status_code == 200:
-                break
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {}
+                errcode = body.get("fault", {}).get("detail", {}).get("errorcode")
+                if errcode == "keymanagement.service.InvalidAPICallAsNoApiProductMatchFound":
+                    flights_insp, warn_insp = await _amadeus_flight_inspiration(
+                        client, try_base, token, origin, destination, start_date, end_date,
+                    )
+                    if flights_insp:
+                        return flights_insp, warnings + warn_insp
+                    last_error = "Flight Offers Search API 권한 없음. FLIGHT_API_SETUP.md §1.6 참조."
+                    continue
+                if body.get("data"):
+                    break
             last_error = f"Amadeus 검색 실패: {resp.status_code}"
-            if resp.status_code != 401:
+            if resp.status_code not in (401, 200):
                 break
         else:
             msg = last_error or "Amadeus 오류"
