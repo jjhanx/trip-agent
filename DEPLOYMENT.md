@@ -618,6 +618,7 @@ docker compose logs itinerary
 
 | 에러 | 원인 | 해결 |
 |------|------|------|
+| `extra_forbidden: amadeus_client_id` | .env에 제거된 Amadeus 변수 남음 | `git pull` 후 재빌드 (Settings가 extra 무시). 또는 .env에서 AMADEUS_* 삭제 |
 | `ModuleNotFoundError: a2a.server.events.event_factory` | a2a-sdk 0.3.x에서 모듈 제거 | `git pull` 후 `docker compose up -d --build` |
 | `ImportError: MessagePart from a2a.types` | API 변경 (MessagePart→Part/TextPart) | 위와 동일 |
 | `ValidationError: AgentSkill... description Field required` | AgentSkill에 `description` 필수 | 위와 동일 |
