@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     rental_car_mcp_url: str = "http://localhost:8003/mcp"
     transit_mcp_url: str = "http://localhost:8004/mcp"
 
-    # Flight API - Duffel (대한항공·아시아나 포함 300+ 항공사, Live 토큰 필요)
-    duffel_access_token: str = ""
+    # Flight API - SerpApi (Google Flights 연동)
+    serpapi_api_key: str = ""
 
     # A2A agent URLs (for Session Agent to call other agents)
     flight_agent_url: str = "http://localhost:9001"

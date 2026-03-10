@@ -86,7 +86,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             else:
                 flights, warnings = multi_source_search_flights(
@@ -97,7 +97,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             if travel.use_miles:
                 flights.sort(key=lambda x: x.get("miles_required") or 999999)

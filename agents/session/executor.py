@@ -202,7 +202,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             else:
                 destination = travel.destination_airport_code or travel.destination
@@ -214,7 +214,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             if not travel.destination_airports:
                 if travel.use_miles:
