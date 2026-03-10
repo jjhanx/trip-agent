@@ -86,9 +86,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    kiwi_api_key=s.kiwi_api_key,
-                    rapidapi_key=s.rapidapi_key,
-                    flightapi_key=s.flightapi_key,
+                    duffel_access_token=s.duffel_access_token,
                 )
             else:
                 flights, warnings = multi_source_search_flights(
@@ -99,9 +97,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    kiwi_api_key=s.kiwi_api_key,
-                    rapidapi_key=s.rapidapi_key,
-                    flightapi_key=s.flightapi_key,
+                    duffel_access_token=s.duffel_access_token,
                 )
             if travel.use_miles:
                 flights.sort(key=lambda x: x.get("miles_required") or 999999)

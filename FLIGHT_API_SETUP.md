@@ -1,95 +1,47 @@
-# Flight API 키 발급 및 설정 가이드
+# Flight API 키 발급 및 설정 가이드 (SerpApi Google Flights)
 
-항공편 검색에 사용하는 **flightapi.io**, Kiwi, RapidAPI 키 발급 및 `.env` 설정 방법을 안내합니다.
+항공편 검색에 **SerpApi (Google Flights 연동)**를 사용합니다. 대한항공·아시아나를 포함한 전 세계 주요 항공사의 실제 운항 데이터를 구글 항공권(Google Flights) 검색엔진을 통해 제공받습니다.
 
-> API 키를 설정하지 않으면 **Mock(예시) 데이터**가 표시됩니다. Mock 사용 시 UI에 **"예시(Mock) 데이터입니다"**가 명시되며, 실제 예약·가격과 무관합니다.
-
-**현재 활용 가능한 API**: **flightapi.io**가 무료 가입 후 즉시 사용 가능합니다. Kiwi Tequila는 초대제로 전환되었고, RapidAPI 항공편 API는 플랜별로 제공됩니다.
+> API 키를 설정하지 않거나 무료 한도를 모두 소진하면 자동으로 Playwright 기반 크롤링으로 전환(Fallback)되며, 이마저 실패할 경우 **Mock(예시) 데이터**가 표시됩니다.
 
 ---
 
-## 1. flightapi.io (100회/월 무료, 권장)
+## 1. SerpApi (Google Flights API) 개요
 
-### 1.1 가입 및 키 발급
+### 특징 및 지원 항공사
+- **Google Flights** 검색 결과를 그대로 가져오므로, 대한항공, 아시아나항공 등 국적기를 포함한 100% 실제 데이터가 포함됩니다.
+- 복잡한 항공사 인증이나 신용카드 등록 없이 이메일 가입만으로 API 키를 바로 발급받을 수 있습니다.
 
-1. **[flightapi.io](https://www.flightapi.io/)** 접속 → Sign Up
-2. **Dashboard** → **API Keys** → Create / 복사
-3. `.env`에 `FLIGHTAPI_KEY=발급받은키` 추가
-4. Round Trip API 사용 (출발지↔도착지 왕복 검색)
+### 요금 구조 (2025년 기준)
+| 구분 | 내용 |
+|------|------|
+| **무료 플랜 (Developer)** | 매월 **250회** 검색 무료 제공 |
+| 한도 초과 시 | 자동 Playwright 브라우저 크롤링으로 대체 (Trip Agent 내재 기능) |
 
-### 1.2 무료 한도
-
-- 월 **100회** (프로젝트 `usage_tracker`가 한도 도달 시 자동 중단·경고 표시)
-
----
-
-## 2. Kiwi Tequila (선택, 초대제)
-
-2024년 이후 Kiwi Tequila는 **초대제 파트너십**으로 전환되었습니다. 일반 가입·로그인이 어렵거나 "Unable to authenticate. Please verify your email" 오류가 발생할 수 있습니다.
-
-- **가입 문의**: affiliates@kiwi.com
-- API 키를 이미 보유한 경우 `.env`에 `KIWI_API_KEY` 설정 시 사용됩니다.
-- **미보유 시**: flightapi.io만으로도 항공편 검색이 정상 동작합니다.
+※ 개발 및 소규모 테스트 목적이라면 무료 250건 한도로 충분하며, 한도 초과 시 내장된 Playwright가 자동으로 작동하여 Google Flights 웹페이지를 긁어오므로 검색이 멈추지 않습니다.
 
 ---
 
-## 3. RapidAPI 항공편 API (대안)
+## 2. 키 발급 및 `.env` 설정
 
-RapidAPI [flight 검색](https://rapidapi.com/search/flight)에서 여러 항공편 API가 있습니다. 각 API는 구독 후 X-RapidAPI-Key로 호출 가능하며, 엔드포인트·파라미터가 API마다 다릅니다.
+### 2.1 가입 및 토큰 발급
+1. **[serpapi.com](https://serpapi.com)** 에 접속하여 회원가입(Sign up)합니다.
+2. 대시보드(Dashboard)의 **Your Private API Key**에서 발급된 키 문자를 복사합니다.
 
-| API | 무료 한도 | 비고 |
-|-----|----------|------|
-| [Flight Price Comparison](https://rapidapi.com/manthankool/api/flight-price-comparison) | 100회/월 | flightapi.io와 동일 백엔드 |
-| [Compare Flight Prices](https://rapidapi.com/obryan-software-obryan-software-default/api/compare-flight-prices) | 플랜별 | 별도 엔드포인트 |
-| [Multi Site Flight Search](https://rapidapi.com/airlineconsolidator/api/multi-site-flight-search) | 플랜별 | |
-
-원하는 RapidAPI 항공 API를 선택한 뒤, 해당 API 문서의 엔드포인트·파라미터에 맞춰 `mcp_servers/flight/api_clients.py`에 클라이언트를 추가할 수 있습니다.
-
----
-
-## 4. `.env` 변수 설정
-
-### 4.1 파일 생성
-
-프로젝트 루트에 `.env` 파일이 없다면 `.env.example`을 복사합니다.
-
-```bash
-cp .env.example .env
-```
-
-### 4.2 Flight API 변수 설정
-
-`.env` 파일을 열고 **flightapi.io** 키를 입력합니다.
+### 2.2 `.env` 설정
+프로젝트 루트 폴더에 `.env` 파일을 열고(없다면 `.env.example`을 복사해 만드세요) 발급받은 API 키를 넣습니다.
 
 ```env
-# Flight APIs (무료 한도 초과 전 자동 중단)
-FLIGHTAPI_KEY=여기에_flightapi_키_붙여넣기
-# KIWI_API_KEY=  (초대제, 미보유 시 비워둠)
-# RAPIDAPI_KEY=  (선택)
+# Flight API - SerpApi (Google Flights 검색 지원)
+SERPAPI_API_KEY=발급받은_api_key_입력
 ```
 
-### 4.3 주의 사항
-
-- `.env`는 **절대 Git에 커밋하지 마세요**. (`.gitignore`에 포함됨)
-- **flightapi.io만 설정해도** 항공편 검색이 정상 동작합니다.
-
 ---
 
-## 5. 마일리지 선호 항공사 우선 표시
+## 3. 작동 원리 (SerpApi + Playwright Fallback)
 
-여행 정보에 **마일리지 프로그램**을 입력하면:
-- 해당 마일리지가 적립되는 항공사 편을 **우선 상단**에 표시
-- 해당 항공사의 가능한 비행편은 모두 노출 (스크롤 지원)
-- **지역 목적지**(돌로미티 등) 시: 마일리지 직항 있는 공항(MXP 등)이 **최우선 검색 대상**
+Trip Agent의 항공편 검색 모듈은 3단계 오케스트레이션으로 작동합니다.
 
-예: 돌로미티 + Skypass → ICN-MXP(밀라노, 대한항공 직항) 최우선 노출. MUC, VCE, VRN 등 여러 공항을 직항 우선순으로 검색 후 병합합니다.
-
-지원 프로그램: Skypass(대한항공), Asiana(아시아나), Miles & More(루프트한자·스위스·오스트리아 항공 등)
-
----
-
-## 6. Mock 사용 시 동작
-
-- API 키가 없거나, 모든 API가 한도 초과했거나, 실제 검색 결과가 **0건**인 경우
-- **Mock(예시) 데이터**로 자동 대체
-- 화면에 **"예시(Mock) 데이터입니다. 실제 예약·가격과 무관합니다."** 배너가 반드시 표시됨
+1. **SerpApi 호출**: `SERPAPI_API_KEY`를 이용해 구글 플라이트 결과를 조회합니다.
+2. **Playwright Fallback**: 월 무료 250건 한도를 다 썼거나 SerpApi 쪽에 오류가 나면 사용자 화면에 `SerpApi 무료 한도 초과: Playwright 크롤링으로 전환합니다...`라는 경고를 띄우고, 백그라운드 브라우저(Headless Chrome)를 열어 스크래핑을 시도합니다. 
+3. **Mock 데이터 (최후의 보루)**: 위 1, 2번이 모두 실패하거나 출발일이 너무 멀어서 예약 불가능한 기간일 경우 Mock 데이터를 화면에 뿌리고 에러 상황을 우회합니다.

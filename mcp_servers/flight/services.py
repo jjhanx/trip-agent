@@ -1,13 +1,9 @@
-"""Flight search logic - multi-API (flightapi.io, Kiwi, RapidAPI) + mock fallback."""
+"""Flight search logic - SerpApi (Google Flights) API + Playwright Fallback."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from mcp_servers.flight.api_clients import (
-    search_flightapi,
-    search_kiwi,
-    search_rapidapi_skyscanner,
-)
+from mcp_servers.flight.api_clients import search_serpapi_flights, search_playwright_flights
 
 
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
@@ -35,7 +31,7 @@ def _is_preferred_airline(flight: dict, preferred: frozenset[str]) -> bool:
     )  # "koreanair" in "koreanairlines"
 
 
-async def _search_all_apis(
+async def _search_orchestrator(
     origin: str,
     destination: str,
     start_date: str,
@@ -45,55 +41,54 @@ async def _search_all_apis(
     mileage_program: str | None,
     config: dict,
 ) -> tuple[list[dict], list[str], bool]:
-    """병렬로 Kiwi, RapidAPI, flightapi.io 호출. 한도 초과 시 해당 API는 건너뜀.
-    Returns (flights, warnings, api_responded_ok).
-    api_responded_ok: 최소 1개 API가 예외 없이 정상 응답했는지 (0건이어도 OK)."""
-    warnings: list[str] = []
-    all_flights: list[dict] = []
-    tasks = []
+    """SerpApi -> Playwright -> Mock 오케스트레이션."""
+    api_key = config.get("serpapi_api_key", "")
+    all_warnings = []
+    flights = []
+    api_responded_ok = False
 
-    if config.get("kiwi_api_key"):
-        tasks.append(
-            search_kiwi(origin, destination, start_date, end_date, config["kiwi_api_key"])
-        )
-    if config.get("rapidapi_key"):
-        tasks.append(
-            search_rapidapi_skyscanner(
-                origin, destination, start_date, end_date, config["rapidapi_key"]
+    if api_key:
+        try:
+            flights, w = await search_serpapi_flights(
+                origin, destination, start_date, end_date, api_key, seat_class
             )
-        )
-    if config.get("flightapi_key"):
-        tasks.append(
-            search_flightapi(
-                origin, destination, start_date, end_date,
-                config["flightapi_key"], seat_class,
+            all_warnings.extend(w)
+            # SerpApi 한도 초과 등의 이유로 fallback 메시지가 있다면 Playwright 실행
+            needs_fallback = any("Playwright 크롤링으로 전환합니다" in x for x in w)
+            if not needs_fallback and flights:
+                api_responded_ok = True
+        except Exception as e:
+            all_warnings.append(f"SerpApi API 예외 오류: {e}")
+    else:
+        all_warnings.append("SERPAPI_API_KEY가 설정되지 않았습니다.")
+        
+    needs_fallback = any("Playwright 크롤링으로 전환" in x for x in all_warnings) or (not flights and api_key)
+
+    # 2단계: Playwright Fallback
+    if needs_fallback and not flights:
+        try:
+            play_flights, play_w = await search_playwright_flights(
+                origin, destination, start_date, end_date, seat_class
             )
-        )
+            all_warnings.extend(play_w)
+            if play_flights:
+                flights = play_flights
+                api_responded_ok = True # 크롤링 성공을 API 성공으로 취급
+        except Exception as e:
+            all_warnings.append(f"Playwright Fallback 최종 실패: {e}")
 
-    if not tasks:
-        return [], ["API 키가 설정되지 않았습니다. .env 참고."], False
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    api_responded_ok = any(not isinstance(r, Exception) for r in results)
-
-    for i, r in enumerate(results):
-        if isinstance(r, Exception):
-            warnings.append(f"API 오류: {r}")
-            continue
-        flights, w = r
-        warnings.extend(w)
-        all_flights.extend(flights)
+    all_flights = flights
 
     # 중복 제거 (airline+flight_number+departure 기준)
-    seen = set()
-    unique = []
+    seen: set = set()
+    unique: list = []
     for f in all_flights:
         key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
         if key not in seen:
             seen.add(key)
             unique.append(f)
 
-    # 마일리지 선호 시: API 결과에 선호 항공사가 0건이면 mock에서 해당 항공사만 보충
+    # 마일리지 선호 시: API/크롤링 결과에 선호 항공사가 0건이면 mock에서 해당 항공사만 보충
     preferred_airlines = _get_preferred_airlines(mileage_program)
     if preferred_airlines:
         preferred_in_results = [f for f in unique if _is_preferred_airline(f, preferred_airlines)]
@@ -107,8 +102,8 @@ async def _search_all_apis(
                 f["source"] = "mock_reference"  # API에 없어 참고용 추가
             if mock_preferred:
                 unique = mock_preferred + unique
-                warnings.append(
-                    "선호 항공사 일정이 API에 없어 참고용 예시를 추가했습니다. 실제 예약·가격은 항공사 사이트에서 확인하세요."
+                all_warnings.append(
+                    "선호 항공사 일정이 검색되지 않아 참고용 예시(Mock)를 먼저 추가했습니다. 실제 예약·가격은 항공사 사이트에서 확인하세요."
                 )
 
     # 마일리지 선호 항공사 우선: 선호 항공사 전편 먼저, 그다음 나머지. 각 그룹 내 가격순
@@ -129,7 +124,7 @@ async def _search_all_apis(
         else:
             unique.sort(key=lambda x: x.get("price_krw") or 999999)
 
-    return unique, warnings, api_responded_ok
+    return unique, all_warnings, api_responded_ok
 
 
 def multi_source_search_flights(
@@ -140,24 +135,16 @@ def multi_source_search_flights(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
-    kiwi_api_key: str = "",
-    rapidapi_key: str = "",
-    flightapi_key: str = "",
+    serpapi_api_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
-    flightapi.io + Kiwi + RapidAPI 연동 검색.
-    무료 한도 초과 전에 중단, 경고 반환.
-    mileage_program이 있으면 해당 마일리지 적립 항공사 편을 우선 노출.
+    SerpApi 검색 및 Playwright Fallback.
     Returns (flights, warnings)
     """
-    config = {
-        "kiwi_api_key": kiwi_api_key,
-        "rapidapi_key": rapidapi_key,
-        "flightapi_key": flightapi_key,
-    }
+    config = {"serpapi_api_key": serpapi_api_key}
 
     async def _run():
-        return await _search_all_apis(
+        return await _search_orchestrator(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program, config,
         )
@@ -193,7 +180,7 @@ def multi_source_search_flights(
             preferred.sort(key=price_key)
             others.sort(key=price_key)
             flights = preferred + others
-        # API 정상 연결됐으나 0건 → 예약 기간 밖 가능성. 그 외(인증/검색 실패 등)는 일반 메시지
+
         api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
         has_api_error = any(
             any(kw in w for kw in api_error_keywords)
@@ -206,7 +193,8 @@ def multi_source_search_flights(
                 "예시(Mock) 데이터로 보여드립니다."
             )
         else:
-            warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
+            warnings.append("실제 데이터 가져오기에 모두 실패했습니다. Mock 데이터로 대체합니다.")
+            
     return flights, warnings
 
 
@@ -218,13 +206,10 @@ def multi_source_search_flights_multi_dest(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
-    kiwi_api_key: str = "",
-    rapidapi_key: str = "",
-    flightapi_key: str = "",
+    serpapi_api_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
-    정렬: 1) 마일리지 직항 공항·선호 항공사 2) 가격순
     """
     airport_labels = {"MXP": "밀라노", "MUC": "뮌헨", "VCE": "베니스", "VRN": "베로나", "INN": "인스부르크", "TSF": "베니스", "BZO": "볼차노"}
     all_flights: list[dict] = []
@@ -236,7 +221,7 @@ def multi_source_search_flights_multi_dest(
         flights, warnings = multi_source_search_flights(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
-            kiwi_api_key=kiwi_api_key, rapidapi_key=rapidapi_key, flightapi_key=flightapi_key,
+            serpapi_api_key=serpapi_api_key,
         )
         label = airport_labels.get(dest, dest)
         for f in flights:

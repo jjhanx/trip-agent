@@ -1,4 +1,4 @@
-"""Flight MCP Server - 항공편 검색 Tools (flightapi.io, Kiwi, RapidAPI)."""
+"""Flight MCP Server - 항공편 검색 Tools (SerpApi Google Flights + Playwright)."""
 
 import json
 import os
@@ -15,9 +15,7 @@ mcp = FastMCP("flight-search", port=8001)
 
 def _get_config():
     return {
-        "kiwi_api_key": os.environ.get("KIWI_API_KEY", ""),
-        "rapidapi_key": os.environ.get("RAPIDAPI_KEY", ""),
-        "flightapi_key": os.environ.get("FLIGHTAPI_KEY", ""),
+        "serpapi_api_key": os.environ.get("SERPAPI_API_KEY", ""),
     }
 
 
@@ -33,7 +31,7 @@ def search_flights(
     destination_airports: list[str] | None = None,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    flightapi.io, Kiwi, RapidAPI 사용. mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
+    SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
@@ -58,17 +56,13 @@ def search_flights(
             seat_class,
             use_miles,
             mileage_program=mileage_program or None,
-            kiwi_api_key=cfg["kiwi_api_key"],
-            rapidapi_key=cfg["rapidapi_key"],
-            flightapi_key=cfg["flightapi_key"],
+            serpapi_api_key=cfg["serpapi_api_key"],
         )
     else:
         flights, warnings = multi_source_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
-            kiwi_api_key=cfg["kiwi_api_key"],
-            rapidapi_key=cfg["rapidapi_key"],
-            flightapi_key=cfg["flightapi_key"],
+            serpapi_api_key=cfg["serpapi_api_key"],
         )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 

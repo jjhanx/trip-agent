@@ -202,9 +202,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    kiwi_api_key=s.kiwi_api_key,
-                    rapidapi_key=s.rapidapi_key,
-                    flightapi_key=s.flightapi_key,
+                    duffel_access_token=s.duffel_access_token,
                 )
             else:
                 destination = travel.destination_airport_code or travel.destination
@@ -216,9 +214,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    kiwi_api_key=s.kiwi_api_key,
-                    rapidapi_key=s.rapidapi_key,
-                    flightapi_key=s.flightapi_key,
+                    duffel_access_token=s.duffel_access_token,
                 )
             if not travel.destination_airports:
                 if travel.use_miles:
