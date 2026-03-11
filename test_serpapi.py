@@ -5,11 +5,9 @@ import os
 from dotenv import load_dotenv
 
 async def main():
-    load_dotenv()
-    api_key = os.getenv("SERPAPI_API_KEY")
-    # Docker passenv might not be loaded by dotenv properly if it's fed via compose
-    if not api_key:
-        api_key = os.environ.get("SERPAPI_API_KEY")
+    from config import get_settings
+    settings = get_settings()
+    api_key = settings.serpapi_api_key
 
     if not api_key:
         print("NO API KEY")
