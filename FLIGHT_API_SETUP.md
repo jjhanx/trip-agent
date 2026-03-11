@@ -38,10 +38,14 @@ SERPAPI_API_KEY=발급받은_api_key_입력
 
 ---
 
-## 3. 작동 원리 (SerpApi + Playwright Fallback)
+## 3. 작동 원리 (SerpApi + Play로켓 Fallback)
 
 Trip Agent의 항공편 검색 모듈은 3단계 오케스트레이션으로 작동합니다.
 
 1. **SerpApi 호출**: `SERPAPI_API_KEY`를 이용해 구글 플라이트 결과를 조회합니다.
+   - **왕복(Round-trip)**: `type=1`
+   - **편도(One-way)**: `type=2` (귀환일 검색 제외)
+   - **다구간(Multi-city)**: `type=3` (최대 20개 구간의 출도착지/날짜 파라미터 배열 조합)
+   - 디버깅을 위해 `mcp_servers/flight/api_clients.py` 파일 내의 `DEBUG_SERPAPI = True` 플래그를 통해 검색 요청/응답 결과를 터미널에서 확인할 수 있습니다.
 2. **Playwright Fallback**: 월 무료 250건 한도를 다 썼거나 SerpApi 쪽에 오류가 나면 사용자 화면에 `SerpApi 무료 한도 초과: Playwright 크롤링으로 전환합니다...`라는 경고를 띄우고, 백그라운드 브라우저(Headless Chrome)를 열어 스크래핑을 시도합니다. 
 3. **Mock 데이터 (최후의 보루)**: 위 1, 2번이 모두 실패하거나 출발일이 너무 멀어서 예약 불가능한 기간일 경우 Mock 데이터를 화면에 뿌리고 에러 상황을 우회합니다.

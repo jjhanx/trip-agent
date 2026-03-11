@@ -51,27 +51,49 @@
       <section id="step-input" class="card">
         <h2>1. 여행 정보 입력</h2>
         <form id="travel-form">
-          <div class="form-row">
-            <label>출발지 <input type="text" name="origin" placeholder="예: ICN, 서울" required></label>
-            <label>목적지 <input type="text" name="destination" placeholder="예: KIX, 오사카" required></label>
-          </div>
-          <div id="selected-airports" class="form-row hidden">
-            <span id="origin-airport-display"></span>
-            <span id="destination-airport-display"></span>
-          </div>
-          <div class="form-row">
-            <label>출발일
-              <div class="date-row">
-                <input type="text" name="start_date" id="start_date_input" placeholder="YYYY-MM-DD" required readonly>
-                <button type="button" id="btn-calendar-start" class="calendar-btn" title="달력">📅</button>
-              </div>
+          <div class="form-row" style="margin-bottom: 1rem;">
+            <label>여정 유형
+              <select name="trip_type" id="trip_type_select">
+                <option value="round_trip">왕복</option>
+                <option value="one_way">편도</option>
+                <option value="multi_city">다구간</option>
+              </select>
             </label>
-            <label>귀환일
-              <div class="date-row">
-                <input type="text" name="end_date" id="end_date_input" placeholder="YYYY-MM-DD" required readonly>
-                <button type="button" id="btn-calendar-end" class="calendar-btn" title="달력">📅</button>
-              </div>
-            </label>
+          </div>
+          
+          <div id="single-trip-fields">
+            <div class="form-row">
+              <label>출발지 <input type="text" name="origin" id="origin_input" placeholder="예: ICN, 서울" required></label>
+              <label>목적지 <input type="text" name="destination" id="destination_input" placeholder="예: KIX, 오사카" required></label>
+            </div>
+            <div id="selected-airports" class="form-row hidden">
+              <span id="origin-airport-display"></span>
+              <span id="destination-airport-display"></span>
+            </div>
+            <div class="form-row">
+              <label>출발일
+                <div class="date-row">
+                  <input type="text" name="start_date" id="start_date_input" placeholder="YYYY-MM-DD" required readonly>
+                  <button type="button" id="btn-calendar-start" class="calendar-btn" title="달력">📅</button>
+                </div>
+              </label>
+              <label id="end-date-label">귀환일
+                <div class="date-row">
+                  <input type="text" name="end_date" id="end_date_input" placeholder="YYYY-MM-DD" required readonly>
+                  <button type="button" id="btn-calendar-end" class="calendar-btn" title="달력">📅</button>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div id="multi-city-fields" class="hidden" style="margin-bottom: 1rem; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">
+            <h4>다구간 여정</h4>
+            <div id="multi-city-legs" style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- JS will populate legs here -->
+            </div>
+            <div style="margin-top: 10px;">
+              <button type="button" id="btn-add-leg" class="secondary" style="font-size: 0.9em;">+ 구간 추가</button>
+            </div>
           </div>
           <div id="calendar-picker" class="calendar-picker hidden">
             <div class="calendar-header">

@@ -56,9 +56,11 @@ async def search_serpapi_flights(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str,
+    end_date: str | None,
     api_key: str,
     seat_class: str = "economy",
+    trip_type: str = "round_trip",
+    multi_cities: list[dict] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi (Google Flights) 검색.
@@ -81,15 +83,39 @@ async def search_serpapi_flights(
 
     params = {
       "engine": "google_flights",
-      "departure_id": origin.upper()[:3],
-      "arrival_id": destination.upper()[:3],
-      "outbound_date": start_date,
-      "return_date": end_date,
       "currency": "KRW",
       "hl": "ko",
       "api_key": api_key,
       "travel_class": travel_class
     }
+    
+    if trip_type == "one_way":
+        params["type"] = "2"
+        params["departure_id"] = origin.upper()[:3]
+        params["arrival_id"] = destination.upper()[:3]
+        params["outbound_date"] = start_date
+    elif trip_type == "multi_city" and multi_cities:
+        params["type"] = "3"
+        import json
+        params["flights"] = json.dumps([
+            {
+                "departure_id": c.get("origin", "").upper()[:3], 
+                "arrival_id": c.get("destination", "").upper()[:3], 
+                "outbound_date": c.get("date", "")
+            }
+            for c in multi_cities
+        ])
+    else: # round_trip
+        params["type"] = "1"
+        params["departure_id"] = origin.upper()[:3]
+        params["arrival_id"] = destination.upper()[:3]
+        params["outbound_date"] = start_date
+        if end_date:
+            params["return_date"] = end_date
+
+    DEBUG_SERPAPI = True # 디버깅 스위치 추가
+    if DEBUG_SERPAPI:
+        print(f"\n[DEBUG] SerpApi Request Params: {json.dumps({k: v for k, v in params.items() if k != 'api_key'}, ensure_ascii=False)}")
 
     loop = asyncio.get_running_loop()
     
@@ -101,6 +127,14 @@ async def search_serpapi_flights(
         results = await loop.run_in_executor(None, _run_search)
     except Exception as e:
         return [], [f"SerpApi 오류: {e}"]
+
+    if DEBUG_SERPAPI:
+        if "error" in results:
+            print(f"[DEBUG] SerpApi Response Error: {results['error']}")
+        else:
+            b_len = len(results.get('best_flights', []))
+            o_len = len(results.get('other_flights', []))
+            print(f"[DEBUG] SerpApi Response: best_flights={b_len}, other_flights={o_len}")
 
     # Rate limit check etc
     if "error" in results:

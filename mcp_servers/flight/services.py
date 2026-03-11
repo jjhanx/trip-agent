@@ -35,7 +35,9 @@ async def _search_orchestrator(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str,
+    end_date: str | None,
+    trip_type: str,
+    multi_cities: list[dict] | None,
     seat_class: str,
     use_miles: bool,
     mileage_program: str | None,
@@ -50,7 +52,8 @@ async def _search_orchestrator(
     if api_key:
         try:
             flights, w = await search_serpapi_flights(
-                origin, destination, start_date, end_date, api_key, seat_class
+                origin, destination, start_date, end_date, api_key, seat_class, 
+                trip_type=trip_type, multi_cities=multi_cities
             )
             all_warnings.extend(w)
             # SerpApi 한도 초과 등의 이유로 fallback 메시지가 있다면 Playwright 실행
@@ -131,7 +134,9 @@ def multi_source_search_flights(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str,
+    end_date: str | None = None,
+    trip_type: str = "round_trip",
+    multi_cities: list[dict] | None = None,
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
@@ -145,7 +150,9 @@ def multi_source_search_flights(
 
     async def _run():
         return await _search_orchestrator(
-            origin, destination, start_date, end_date, seat_class, use_miles,
+            origin, destination, start_date, end_date, 
+            trip_type, multi_cities,
+            seat_class, use_miles,
             mileage_program, config,
         )
 
@@ -165,7 +172,7 @@ def multi_source_search_flights(
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
         flights = mock_search_flights(
-            origin, destination, start_date, end_date, seat_class, use_miles
+            origin, destination, start_date, end_date or "", seat_class, use_miles
         )
         # Mock에도 마일리지 선호 항공사 우선 정렬 적용
         preferred_airlines = _get_preferred_airlines(mileage_program)
@@ -202,7 +209,8 @@ def multi_source_search_flights_multi_dest(
     origin: str,
     destination_airports: list[str],
     start_date: str,
-    end_date: str,
+    end_date: str | None = None,
+    trip_type: str = "round_trip",
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
@@ -219,7 +227,9 @@ def multi_source_search_flights_multi_dest(
 
     for i, dest in enumerate(destination_airports):
         flights, warnings = multi_source_search_flights(
-            origin, dest, start_date, end_date, seat_class, use_miles,
+            origin, dest, start_date, end_date, 
+            trip_type=trip_type, multi_cities=None,
+            seat_class=seat_class, use_miles=use_miles,
             mileage_program=mileage_program,
             serpapi_api_key=serpapi_api_key,
         )

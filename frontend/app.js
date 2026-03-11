@@ -12,6 +12,7 @@ function loadFormFromStorage() {
     if (!form) return;
     const set = (name, v) => { const el = form[name]; if (el && v != null) el.value = String(v); };
     const setCheck = (name, v) => { const el = form[name]; if (el) el.checked = !!v; };
+    if (data.trip_type) set('trip_type', data.trip_type);
     if (data.origin) set('origin', data.origin);
     if (data.destination) set('destination', data.destination);
     if (data.start_date) set('start_date', data.start_date);
@@ -32,6 +33,10 @@ function loadFormFromStorage() {
     setCheck('use_miles', data.use_miles);
     if (data.origin_airport_code) state.origin_airport_code = data.origin_airport_code;
     if (data.destination_airport_code) state.destination_airport_code = data.destination_airport_code;
+
+    if (data.multi_cities) {
+      state.multi_cities = data.multi_cities;
+    }
   } catch (_) { /* ignore */ }
 }
 
@@ -39,7 +44,9 @@ function saveFormToStorage() {
   try {
     const form = $('#travel-form');
     if (!form) return;
+    updateStateFromMultiCityDOM();
     const data = {
+      trip_type: form.trip_type?.value || 'round_trip',
       origin: form.origin?.value,
       destination: form.destination?.value,
       start_date: form.start_date?.value,
@@ -60,12 +67,15 @@ function saveFormToStorage() {
       use_miles: form.use_miles?.checked,
       origin_airport_code: state.origin_airport_code,
       destination_airport_code: state.destination_airport_code,
+      multi_cities: state.multi_cities,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (_) { /* ignore */ }
 }
 let state = {
   travelInput: null,
+  trip_type: 'round_trip',
+  multi_cities: [],
   origin_airport_code: null,
   destination_airport_code: null,
   flights: [],
@@ -172,11 +182,20 @@ function buildTravelInput() {
   const male = parseInt(form.travelers_male?.value, 10) || 0;
   const female = parseInt(form.travelers_female?.value, 10) || 0;
   const children = parseInt(form.travelers_children?.value, 10) || 0;
+  const trip_type = form.trip_type?.value || 'round_trip';
+  let multi_cities = [];
+  if (trip_type === 'multi_city') {
+    updateStateFromMultiCityDOM();
+    multi_cities = state.multi_cities;
+  }
+
   const input = {
-    origin: form.origin.value,
-    destination: form.destination.value,
-    start_date: form.start_date.value,
-    end_date: form.end_date.value,
+    trip_type: trip_type,
+    origin: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].origin : form.origin.value,
+    destination: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[multi_cities.length - 1].destination : form.destination.value,
+    start_date: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].date : form.start_date.value,
+    end_date: trip_type === 'round_trip' ? form.end_date.value : null,
+    multi_cities: trip_type === 'multi_city' ? multi_cities : null,
     date_flexibility_days: isNaN(flex) || flex <= 0 ? null : flex,
     local_transport: form.local_transport.value,
     accommodation_type: p1,
@@ -210,12 +229,26 @@ function buildTravelInput() {
 }
 
 function needOriginAirport() {
-  const origin = $('#travel-form').origin?.value?.trim() || '';
+  const form = $('#travel-form');
+  const type = form.trip_type?.value;
+  let origin = '';
+  if (type === 'multi_city' && state.multi_cities && state.multi_cities.length > 0) {
+    origin = state.multi_cities[0].origin.trim();
+  } else {
+    origin = form.origin?.value?.trim() || '';
+  }
   return origin && !isAirportCode(origin) && getAirportsForCity(origin);
 }
 
 function needDestAirport() {
-  const dest = $('#travel-form').destination?.value?.trim() || '';
+  const form = $('#travel-form');
+  const type = form.trip_type?.value;
+  let dest = '';
+  if (type === 'multi_city' && state.multi_cities && state.multi_cities.length > 0) {
+    dest = state.multi_cities[state.multi_cities.length - 1].destination.trim();
+  } else {
+    dest = form.destination?.value?.trim() || '';
+  }
   return dest && !isAirportCode(dest) && getAirportsForCity(dest);
 }
 
@@ -527,18 +560,27 @@ function renderCalendar() {
 
   const startInput = $('#start_date_input')?.value;
   const endInput = $('#end_date_input')?.value;
-  const selectedStart = startInput ? new Date(startInput + 'T12:00:00') : null;
-  const selectedEnd = endInput ? new Date(endInput + 'T12:00:00') : null;
+  let selectedStart = null;
+  let selectedEnd = null;
+
+  if (calendarTarget && calendarTarget.startsWith('multi_')) {
+    const idx = parseInt(calendarTarget.split('_')[1], 10);
+    const val = state.multi_cities[idx]?.date;
+    selectedStart = val ? new Date(val + 'T12:00:00') : null;
+  } else {
+    selectedStart = startInput ? new Date(startInput + 'T12:00:00') : null;
+    selectedEnd = endInput ? new Date(endInput + 'T12:00:00') : null;
+  }
 
   let html = '';
   for (let i = 0; i < startDay; i++) {
     const d = new Date(year, month, -startDay + i + 1);
-    const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     html += `<span class="other-month" data-date="${ymd}">${d.getDate()}</span>`;
   }
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month, d);
-    const ymd = `${year}-${String(month + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const ymd = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     let cls = '';
     if (selectedStart && date.getTime() === selectedStart.getTime()) cls = 'selected';
     if (selectedEnd && date.getTime() === selectedEnd.getTime()) cls = 'selected';
@@ -548,7 +590,7 @@ function renderCalendar() {
   const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
   for (let i = 0; i < remaining; i++) {
     const nextDate = new Date(year, month + 1, i + 1);
-    const ymd = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}-${String(nextDate.getDate()).padStart(2,'0')}`;
+    const ymd = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
     html += `<span class="other-month" data-date="${ymd}">${nextDate.getDate()}</span>`;
   }
 
@@ -564,7 +606,11 @@ function renderCalendar() {
     }
     span.addEventListener('click', () => {
       if (span.classList.contains('disabled')) return;
-      if (calendarTarget === 'start') {
+      if (calendarTarget && calendarTarget.startsWith('multi_')) {
+        const idx = parseInt(calendarTarget.split('_')[1], 10);
+        state.multi_cities[idx].date = ymd;
+        renderMultiCityLegs();
+      } else if (calendarTarget === 'start') {
         $('#start_date_input').value = ymd;
         if (endVal && ymd > endVal) $('#end_date_input').value = '';
       } else if (calendarTarget === 'end') {
@@ -581,11 +627,17 @@ function renderCalendar() {
 
 function openCalendar(target) {
   calendarTarget = target;
-  const input = target === 'start' ? $('#start_date_input') : $('#end_date_input');
-  let val = input?.value;
-  if (target === 'end' && !val) {
-    const startVal = $('#start_date_input')?.value;
-    if (startVal) val = startVal;
+  let val = '';
+  if (target.startsWith('multi_')) {
+    const idx = parseInt(target.split('_')[1], 10);
+    val = state.multi_cities[idx]?.date;
+  } else {
+    const input = target === 'start' ? $('#start_date_input') : $('#end_date_input');
+    val = input?.value;
+    if (target === 'end' && !val) {
+      const startVal = $('#start_date_input')?.value;
+      if (startVal) val = startVal;
+    }
   }
   if (val) {
     const [y, m] = val.split('-').map(Number);
@@ -600,6 +652,7 @@ function openCalendar(target) {
 function initStepIndicator() {
   show('step-input');
   loadFormFromStorage();
+  initTripTypeUI();
 }
 
 if (document.readyState === 'loading') {
@@ -607,6 +660,113 @@ if (document.readyState === 'loading') {
 } else {
   initStepIndicator();
 }
+
+function initTripTypeUI() {
+  const select = $('#trip_type_select');
+  if (!select) return;
+  const val = select.value;
+  const single = $('#single-trip-fields');
+  const multi = $('#multi-city-fields');
+  const endDateLabel = $('#end-date-label');
+
+  if (val === 'multi_city') {
+    single.classList.add('hidden');
+    multi.classList.remove('hidden');
+    if (state.multi_cities.length === 0) {
+      state.multi_cities = [
+        { origin: '', destination: '', date: '' },
+        { origin: '', destination: '', date: '' }
+      ];
+    }
+    renderMultiCityLegs();
+  } else {
+    single.classList.remove('hidden');
+    multi.classList.add('hidden');
+    if (val === 'one_way') {
+      endDateLabel.style.visibility = 'hidden';
+      $('#end_date_input').required = false;
+    } else {
+      endDateLabel.style.visibility = 'visible';
+      $('#end_date_input').required = true;
+    }
+  }
+}
+
+$('#trip_type_select')?.addEventListener('change', () => {
+  initTripTypeUI();
+  saveFormToStorage();
+});
+
+function renderMultiCityLegs() {
+  const container = $('#multi-city-legs');
+  if (!container) return;
+
+  container.innerHTML = state.multi_cities.map((leg, i) => `
+    <div class="form-row multi-city-leg" data-idx="${i}" style="align-items: center; background: #fafafa; padding: 10px; border-radius: 4px;">
+      <span style="font-weight: bold; margin-right: 10px;">${i + 1}</span>
+      <label>출발 <input type="text" class="mc-origin" value="${leg.origin}" placeholder="예: ICN" required></label>
+      <label>도착 <input type="text" class="mc-dest" value="${leg.destination}" placeholder="예: NRT" required></label>
+      <label>날짜 
+        <div class="date-row">
+          <input type="text" class="mc-date" value="${leg.date}" placeholder="YYYY-MM-DD" required readonly>
+          <button type="button" class="calendar-btn mc-cal" data-idx="${i}" title="달력">📅</button>
+        </div>
+      </label>
+      ${state.multi_cities.length > 2 ? `<button type="button" class="secondary mc-remove" data-idx="${i}" style="margin-left: 10px;">삭제</button>` : ''}
+    </div>
+  `).join('');
+
+  $$('.mc-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      updateStateFromMultiCityDOM();
+      state.multi_cities.splice(idx, 1);
+      renderMultiCityLegs();
+      saveFormToStorage();
+    });
+  });
+
+  $$('.mc-cal').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.currentTarget.dataset.idx);
+      openCalendar('multi_' + idx);
+    });
+  });
+
+  $$('.multi-city-leg input').forEach(input => {
+    input.addEventListener('change', () => {
+      updateStateFromMultiCityDOM();
+      saveFormToStorage();
+    });
+  });
+}
+
+function updateStateFromMultiCityDOM() {
+  const legs = $$('.multi-city-leg');
+  if (!legs.length) return;
+  state.multi_cities = Array.from(legs).map(leg => ({
+    origin: leg.querySelector('.mc-origin').value,
+    destination: leg.querySelector('.mc-dest').value,
+    date: leg.querySelector('.mc-date').value
+  }));
+}
+
+$('#btn-add-leg')?.addEventListener('click', () => {
+  updateStateFromMultiCityDOM();
+  if (state.multi_cities.length >= 20) {
+    alert('다구간은 최대 20개까지만 추가할 수 있습니다.');
+    return;
+  }
+
+  const last = state.multi_cities[state.multi_cities.length - 1];
+  state.multi_cities.push({
+    origin: last ? last.destination : '',
+    destination: '',
+    date: ''
+  });
+  renderMultiCityLegs();
+  saveFormToStorage();
+});
 
 $('#travel-form')?.addEventListener('input', saveFormToStorage);
 $('#travel-form')?.addEventListener('change', saveFormToStorage);

@@ -24,13 +24,15 @@ def search_flights(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str,
+    end_date: str | None = None,
+    trip_type: str = "round_trip",
+    multi_cities: list[dict] | None = None,
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
     destination_airports: list[str] | None = None,
 ) -> str:
-    """Search for flights between origin and destination for the given dates.
+    """Search for flights. Supports round_trip, one_way, and multi_city.
     SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
 
     Args:
@@ -41,26 +43,34 @@ def search_flights(
         seat_class: economy, premium_economy, business, first
         use_miles: Whether to search mileage redemption options
         mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
+        multi_cities: [{origin, destination, date}] - Only used when trip_type="multi_city"
         destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
 
     Returns:
         JSON object with "flights" array and "warnings" array
     """
     cfg = _get_config()
-    if destination_airports and len(destination_airports) > 0:
+    
+    # If standard destination_airports mapping is needed but it's a multi_city trip mapping is complex
+    # Usually multi_city supplies exact airports.
+    
+    if destination_airports and len(destination_airports) > 0 and trip_type != "multi_city":
         flights, warnings = multi_source_search_flights_multi_dest(
             origin,
             destination_airports[:4],
             start_date,
             end_date,
-            seat_class,
-            use_miles,
+            trip_type=trip_type,
+            seat_class=seat_class,
+            use_miles=use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
         )
     else:
         flights, warnings = multi_source_search_flights(
-            origin, destination, start_date, end_date, seat_class, use_miles,
+            origin, destination, start_date, end_date, 
+            trip_type=trip_type, multi_cities=multi_cities,
+            seat_class=seat_class, use_miles=use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
         )
