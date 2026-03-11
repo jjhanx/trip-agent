@@ -244,6 +244,7 @@ def multi_source_search_flights_multi_dest(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    date_flexibility_days: int = 0,
 ) -> tuple[list[dict], list[str]]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
@@ -261,6 +262,7 @@ def multi_source_search_flights_multi_dest(
             seat_class=seat_class, use_miles=use_miles,
             mileage_program=mileage_program,
             serpapi_api_key=serpapi_api_key,
+            date_flexibility_days=date_flexibility_days,
         )
         label = airport_labels.get(dest, dest)
         for f in flights:

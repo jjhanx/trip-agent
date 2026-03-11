@@ -199,10 +199,12 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.destination_airports[:4],
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    travel.seat_class.value,
-                    travel.use_miles,
+                    trip_type=travel.trip_type,
+                    seat_class=travel.seat_class.value,
+                    use_miles=travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=travel.date_flexibility_days or 0,
                 )
             else:
                 destination = travel.destination_airport_code or travel.destination
@@ -211,10 +213,12 @@ class SessionExecutor(BaseAgentExecutor):
                     destination,
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    travel.seat_class.value,
-                    travel.use_miles,
+                    trip_type=travel.trip_type,
+                    seat_class=travel.seat_class.value,
+                    use_miles=travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=travel.date_flexibility_days or 0,
                 )
             if not travel.destination_airports:
                 if travel.use_miles:

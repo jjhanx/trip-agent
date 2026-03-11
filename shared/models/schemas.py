@@ -69,6 +69,9 @@ class TravelInput(BaseModel):
     origin: str = Field(..., description="출발지 (공항 코드 또는 도시/관광지)")
     start_date: date = Field(..., description="출발일")
     end_date: date = Field(..., description="귀환일")
+    trip_type: str = Field(
+        default="round_trip", description="여정 타입 (round_trip, one_way, multi_city)"
+    )
     date_flexibility_days: int | None = Field(
         None, description="날짜 유연성: +/- 허용 일수 (최저가 검색 등)"
     )
