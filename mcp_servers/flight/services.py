@@ -170,6 +170,7 @@ def multi_source_search_flights(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    date_flexibility_days: int = 0,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi 검색 및 Playwright Fallback.
@@ -183,6 +184,7 @@ def multi_source_search_flights(
             trip_type, multi_cities,
             seat_class, use_miles,
             mileage_program, config,
+            date_flexibility_days=date_flexibility_days,
         )
 
     try:
