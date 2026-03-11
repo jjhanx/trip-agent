@@ -5,12 +5,18 @@ import os
 from dotenv import load_dotenv
 
 async def main():
-    from config import get_settings
-    settings = get_settings()
-    api_key = settings.serpapi_api_key
+    api_key = None
+    if os.path.exists(".env"):
+        with open(".env", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("SERPAPI_API_KEY="):
+                    api_key = line.strip().split("=")[1]
+    
+    if not api_key:
+        api_key = os.environ.get("SERPAPI_API_KEY")
 
     if not api_key:
-        print("NO API KEY")
+        print("NO API KEY FOUND IN .env OR ENV.")
         return
         
     params = {
