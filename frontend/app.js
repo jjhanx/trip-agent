@@ -393,8 +393,10 @@ function renderFlights(flights, warnings) {
   const warnEl = $('#flight-warnings');
   const mockEl = $('#flight-mock-notice');
   const warns = warnings || [];
-  const isMock = warns.some(w => /mock/i.test(String(w))) ||
-    (Array.isArray(flights) && flights.some(f => f?.source === 'mock'));
+
+  // 전체가 Mock인지 판별 (참고용 예시가 "추가"된 경우는 전체 Mock이 아님)
+  const isMock = warns.some(w => w.includes('모두 실패하여 예시(Mock) 데이터를 반환')) ||
+    (Array.isArray(flights) && flights.length > 0 && flights.every(f => f?.source === 'mock'));
 
   if (mockEl) {
     if (isMock) {
@@ -421,9 +423,12 @@ function renderFlights(flights, warnings) {
     const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';
     const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
     const mileageBadge = f.mileage_eligible ? '<span class="flight-badge mileage">마일리지 적립</span>' : '';
+    const mockBadge = (f.source === 'mock_reference' || f.source === 'mock')
+      ? '<span class="flight-badge" style="background:#fff3cd; color:#856404; margin-left: 5px;">예시(Mock) 참고용</span>'
+      : '';
     return `
     <div class="option-item" data-idx="${i}">
-      <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}</h3>
+      <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
       <p class="flight-route">${route}</p>
       <p class="flight-time">${timeRange}${duration}</p>
       <p class="price">${price}</p>
