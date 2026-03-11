@@ -155,7 +155,7 @@ async def search_serpapi_flights(
         return [], warnings
 
     flights = []
-    for f in all_raw_flights[:25]:
+    for f in all_raw_flights:
         price = f.get("price", 0)
         flights_arr = f.get("flights", [])
         if not flights_arr:

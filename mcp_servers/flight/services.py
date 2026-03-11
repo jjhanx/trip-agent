@@ -1,7 +1,11 @@
 """Flight search logic - SerpApi (Google Flights) API + Playwright Fallback."""
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+import aiohttp
+from typing import Any
+from datetime import datetime, timedelta
 
 from mcp_servers.flight.api_clients import search_serpapi_flights, search_playwright_flights
 
@@ -35,52 +39,94 @@ async def _search_orchestrator(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str | None,
-    trip_type: str,
-    multi_cities: list[dict] | None,
-    seat_class: str,
-    use_miles: bool,
-    mileage_program: str | None,
-    config: dict,
-) -> tuple[list[dict], list[str], bool]:
-    """SerpApi -> Playwright -> Mock 오케스트레이션."""
-    api_key = config.get("serpapi_api_key", "")
-    all_warnings = []
-    flights = []
+    end_date: str | None = None,
+    trip_type: str = "round_trip",
+    multi_cities: list[dict] | None = None,
+    seat_class: str = "economy",
+    use_miles: bool = False,
+    mileage_program: str | None = None,
+    config: dict | None = None,
+    date_flexibility_days: int = 0,
+) -> tuple[list[dict], list[str]]:
+    """
+    모든 API 및 폴백 검색을 오케스트레이션하고 마일리지 우선 정렬 수행.
+    date_flexibility_days 파라미터를 사용해 지정일 전후의 모든 날짜 조합에 대해 검색을 수행합니다.
+    """
+    if config is None:
+        config = {}
+    api_key = config.get("serpapi_api_key", os.environ.get("SERPAPI_API_KEY", ""))
+
+    all_flights: list[dict] = []
+    all_warnings: list[str] = []
     api_responded_ok = False
 
-    if api_key:
+    # 날짜 유연성 처리 (다구간이 아닌 왕복, 편도의 경우에만 적용)
+    # 지나친 트래픽을 막기 위해 flexibility 최대를 2로 제한
+    flex = min(date_flexibility_days, 2)
+    
+    date_pairs = []
+    if trip_type == "multi_city":
+        # 다구간은 복잡하므로 유연성 적용 최소화 (우선 1회 요청만 함)
+        date_pairs.append({"start_date": start_date, "end_date": end_date})
+    else:
         try:
-            flights, w = await search_serpapi_flights(
-                origin, destination, start_date, end_date, api_key, seat_class, 
+            s_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            e_dt = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+            
+            for d in range(-flex, flex + 1):
+                mod_start = (s_dt + timedelta(days=d)).strftime("%Y-%m-%d")
+                if e_dt:
+                    for rd in range(-flex, flex + 1):
+                        mod_end = (e_dt + timedelta(days=rd)).strftime("%Y-%m-%d")
+                        # 출발일이 도착일보다 늦으면 스킵
+                        if mod_start <= mod_end:
+                            date_pairs.append({"start_date": mod_start, "end_date": mod_end})
+                else:
+                    date_pairs.append({"start_date": mod_start, "end_date": None})
+        except ValueError:
+            date_pairs.append({"start_date": start_date, "end_date": end_date})
+            
+    if not date_pairs:
+        date_pairs = [{"start_date": start_date, "end_date": end_date}]
+
+    if api_key:
+        # 여러 날짜 비동기 병렬 요청 (gather)
+        tasks = []
+        for pair in date_pairs:
+            tasks.append(search_serpapi_flights(
+                origin, destination, pair["start_date"], pair["end_date"], api_key, seat_class, 
                 trip_type=trip_type, multi_cities=multi_cities
-            )
-            all_warnings.extend(w)
-            # SerpApi 한도 초과 등의 이유로 fallback 메시지가 있다면 Playwright 실행
-            needs_fallback = any("Playwright 크롤링으로 전환합니다" in x for x in w)
-            if not needs_fallback and flights:
-                api_responded_ok = True
-        except Exception as e:
-            all_warnings.append(f"SerpApi API 예외 오류: {e}")
+            ))
+            
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, tuple) and len(res) == 2:
+                flights, w = res
+                all_flights.extend(flights)
+                all_warnings.extend(w)
+                if flights:
+                    api_responded_ok = True
+            elif isinstance(res, Exception):
+                all_warnings.append(f"SerpApi 동시 검색 중 오류: {str(res)}")
     else:
         all_warnings.append("SERPAPI_API_KEY가 설정되지 않았습니다.")
         
-    needs_fallback = any("Playwright 크롤링으로 전환" in x for x in all_warnings) or (not flights and api_key)
+    needs_fallback = any("Playwright 크롤링으로 전환" in x for x in all_warnings) or (not all_flights and api_key)
 
-    # 2단계: Playwright Fallback
-    if needs_fallback and not flights:
+    # 2단계: Playwright Fallback (폴백은 메인 지정 날짜 하루만 시도)
+    if needs_fallback and not all_flights:
         try:
             play_flights, play_w = await search_playwright_flights(
                 origin, destination, start_date, end_date, seat_class
             )
             all_warnings.extend(play_w)
             if play_flights:
-                flights = play_flights
+                all_flights = play_flights
                 api_responded_ok = True # 크롤링 성공을 API 성공으로 취급
         except Exception as e:
             all_warnings.append(f"Playwright Fallback 최종 실패: {e}")
 
-    all_flights = flights
+    flights = all_flights
 
     # 중복 제거 (airline+flight_number+departure 기준)
     seen: set = set()

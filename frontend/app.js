@@ -444,12 +444,42 @@ function renderFlights(flights, warnings) {
     let detailsHtml = '';
     if (f.segments && f.segments.length > 0) {
       detailsHtml += `<div class="flight-details hidden" id="flight-details-${i}" style="margin-top: 1rem; padding: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px;">`;
+
+      let isReturnFlightStarted = false;
+      const outboundDateStart = f.departure ? f.departure.substring(0, 10) : "";
+
       f.segments.forEach((seg, sIdx) => {
         const dAirport = seg.departure_airport?.name || seg.departure_airport?.id || "";
         const aAirport = seg.arrival_airport?.name || seg.arrival_airport?.id || "";
-        const dTime = fmtFlightDateTime(seg.departure_airport?.time?.substring(0, 19) || "");
+        const dTimeStr = seg.departure_airport?.time?.substring(0, 19) || "";
+        const dTime = fmtFlightDateTime(dTimeStr);
         const aTime = fmtFlightDateTime(seg.arrival_airport?.time?.substring(0, 19) || "");
         const segDur = seg.duration ? Math.round(seg.duration / 60) + '시간 ' + (seg.duration % 60) + '분' : '';
+
+        // Detect if this segment is part of the return trip (if it is a round trip)
+        const currentSegmentDate = dTimeStr.substring(0, 10);
+        const isRoundTrip = state.travelInput?.trip_type === 'round_trip';
+
+        if (isRoundTrip && !isReturnFlightStarted && currentSegmentDate > outboundDateStart) {
+          // Check if there is a massive gap in days (layover duration logic below is usually for hours)
+          // Or typically if the destination of the entire outbound journey is reached, but comparing dates is safer for SerpApi's flat array
+          if (f.layovers && f.layovers[sIdx - 1] && f.layovers[sIdx - 1].duration > 1440) {
+            isReturnFlightStarted = true;
+            detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
+            detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
+          } else if (dAirport.includes(f.destination) || seg.departure_airport?.id === f.destination) {
+            isReturnFlightStarted = true;
+            detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
+            detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
+          }
+        }
+
+        if (sIdx === 0) {
+          if (isRoundTrip) {
+            detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[가는 편]</div>`;
+          }
+        }
+
         detailsHtml += `
           <div style="margin-bottom: 0.5rem;">
             <strong>${seg.airline} ${seg.flight_number}</strong><br>
@@ -460,10 +490,13 @@ function renderFlights(flights, warnings) {
         // Layover after this segment?
         if (f.layovers && f.layovers[sIdx]) {
           const lay = f.layovers[sIdx];
-          const layDur = lay.duration ? Math.round(lay.duration / 60) + '시간 ' + (lay.duration % 60) + '분' : '';
-          detailsHtml += `<div style="padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 0.5rem; text-align: center; color: var(--error);">
-             ⏳ 대기: ${lay.name || lay.id || '경유지'} (${layDur})
-           </div>`;
+          // Ignore massive "layovers" that are actually just the destination stay for round trips
+          if (lay.duration && lay.duration < 1440) {
+            const layDur = lay.duration ? Math.round(lay.duration / 60) + '시간 ' + (lay.duration % 60) + '분' : '';
+            detailsHtml += `<div style="padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 0.5rem; text-align: center; color: var(--error);">
+                 ⏳ 대기: ${lay.name || lay.id || '경유지'} (${layDur})
+               </div>`;
+          }
         }
       });
       detailsHtml += `
@@ -480,11 +513,14 @@ function renderFlights(flights, warnings) {
         </div>`;
     }
 
+    const isRoundTrip = state.travelInput?.trip_type === 'round_trip';
+    const routeDisplay = isRoundTrip ? `${f.origin || ''} ⇌ ${destLabel}` : route;
+
     return `
     <div class="option-item" data-idx="${i}" style="flex-direction: column; align-items: stretch; padding: 0;">
       <div class="flight-summary" style="padding: 1rem;">
         <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
-        <p class="flight-route">${route}</p>
+        <p class="flight-route">${routeDisplay}</p>
         <p class="flight-time">${timeRange}${duration}</p>
         <p class="price">${price}</p>
         <div style="text-align: right; margin-top: -1.5rem;">

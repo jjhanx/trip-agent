@@ -31,6 +31,7 @@ def search_flights(
     use_miles: bool = False,
     mileage_program: str | None = None,
     destination_airports: list[str] | None = None,
+    date_flexibility_days: int = 0,
 ) -> str:
     """Search for flights. Supports round_trip, one_way, and multi_city.
     SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
@@ -45,6 +46,7 @@ def search_flights(
         mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
         multi_cities: [{origin, destination, date}] - Only used when trip_type="multi_city"
         destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
+        date_flexibility_days: 검색 일자 유연성 (±일)
 
     Returns:
         JSON object with "flights" array and "warnings" array
@@ -65,6 +67,7 @@ def search_flights(
             use_miles=use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
+            date_flexibility_days=date_flexibility_days,
         )
     else:
         flights, warnings = multi_source_search_flights(
@@ -73,6 +76,7 @@ def search_flights(
             seat_class=seat_class, use_miles=use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
+            date_flexibility_days=date_flexibility_days,
         )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 
