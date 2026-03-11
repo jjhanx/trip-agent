@@ -27,6 +27,8 @@ def _normalize_flight(
     duration_hours: float | None = None,
     flight_id: str | None = None,
     seat_class: str = "economy",
+    segments: list[dict] | None = None,
+    layovers: list[dict] | None = None,
 ) -> dict:
     """통일된 항공편 형식으로 변환."""
     return {
@@ -42,6 +44,8 @@ def _normalize_flight(
         "duration_hours": duration_hours,
         "seat_class": seat_class,
         "source": "api",
+        "segments": segments or [],
+        "layovers": layovers or [],
     }
 
 
@@ -182,6 +186,8 @@ async def search_serpapi_flights(
         else:
             flight_number = f"{airline} {fn}".strip() if fn else airline
         
+        raw_layovers = f.get("layovers", [])
+        
         flights.append(
             _normalize_flight(
                 airline=airline,
@@ -195,6 +201,8 @@ async def search_serpapi_flights(
                 duration_hours=dur_hrs,
                 flight_id=f_id or f"{airline}_{flight_number}_{dep}",
                 seat_class=seat_class,
+                segments=flights_arr,
+                layovers=raw_layovers,
             )
         )
 

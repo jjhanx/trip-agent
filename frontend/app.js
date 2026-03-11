@@ -392,11 +392,17 @@ function renderFlights(flights, warnings) {
   const list = $('#flights-list');
   const warnEl = $('#flight-warnings');
   const mockEl = $('#flight-mock-notice');
+  const sortBar = $('#flight-sort-bar');
   const warns = warnings || [];
+
+  if (flights) {
+    state.currentFlights = flights;
+  }
+  const currentFlights = state.currentFlights || [];
 
   // 전체가 Mock인지 판별 (참고용 예시가 "추가"된 경우는 전체 Mock이 아님)
   const isMock = warns.some(w => w.includes('모두 실패하여 예시(Mock) 데이터를 반환')) ||
-    (Array.isArray(flights) && flights.length > 0 && flights.every(f => f?.source === 'mock'));
+    (currentFlights.length > 0 && currentFlights.every(f => f?.source === 'mock'));
 
   if (mockEl) {
     if (isMock) {
@@ -416,7 +422,14 @@ function renderFlights(flights, warnings) {
       warnEl.classList.add('hidden');
     }
   }
-  list.innerHTML = (flights || []).map((f, i) => {
+
+  if (currentFlights.length > 0) {
+    sortBar.classList.remove('hidden');
+  } else {
+    sortBar.classList.add('hidden');
+  }
+
+  list.innerHTML = currentFlights.map((f, i) => {
     const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
     const route = `${f.origin || ''} → ${destLabel}`;
     const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
@@ -426,23 +439,162 @@ function renderFlights(flights, warnings) {
     const mockBadge = (f.source === 'mock_reference' || f.source === 'mock')
       ? '<span class="flight-badge" style="background:#fff3cd; color:#856404; margin-left: 5px;">예시(Mock) 참고용</span>'
       : '';
+
+    // Segments and layovers details
+    let detailsHtml = '';
+    if (f.segments && f.segments.length > 0) {
+      detailsHtml += `<div class="flight-details hidden" id="flight-details-${i}" style="margin-top: 1rem; padding: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px;">`;
+      f.segments.forEach((seg, sIdx) => {
+        const dAirport = seg.departure_airport?.name || seg.departure_airport?.id || "";
+        const aAirport = seg.arrival_airport?.name || seg.arrival_airport?.id || "";
+        const dTime = fmtFlightDateTime(seg.departure_airport?.time?.substring(0, 19) || "");
+        const aTime = fmtFlightDateTime(seg.arrival_airport?.time?.substring(0, 19) || "");
+        const segDur = seg.duration ? Math.round(seg.duration / 60) + '시간 ' + (seg.duration % 60) + '분' : '';
+        detailsHtml += `
+          <div style="margin-bottom: 0.5rem;">
+            <strong>${seg.airline} ${seg.flight_number}</strong><br>
+            <span style="color:var(--muted)">${dTime} ${dAirport} -> ${aTime} ${aAirport}</span>
+            ${segDur ? `<br><span style="color:var(--accent); font-size:0.85em;">비행시간: ${segDur}</span>` : ''}
+          </div>
+        `;
+        // Layover after this segment?
+        if (f.layovers && f.layovers[sIdx]) {
+          const lay = f.layovers[sIdx];
+          const layDur = lay.duration ? Math.round(lay.duration / 60) + '시간 ' + (lay.duration % 60) + '분' : '';
+          detailsHtml += `<div style="padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 0.5rem; text-align: center; color: var(--error);">
+             ⏳ 대기: ${lay.name || lay.id || '경유지'} (${layDur})
+           </div>`;
+        }
+      });
+      detailsHtml += `
+        <div style="margin-top: 1rem; text-align: right;">
+          <button type="button" class="btn-select-flight text-sm" data-idx="${i}" style="padding: 0.4rem 1rem;">이 항공편 번호로 선택하기</button>
+        </div>
+      </div>`;
+    } else {
+      detailsHtml += `
+        <div class="flight-details hidden" id="flight-details-${i}" style="margin-top: 1rem; padding: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px;">
+          <div style="margin-top: 0.5rem; text-align: right;">
+            <button type="button" class="btn-select-flight text-sm" data-idx="${i}" style="padding: 0.4rem 1rem;">이 항공편 번호로 선택하기</button>
+          </div>
+        </div>`;
+    }
+
     return `
-    <div class="option-item" data-idx="${i}">
-      <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
-      <p class="flight-route">${route}</p>
-      <p class="flight-time">${timeRange}${duration}</p>
-      <p class="price">${price}</p>
+    <div class="option-item" data-idx="${i}" style="flex-direction: column; align-items: stretch; padding: 0;">
+      <div class="flight-summary" style="padding: 1rem;">
+        <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
+        <p class="flight-route">${route}</p>
+        <p class="flight-time">${timeRange}${duration}</p>
+        <p class="price">${price}</p>
+        <div style="text-align: right; margin-top: -1.5rem;">
+          <span style="font-size:0.8em; color:var(--accent); text-decoration: underline;">상세 보기 ▼</span>
+        </div>
+      </div>
+      ${detailsHtml}
     </div>
   `;
   }).join('');
-  list.querySelectorAll('.option-item').forEach(el => {
-    el.addEventListener('click', () => {
-      list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
-      el.classList.add('selected');
-      state.selectedFlight = flights[parseInt(el.dataset.idx)];
+
+  // Toggle Accordion Details
+  list.querySelectorAll('.flight-summary').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // Don't toggle if they clicked the select button obviously
+      const item = el.closest('.option-item');
+      const idx = item.dataset.idx;
+      const details = document.getElementById(`flight-details-${idx}`);
+      if (details.classList.contains('hidden')) {
+        // Hide all others
+        list.querySelectorAll('.flight-details').forEach(d => d.classList.add('hidden'));
+        details.classList.remove('hidden');
+      } else {
+        details.classList.add('hidden');
+      }
+    });
+  });
+
+  // Select Flight Click
+  list.querySelectorAll('.btn-select-flight').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      selectFlight(state.currentFlights[idx]);
     });
   });
 }
+
+function selectFlight(f) {
+  state.selectedFlight = f;
+  const list = $('#flights-list');
+  const sortBar = $('#flight-sort-bar');
+  const summary = $('#selected-flight-summary');
+  const summaryText = $('#selected-flight-text');
+  const nextBtn = $('#btn-next-flights');
+
+  list.classList.add('hidden');
+  sortBar.classList.add('hidden');
+
+  const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+  const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+  summaryText.innerHTML = `${f.airline} ${f.flight_number} - ${f.origin} → ${destLabel} (${price})`;
+  summary.classList.remove('hidden');
+
+  nextBtn.disabled = false;
+  nextBtn.style.opacity = '1';
+  nextBtn.style.cursor = 'pointer';
+}
+
+$('#btn-cancel-flight').addEventListener('click', () => {
+  state.selectedFlight = null;
+  $('#flights-list').classList.remove('hidden');
+  $('#flight-sort-bar').classList.remove('hidden');
+  $('#selected-flight-summary').classList.add('hidden');
+
+  const nextBtn = $('#btn-next-flights');
+  nextBtn.disabled = true;
+  nextBtn.style.opacity = '0.5';
+  nextBtn.style.cursor = 'not-allowed';
+});
+
+// Sorting Logic
+$$('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    $$('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const sortType = btn.dataset.sort;
+    if (!state.currentFlights || state.currentFlights.length === 0) return;
+
+    let flights = [...state.currentFlights];
+
+    if (sortType === 'recommend') {
+      // 선호 항공사는 mileage_eligible == True, 최상단 배치. 그룹 내 가격순
+      flights.sort((a, b) => {
+        const aPref = a.mileage_eligible ? 1 : 0;
+        const bPref = b.mileage_eligible ? 1 : 0;
+        if (aPref !== bPref) return bPref - aPref; // 1 goes first
+        const aPrice = a.price_krw || a.miles_required || 99999999;
+        const bPrice = b.price_krw || b.miles_required || 99999999;
+        return aPrice - bPrice;
+      });
+    } else if (sortType === 'price') {
+      flights.sort((a, b) => {
+        const aPrice = a.price_krw || a.miles_required || 99999999;
+        const bPrice = b.price_krw || b.miles_required || 99999999;
+        return aPrice - bPrice;
+      });
+    } else if (sortType === 'duration') {
+      flights.sort((a, b) => {
+        const aDur = a.duration_hours || 999;
+        const bDur = b.duration_hours || 999;
+        return aDur - bDur;
+      });
+    }
+
+    // Sort된 데이터를 state에 다시 담고 다시 렌더 (경고도 빈 배열로 처리, 상단 배너 안 건드리게)
+    state.currentFlights = flights;
+    renderFlights();
+  });
+});
 
 $('#btn-back-flights').addEventListener('click', () => {
   state.origin_airport_code = null;
