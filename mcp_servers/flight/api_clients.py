@@ -157,25 +157,35 @@ async def search_serpapi_flights(
         if not flights_arr:
             continue
             
+        # Extract main info from the first segment
         seg = flights_arr[0]
         airline = seg.get("airline", "")
         fn = seg.get("flight_number", "")
         # Google Flights returns departure_token as an ID sometimes, or just generate one
         f_id = f.get("departure_token", "")
         dep = seg.get("departure_airport", {}).get("time", "")[:19]
-        arr = seg.get("arrival_airport", {}).get("time", "")[:19]
+        
+        # Extract arrival info from the LAST segment
+        last_seg = flights_arr[-1]
+        arr = last_seg.get("arrival_airport", {}).get("time", "")[:19]
         
         orig_code = seg.get("departure_airport", {}).get("id", origin)
-        dest_code = seg.get("arrival_airport", {}).get("id", destination)
+        dest_code = last_seg.get("arrival_airport", {}).get("id", destination)
         
         # 전체 비행 시간(분)
         dur_min = f.get("total_duration", 0)
         dur_hrs = _parse_duration_to_hours(dur_min)
         
+        # Combine flight numbers if there are multiple segments (e.g. layovers)
+        if len(flights_arr) > 1:
+            flight_number = f"Multiple ({len(flights_arr)} stops)"
+        else:
+            flight_number = f"{airline} {fn}".strip() if fn else airline
+        
         flights.append(
             _normalize_flight(
                 airline=airline,
-                flight_number=f"{airline} {fn}".strip() if fn else airline,
+                flight_number=flight_number,
                 departure=dep.replace(" ", "T") if dep else "",
                 arrival=arr.replace(" ", "T") if arr else "",
                 origin=orig_code,
@@ -183,7 +193,7 @@ async def search_serpapi_flights(
                 price_krw=price,
                 miles_required=None,
                 duration_hours=dur_hrs,
-                flight_id=f_id,
+                flight_id=f_id or f"{airline}_{flight_number}_{dep}",
                 seat_class=seat_class,
             )
         )
