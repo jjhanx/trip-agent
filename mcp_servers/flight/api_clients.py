@@ -96,7 +96,6 @@ async def search_serpapi_flights(
         params["outbound_date"] = start_date
     elif trip_type == "multi_city" and multi_cities:
         params["type"] = "3"
-        import json
         params["flights"] = json.dumps([
             {
                 "departure_id": c.get("origin", "").upper()[:3], 
