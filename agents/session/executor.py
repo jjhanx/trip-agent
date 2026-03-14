@@ -252,9 +252,9 @@ class SessionExecutor(BaseAgentExecutor):
             flight_payload["selected_outbound_flight"] = selected_outbound_flight
         if selected_multi_city_flights:
             flight_payload["selected_multi_city_flights"] = selected_multi_city_flights
-        if travel.trip_type == "round_trip" and not selected_flight and not flight_leg:
+        if travel.trip_type == "round_trip" and not flight_complete and not flight_leg:
             flight_payload["flight_leg"] = "outbound"
-        if travel.trip_type == "one_way" and not selected_flight:
+        if travel.trip_type == "one_way" and not flight_complete:
             flight_payload["flight_leg"] = "outbound"
         if travel.trip_type == "multi_city" and multi_cities and not flight_leg:
             flight_payload["flight_leg"] = "multi_city_0"

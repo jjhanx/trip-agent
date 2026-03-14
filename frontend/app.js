@@ -873,6 +873,8 @@ $('#btn-back-flights').addEventListener('click', () => {
 });
 
 $('#btn-next-flights').addEventListener('click', async () => {
+  state.trip_type = state.travelInput?.trip_type || $('#trip_type_select')?.value || 'round_trip';
+
   if (state.trip_type === 'multi_city') {
     const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
     const selected = state.selectedMultiCityFlights?.[idx];
@@ -900,23 +902,55 @@ $('#btn-next-flights').addEventListener('click', async () => {
       return;
     }
   }
+
   state.selectedFlight = buildSelectedFlight();
+  if (!state.selectedFlight) {
+    alert('항공편 선택을 완료해 주세요.');
+    return;
+  }
   show('loading');
   try {
     const payload = { ...state.travelInput, selected_flight: state.selectedFlight };
     let data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
+
     if (data?.step === 'rental') {
       state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
       renderRentalOptions(state.localTransport);
       show('step-rental');
-    } else {
-      let itin = Array.isArray(data) ? data : (data?.itineraries || data);
-      if (!Array.isArray(itin)) itin = [itin];
-      state.itineraries = itin;
-      renderItineraries(state.itineraries);
-      show('step-itineraries');
+      return;
     }
+    if (Array.isArray(data?.flights) && data.flights.length > 0 && !data?.step) {
+      // Flight search results (fallback: incomplete selection triggered search)
+      state.flights = data.flights;
+      state.flightWarnings = data?.warnings || [];
+      if (state.trip_type === 'round_trip' && state.selectedOutboundFlight) {
+        state.flightLeg = 'return';
+        state.selectedReturnFlight = null;
+      }
+      state.flightsByLeg[state.flightLeg] = data.flights;
+      renderFlights(data.flights, state.flightWarnings);
+      $('#flights-list').classList.remove('hidden');
+      $('#flight-sort-bar').classList.remove('hidden');
+      $('#selected-flight-summary').classList.add('hidden');
+      if (state.flightLeg === 'return') state.selectedReturnFlight = null;
+      show('step-flights');
+      return;
+    }
+    if (data?.step === 'accommodation_and_transport') {
+      state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
+      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      renderAccommodations(state.accommodations);
+      renderRentalOptions(state.localTransport);
+      show('step-accommodation');
+      return;
+    }
+
+    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
+    if (!Array.isArray(itin)) itin = [itin];
+    state.itineraries = itin;
+    renderItineraries(state.itineraries);
+    show('step-itineraries');
   } catch (err) {
     showError(err.message);
   }
