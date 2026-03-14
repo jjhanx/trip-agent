@@ -27,3 +27,11 @@ alwaysApply: true
 수정이 완료되면 **반드시** 다음을 수행한다.
 - `git add` → `git commit -m "설명"` → `git push origin main`
 - 수정 사항이 있을 때마다 즉시 GitHub에 업데이트한다.
+
+## 3. 서버 배포 안내
+
+수정 반영 후 사용자에게 **서버에서 할 일**을 안내한다.
+- `git pull origin main`
+- `.env` 변경 필요 시 안내 (새 변수·삭제 변수)
+- `docker compose down` → `docker compose up -d --build`
+- 확인 명령: `docker compose ps -a`, `docker compose logs -f session`
