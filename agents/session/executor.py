@@ -199,12 +199,10 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.destination_airports[:4],
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    trip_type=travel.trip_type,
-                    seat_class=travel.seat_class.value,
-                    use_miles=travel.use_miles,
+                    travel.seat_class.value,
+                    travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    serpapi_api_key=s.serpapi_api_key,
-                    date_flexibility_days=travel.date_flexibility_days or 0,
+                    duffel_access_token=s.duffel_access_token,
                 )
             else:
                 destination = travel.destination_airport_code or travel.destination
@@ -213,18 +211,12 @@ class SessionExecutor(BaseAgentExecutor):
                     destination,
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    trip_type=travel.trip_type,
-                    seat_class=travel.seat_class.value,
-                    use_miles=travel.use_miles,
+                    travel.seat_class.value,
+                    travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    serpapi_api_key=s.serpapi_api_key,
-                    date_flexibility_days=travel.date_flexibility_days or 0,
+                    duffel_access_token=s.duffel_access_token,
                 )
-            if not travel.destination_airports:
-                if travel.use_miles:
-                    flights.sort(key=lambda x: x.get("miles_required") or 999999)
-                else:
-                    flights.sort(key=lambda x: x.get("price_krw") or 999999)
+            # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))

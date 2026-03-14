@@ -44,10 +44,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 "end_date": travel.end_date.isoformat(),
                 "seat_class": travel.seat_class.value,
                 "use_miles": travel.use_miles,
-                "trip_type": travel.trip_type,
             }
-            if travel.date_flexibility_days:
-                params["date_flexibility_days"] = travel.date_flexibility_days
             if travel.mileage_program:
                 params["mileage_program"] = travel.mileage_program
             if travel.destination_airports:
@@ -61,12 +58,8 @@ class FlightSearchExecutor(BaseAgentExecutor):
             else:
                 flights = parsed if isinstance(parsed, list) else []
                 warnings = []
-            if isinstance(flights, list):
-                if travel.use_miles:
-                    flights.sort(key=lambda x: x.get("miles_required") or 999999)
-                else:
-                    flights.sort(key=lambda x: x.get("price_krw") or 999999)
-            out = {"flights": flights, "warnings": warnings}
+            # MCP가 추천순(선호 직항→선호 경유→나머지 직항→나머지 경유)으로 이미 정렬 반환
+            out = {"flights": flights or [], "warnings": warnings or []}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
@@ -86,12 +79,10 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.destination_airports[:4],
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    trip_type=travel.trip_type,
-                    seat_class=travel.seat_class.value,
-                    use_miles=travel.use_miles,
+                    travel.seat_class.value,
+                    travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    serpapi_api_key=s.serpapi_api_key,
-                    date_flexibility_days=travel.date_flexibility_days or 0,
+                    duffel_access_token=s.duffel_access_token,
                 )
             else:
                 flights, warnings = multi_source_search_flights(
@@ -99,17 +90,12 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.destination_airport_code or travel.destination,
                     travel.start_date.isoformat(),
                     travel.end_date.isoformat(),
-                    trip_type=travel.trip_type,
-                    seat_class=travel.seat_class.value,
-                    use_miles=travel.use_miles,
+                    travel.seat_class.value,
+                    travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    serpapi_api_key=s.serpapi_api_key,
-                    date_flexibility_days=travel.date_flexibility_days or 0,
+                    duffel_access_token=s.duffel_access_token,
                 )
-            if travel.use_miles:
-                flights.sort(key=lambda x: x.get("miles_required") or 999999)
-            else:
-                flights.sort(key=lambda x: x.get("price_krw") or 999999)
+            # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))

@@ -1,4 +1,4 @@
-"""Flight MCP Server - 항공편 검색 Tools (SerpApi Google Flights + Playwright)."""
+"""Flight MCP Server - 항공편 검색 Tools (Duffel API, 대한항공·아시아나 포함)."""
 
 import json
 import os
@@ -15,7 +15,7 @@ mcp = FastMCP("flight-search", port=8001)
 
 def _get_config():
     return {
-        "serpapi_api_key": os.environ.get("SERPAPI_API_KEY", ""),
+        "duffel_access_token": os.environ.get("DUFFEL_ACCESS_TOKEN", ""),
     }
 
 
@@ -24,17 +24,14 @@ def search_flights(
     origin: str,
     destination: str,
     start_date: str,
-    end_date: str | None = None,
-    trip_type: str = "round_trip",
-    multi_cities: list[dict] | None = None,
+    end_date: str,
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
     destination_airports: list[str] | None = None,
-    date_flexibility_days: int = 0,
 ) -> str:
-    """Search for flights. Supports round_trip, one_way, and multi_city.
-    SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
+    """Search for flights between origin and destination for the given dates.
+    Duffel API 사용 (대한항공·아시아나 포함 300+ 항공사). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
@@ -44,39 +41,28 @@ def search_flights(
         seat_class: economy, premium_economy, business, first
         use_miles: Whether to search mileage redemption options
         mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
-        multi_cities: [{origin, destination, date}] - Only used when trip_type="multi_city"
         destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
-        date_flexibility_days: 검색 일자 유연성 (±일)
 
     Returns:
         JSON object with "flights" array and "warnings" array
     """
     cfg = _get_config()
-    
-    # If standard destination_airports mapping is needed but it's a multi_city trip mapping is complex
-    # Usually multi_city supplies exact airports.
-    
-    if destination_airports and len(destination_airports) > 0 and trip_type != "multi_city":
+    if destination_airports and len(destination_airports) > 0:
         flights, warnings = multi_source_search_flights_multi_dest(
             origin,
             destination_airports[:4],
             start_date,
             end_date,
-            trip_type=trip_type,
-            seat_class=seat_class,
-            use_miles=use_miles,
+            seat_class,
+            use_miles,
             mileage_program=mileage_program or None,
-            serpapi_api_key=cfg["serpapi_api_key"],
-            date_flexibility_days=date_flexibility_days,
+            duffel_access_token=cfg["duffel_access_token"],
         )
     else:
         flights, warnings = multi_source_search_flights(
-            origin, destination, start_date, end_date, 
-            trip_type=trip_type, multi_cities=multi_cities,
-            seat_class=seat_class, use_miles=use_miles,
+            origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
-            serpapi_api_key=cfg["serpapi_api_key"],
-            date_flexibility_days=date_flexibility_days,
+            duffel_access_token=cfg["duffel_access_token"],
         )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 

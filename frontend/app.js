@@ -603,14 +603,24 @@ $$('.sort-btn').forEach(btn => {
     let flights = [...state.currentFlights];
 
     if (sortType === 'recommend') {
-      // 선호 항공사는 mileage_eligible == True, 최상단 배치. 그룹 내 가격순
+      // 추천순: 1) 선호 직항 2) 선호 경유(비행시간↑) 3) 나머지 직항 4) 나머지 경유(비행시간↑). 동일 카테고리 내 비행시간↑ 가격↑. 다중 도착 시 airport_priority 반영
       flights.sort((a, b) => {
-        const aPref = a.mileage_eligible ? 1 : 0;
-        const bPref = b.mileage_eligible ? 1 : 0;
-        if (aPref !== bPref) return bPref - aPref; // 1 goes first
-        const aPrice = a.price_krw || a.miles_required || 99999999;
-        const bPrice = b.price_krw || b.miles_required || 99999999;
-        return aPrice - bPrice;
+        const cat = (f) => {
+          const pref = !!f.mileage_eligible;
+          const direct = f.is_direct !== false;
+          if (pref && direct) return 0;
+          if (pref && !direct) return 1;
+          if (!pref && direct) return 2;
+          return 3;
+        };
+        const ap = (f) => f.airport_priority ?? 99;
+        const dur = (f) => f.duration_hours ?? 999;
+        const price = (f) => f.price_krw ?? f.miles_required ?? 99999999;
+        const ca = cat(a), cb = cat(b);
+        if (ca !== cb) return ca - cb;
+        if (ap(a) !== ap(b)) return ap(a) - ap(b);
+        if (dur(a) !== dur(b)) return dur(a) - dur(b);
+        return price(a) - price(b);
       });
     } else if (sortType === 'price') {
       flights.sort((a, b) => {

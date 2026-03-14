@@ -29,7 +29,7 @@ def mock_search_flights(
     is_domestic = _is_domestic(origin, destination)
     base_price = 450000 if seat_class == "economy" else 1200000
 
-    _mock = lambda d: {**d, "source": "mock"}
+    _mock = lambda d: {**d, "source": "mock", "is_direct": d.get("is_direct", True)}
 
     if is_domestic:
         return [

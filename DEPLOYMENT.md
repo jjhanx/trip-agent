@@ -195,6 +195,14 @@ LLM_MODEL=google/gemini-3.1-pro-preview
 
 다른 모델(`google/gemini-2.5-pro`, `google/gemini-2.0-flash` 등)은 [OpenRouter 모델 목록](https://openrouter.ai/docs/features/models) 참고.
 
+**항공편 실제 데이터** 사용 시 [Duffel](https://duffel.com) Live 토큰 설정:
+
+```env
+DUFFEL_ACCESS_TOKEN=duffel_live_xxxxxxxx
+```
+
+자세한 절차는 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고. 미설정 시 Mock(예시) 데이터로 동작합니다.
+
 ### 3.3 Docker Compose로 실행
 
 ```bash
@@ -618,7 +626,7 @@ docker compose logs itinerary
 
 | 에러 | 원인 | 해결 |
 |------|------|------|
-| `extra_forbidden: amadeus_client_id` | .env에 제거된 Amadeus 변수 남음 | `git pull` 후 재빌드 (Settings가 extra 무시). 또는 .env에서 AMADEUS_* 삭제 |
+| `extra_forbidden: amadeus_client_id` | .env에 제거된 Amadeus 변수 남음 | .env에서 AMADEUS_*, KIWI_*, RAPIDAPI_*, FLIGHTAPI_* 등 과거 Flight API 변수 삭제. DUFFEL_ACCESS_TOKEN 사용 |
 | `ModuleNotFoundError: a2a.server.events.event_factory` | a2a-sdk 0.3.x에서 모듈 제거 | `git pull` 후 `docker compose up -d --build` |
 | `ImportError: MessagePart from a2a.types` | API 변경 (MessagePart→Part/TextPart) | 위와 동일 |
 | `ValidationError: AgentSkill... description Field required` | AgentSkill에 `description` 필수 | 위와 동일 |

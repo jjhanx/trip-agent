@@ -1,19 +1,14 @@
-"""SerpApi (Google Flights) API 항공편 검색 클라이언트 + Playwright Fallback.
+"""Duffel API 항공편 검색 클라이언트 (대한항공·아시아나 포함).
 
-SerpApi를 사용하여 대한항공·아시아나 등 실제 운항 데이터를 가져오며,
-무료 한도 초과 시 Playwright를 이용해 스크래핑 방식으로 대응합니다.
+Duffel은 Travelport GDS 경유로 Korean Air, Asiana 등 300+ 항공사 실시간 데이터 제공.
+https://duffel.com/flights/airlines/korean-air
 """
 
 import re
-import asyncio
-import json
 from typing import Any
+
 import httpx
 
-try:
-    from serpapi import GoogleSearch
-except ImportError:
-    GoogleSearch = None
 
 def _normalize_flight(
     airline: str,
@@ -27,8 +22,7 @@ def _normalize_flight(
     duration_hours: float | None = None,
     flight_id: str | None = None,
     seat_class: str = "economy",
-    segments: list[dict] | None = None,
-    layovers: list[dict] | None = None,
+    is_direct: bool = True,
 ) -> dict:
     """통일된 항공편 형식으로 변환."""
     return {
@@ -44,220 +38,164 @@ def _normalize_flight(
         "duration_hours": duration_hours,
         "seat_class": seat_class,
         "source": "api",
-        "segments": segments or [],
-        "layovers": layovers or [],
+        "is_direct": is_direct,
     }
 
 
-def _parse_duration_to_hours(duration_int: int) -> float:
-    """SerpApi duration in minutes -> hours."""
-    if not duration_int:
-        return 0.0
-    return round(duration_int / 60, 1)
+def _parse_iso_duration(duration: str) -> float | None:
+    """PT02H26M -> 2.4 (시간)."""
+    if not duration:
+        return None
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?", str(duration).upper())
+    if not m:
+        return None
+    h = int(m.group(1) or 0)
+    mn = int(m.group(2) or 0)
+    return round(h + mn / 60, 1)
 
 
-async def search_serpapi_flights(
-    origin: str,
-    destination: str,
-    start_date: str,
-    end_date: str | None,
-    api_key: str,
-    seat_class: str = "economy",
-    trip_type: str = "round_trip",
-    multi_cities: list[dict] | None = None,
-) -> tuple[list[dict], list[str]]:
-    """
-    SerpApi (Google Flights) 검색.
-    Returns (flights, warnings)
-    """
-    if not GoogleSearch:
-        return [], ["google-search-results 패키지가 설치되지 않았습니다."]
-    if not api_key:
-        return [], ["SerpApi 키가 설정되지 않았습니다. .env에 SERPAPI_API_KEY를 추가하세요."]
-
-    warnings: list[str] = []
-    
-    class_map = {
-        "economy": 1,
-        "premium_economy": 2,
-        "business": 3,
-        "first": 4,
-    }
-    travel_class = class_map.get((seat_class or "economy").lower(), 1)
-
-    params = {
-      "engine": "google_flights",
-      "currency": "KRW",
-      "hl": "ko",
-      "api_key": api_key,
-      "travel_class": travel_class
-    }
-    
-    if trip_type == "one_way":
-        params["type"] = "2"
-        params["departure_id"] = origin.upper()[:3]
-        params["arrival_id"] = destination.upper()[:3]
-        params["outbound_date"] = start_date
-    elif trip_type == "multi_city" and multi_cities:
-        params["type"] = "3"
-        params["flights"] = json.dumps([
-            {
-                "departure_id": c.get("origin", "").upper()[:3], 
-                "arrival_id": c.get("destination", "").upper()[:3], 
-                "outbound_date": c.get("date", "")
-            }
-            for c in multi_cities
-        ])
-    else: # round_trip
-        params["type"] = "1"
-        params["departure_id"] = origin.upper()[:3]
-        params["arrival_id"] = destination.upper()[:3]
-        params["outbound_date"] = start_date
-        if end_date:
-            params["return_date"] = end_date
-
-    DEBUG_SERPAPI = True # 디버깅 스위치 추가
-    if DEBUG_SERPAPI:
-        print(f"\n[DEBUG] SerpApi Request Params: {json.dumps({k: v for k, v in params.items() if k != 'api_key'}, ensure_ascii=False)}")
-
-    loop = asyncio.get_running_loop()
-    
-    def _run_search():
-        search = GoogleSearch(params)
-        return search.get_dict()
-
+def _currency_to_krw(amount: str | float, currency: str) -> int:
+    """통화 → KRW 근사치."""
     try:
-        results = await loop.run_in_executor(None, _run_search)
-    except Exception as e:
-        return [], [f"SerpApi 오류: {e}"]
-
-    if DEBUG_SERPAPI:
-        if "error" in results:
-            print(f"[DEBUG] SerpApi Response Error: {results['error']}")
-        else:
-            b_len = len(results.get('best_flights', []))
-            o_len = len(results.get('other_flights', []))
-            print(f"[DEBUG] SerpApi Response: best_flights={b_len}, other_flights={o_len}")
-
-    # Rate limit check etc
-    if "error" in results:
-        err_msg = results.get("error", "")
-        if "rate limit" in err_msg.lower() or "searches limit" in err_msg.lower():
-            warnings.append("SerpApi 무료 한도 초과: Playwright 크롤링으로 전환합니다. (속도가 다소 느려질 수 있습니다.)")
-            return [], warnings
-        return [], [f"SerpApi 오류: {err_msg}"]
-
-    best_flights = results.get("best_flights", [])
-    other_flights = results.get("other_flights", [])
-    all_raw_flights = best_flights + other_flights
-
-    if not all_raw_flights:
-        return [], warnings
-
-    flights = []
-    for f in all_raw_flights:
-        price = f.get("price", 0)
-        flights_arr = f.get("flights", [])
-        if not flights_arr:
-            continue
-            
-        # Extract main info from the first segment
-        seg = flights_arr[0]
-        airline = seg.get("airline", "")
-        fn = seg.get("flight_number", "")
-        # Google Flights returns departure_token as an ID sometimes, or just generate one
-        f_id = f.get("departure_token", "")
-        dep = seg.get("departure_airport", {}).get("time", "")[:19]
-        
-        # Extract arrival info from the LAST segment
-        last_seg = flights_arr[-1]
-        arr = last_seg.get("arrival_airport", {}).get("time", "")[:19]
-        
-        orig_code = seg.get("departure_airport", {}).get("id", origin)
-        dest_code = last_seg.get("arrival_airport", {}).get("id", destination)
-        
-        # 전체 비행 시간(분)
-        dur_min = f.get("total_duration", 0)
-        dur_hrs = _parse_duration_to_hours(dur_min)
-        
-        # Combine flight numbers if there are multiple segments (e.g. layovers)
-        if len(flights_arr) > 1:
-            flight_number = f"Multiple ({len(flights_arr)} stops)"
-        else:
-            flight_number = f"{airline} {fn}".strip() if fn else airline
-        
-        raw_layovers = f.get("layovers", [])
-        
-        flights.append(
-            _normalize_flight(
-                airline=airline,
-                flight_number=flight_number,
-                departure=dep.replace(" ", "T") if dep else "",
-                arrival=arr.replace(" ", "T") if arr else "",
-                origin=orig_code,
-                destination=dest_code,
-                price_krw=price,
-                miles_required=None,
-                duration_hours=dur_hrs,
-                flight_id=f_id or f"{airline}_{flight_number}_{dep}",
-                seat_class=seat_class,
-                segments=flights_arr,
-                layovers=raw_layovers,
-            )
-        )
-
-    return flights, warnings
+        amt = float(amount or 0)
+    except (TypeError, ValueError):
+        return 0
+    rates = {"USD": 1400, "EUR": 1500, "GBP": 1750, "KRW": 1, "JPY": 9}
+    rate = rates.get((currency or "USD").upper(), 1400)
+    return int(amt * rate)
 
 
-async def search_playwright_flights(
+async def search_duffel(
     origin: str,
     destination: str,
     start_date: str,
     end_date: str,
-    seat_class: str = "economy"
+    api_key: str,
+    seat_class: str = "economy",
 ) -> tuple[list[dict], list[str]]:
     """
-    Playwright를 이용한 Google Flights 스크래핑 Fallback.
-    실제로 브라우저를 띄워서 스크래핑을 시도합니다.
+    Duffel Offer Requests API. 대한항공·아시아나 포함 300+ 항공사.
+    Live 토큰 필요 (테스트 토큰은 Duffel Airways만 반환).
+    Returns (flights, warnings)
     """
-    warnings = []
-    flights = []
-    
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        return [], ["playwright 패키지가 설치되지 않아 Fallback을 실행할 수 없습니다."]
+    if not api_key:
+        return [], ["Duffel API 키가 설정되지 않았습니다. .env에 DUFFEL_ACCESS_TOKEN 추가."]
+
+    warnings: list[str] = []
+    o, d = origin.upper()[:3], destination.upper()[:3]
+    cabin_map = {
+        "economy": "economy",
+        "premium_economy": "premium_economy",
+        "business": "business",
+        "first": "first",
+    }
+    cabin = cabin_map.get((seat_class or "economy").lower(), "economy")
+
+    payload = {
+        "data": {
+            "slices": [
+                {"origin": o, "destination": d, "departure_date": start_date},
+                {"origin": d, "destination": o, "departure_date": end_date},
+            ],
+            "passengers": [{"type": "adult"}],
+            "cabin_class": cabin,
+            "return_offers": True,
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://api.duffel.com/air/offer_requests",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Duffel-Version": "v2",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+    if resp.status_code != 200:
+        err = resp.text
+        if resp.status_code == 401:
+            return [], [f"Duffel 인증 실패(401). Live 토큰 확인: duffel.com/dashboard"]
+        if resp.status_code == 422:
+            try:
+                j = resp.json()
+                errs = j.get("errors", [])
+                if errs:
+                    err = errs[0].get("message", str(errs))
+            except Exception:
+                pass
+        return [], [f"Duffel 검색 실패: {resp.status_code} - {err[:200]}"]
 
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        data = resp.json()
+    except Exception:
+        return [], ["Duffel 응답 파싱 실패"]
+
+    odata = data.get("data", {})
+    offers = odata.get("offers", [])
+    if not offers:
+        return [], warnings
+
+    flights = []
+    for offer in offers[:25]:
+        total_amount = offer.get("total_amount") or offer.get("base_amount", "0")
+        total_currency = offer.get("total_currency") or offer.get("base_currency", "USD")
+        price_krw = _currency_to_krw(total_amount, total_currency)
+
+        slices = offer.get("slices", [])
+        if not slices:
+            continue
+        segs = slices[0].get("segments", [])
+        if not segs:
+            continue
+
+        # 직항: 1개 세그먼트, 경유: 2개 이상
+        is_direct = len(segs) == 1
+
+        # 총 비행시간 (모든 세그먼트 합)
+        dur_h = None
+        for s in segs:
+            d = _parse_iso_duration(s.get("duration", ""))
+            dur_h = (dur_h or 0) + (d or 0)
+        dur_h = round(dur_h, 1) if dur_h else None
+
+        seg = segs[0]
+        carrier = seg.get("operating_carrier") or seg.get("marketing_carrier") or {}
+        airline = carrier.get("name", carrier.get("iata_code", ""))
+        fn = seg.get("operating_carrier_flight_number") or seg.get("marketing_carrier_flight_number", "")
+        iata = carrier.get("iata_code", "")
+        if not airline and iata:
+            airline = iata
+        if not fn and iata:
+            fn = f"{iata}{fn}" if fn else iata
+
+        dep = seg.get("departing_at", "")[:19]
+        last_seg = segs[-1]
+        arr = last_seg.get("arriving_at", "")[:19]
+
+        orig = seg.get("origin", {})
+        dest = last_seg.get("destination", {})
+        orig_code = orig.get("iata_code", o) if isinstance(orig, dict) else o
+        dest_code = dest.get("iata_code", d) if isinstance(dest, dict) else d
+
+        flights.append(
+            _normalize_flight(
+                airline=airline,
+                flight_number=fn,
+                departure=dep,
+                arrival=arr,
+                origin=orig_code,
+                destination=dest_code,
+                price_krw=price_krw,
+                miles_required=None,
+                duration_hours=dur_h,
+                flight_id=offer.get("id"),
+                seat_class=cabin,
+                is_direct=is_direct,
             )
-            page = await context.new_page()
-            
-            # 구글 항공권 URL 구조 (간소화)
-            # 정확한 파라미터 매핑이 복잡하므로, 여기서는 출발지/도착지를 입력하고 탐색하는 기본 로직을 두거나 mock처럼 반환합니다.
-            # (실제 완벽한 크롤링은 타임아웃, DOM 변경 이슈로 복잡하므로 예시 형태로 구현)
-            
-            url = f"https://www.google.com/travel/flights?q=Flights%20to%20{destination}%20from%20{origin}%20on%20{start_date}%20through%20{end_date}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            
-            # 임의 대기 (결과 로딩)
-            await page.wait_for_timeout(5000)
-            
-            # 페이지 내 항공편 정보 추출 (가상의 선택자)
-            # 여기서는 DOM이 복잡하여 기본적으로 Fallback 결과(가상)와 Playwright 성공 신호만 보냅니다.
-            # 실제 배포 시에는 더 정교한 selector 처리가 필요합니다.
-            
-            # TODO: 실제 DOM 파싱
-            title = await page.title()
-            warnings.append(f"Playwright 작동 성공. (페이지: {title}) 실시간 파싱은 향후 DOM 구조에 맞춰 보완됩니다.")
-            
-            await browser.close()
-            
-    except Exception as e:
-        warnings.append(f"Playwright 크롤링 실패: {e}")
-        
+        )
+
     return flights, warnings
