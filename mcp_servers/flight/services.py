@@ -2,8 +2,47 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 from mcp_servers.flight.api_clients import search_serpapi
+
+
+def _date_pairs_with_flexibility(
+    start_date: str,
+    end_date: str,
+    date_flexibility_days: int,
+) -> list[tuple[str, str]]:
+    """날짜 유연성 적용 시 검색할 (출발일, 귀환일) 쌍. 최대 5쌍으로 API 호출 절약."""
+    if not date_flexibility_days or date_flexibility_days <= 0:
+        return [(start_date, end_date)]
+
+    try:
+        sd = datetime.strptime(start_date, "%Y-%m-%d").date()
+        ed = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return [(start_date, end_date)]
+
+    flex = min(int(date_flexibility_days), 7)  # 최대 ±7일
+
+    pairs: list[tuple[str, str]] = []
+    # 대표 날짜: -flex, -1, 0, +1, +flex (최대 5쌍)
+    offsets = []
+    if flex >= 3:
+        offsets = [-flex, -1, 0, 1, flex]
+    elif flex >= 2:
+        offsets = [-flex, -1, 0, 1, flex]
+    elif flex >= 1:
+        offsets = [-1, 0, 1]
+
+    seen: set[tuple[str, str]] = set()
+    for off in offsets:
+        ns = (sd + timedelta(days=off)).strftime("%Y-%m-%d")
+        ne = (ed + timedelta(days=off)).strftime("%Y-%m-%d")
+        if (ns, ne) not in seen:
+            seen.add((ns, ne))
+            pairs.append((ns, ne))
+
+    return pairs if pairs else [(start_date, end_date)]
 
 
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
@@ -128,19 +167,59 @@ def multi_source_search_flights(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    date_flexibility_days: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi Google Flights 검색 (대한항공·아시아나 포함).
+    date_flexibility_days > 0 시 해당 ±일 범위 내 여러 날짜로 병렬 검색 후 통합.
     mileage_program이 있으면 해당 마일리지 적립 항공사 편을 우선 노출.
     Returns (flights, warnings)
     """
     config = {"serpapi_api_key": serpapi_api_key}
+    date_pairs = _date_pairs_with_flexibility(
+        start_date, end_date, date_flexibility_days or 0
+    )
 
     async def _run():
-        return await _search_serpapi_only(
-            origin, destination, start_date, end_date, seat_class, use_miles,
-            mileage_program, config,
-        )
+        if len(date_pairs) == 1:
+            return await _search_serpapi_only(
+                origin, destination, date_pairs[0][0], date_pairs[0][1],
+                seat_class, use_miles, mileage_program, config,
+            )
+        # 날짜 유연성: 여러 날짜 쌍 병렬 검색
+        tasks = [
+            _search_serpapi_only(
+                origin, destination, ds, de, seat_class, use_miles,
+                mileage_program, config,
+            )
+            for ds, de in date_pairs
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        all_flights: list[dict] = []
+        all_warnings: list[str] = []
+        api_responded_ok = False
+        for r in results:
+            if isinstance(r, Exception):
+                all_warnings.append(f"날짜 유연 검색 오류: {r}")
+                continue
+            fl, wa, ok = r
+            all_flights.extend(fl)
+            all_warnings.extend(wa)
+            if ok:
+                api_responded_ok = True
+        # 중복 제거 및 정렬
+        seen: set = set()
+        unique: list = []
+        for f in all_flights:
+            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+            if key not in seen:
+                seen.add(key)
+                unique.append(f)
+        preferred = _get_preferred_airlines(mileage_program)
+        for f in unique:
+            f["mileage_eligible"] = bool(preferred) and _is_preferred_airline(f, preferred)
+        unique.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
+        return unique, list(dict.fromkeys(all_warnings)), api_responded_ok
 
     try:
         loop = asyncio.get_running_loop()
@@ -149,7 +228,6 @@ def multi_source_search_flights(
     if loop is None:
         flights, warnings, api_responded_ok = asyncio.run(_run())
     else:
-        # uvicorn 등 이미 실행 중인 이벤트 루프 내에서는 별도 스레드에서 실행
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _run())
             flights, warnings, api_responded_ok = future.result()
@@ -191,6 +269,7 @@ def multi_source_search_flights_multi_dest(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    date_flexibility_days: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
@@ -206,6 +285,7 @@ def multi_source_search_flights_multi_dest(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
             serpapi_api_key=serpapi_api_key,
+            date_flexibility_days=date_flexibility_days,
         )
         label = airport_labels.get(dest, dest)
         for f in flights:

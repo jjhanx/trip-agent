@@ -49,6 +49,8 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 params["mileage_program"] = travel.mileage_program
             if travel.destination_airports:
                 params["destination_airports"] = travel.destination_airports
+            if travel.date_flexibility_days and travel.date_flexibility_days > 0:
+                params["date_flexibility_days"] = travel.date_flexibility_days
             result = await self.mcp.call_tool("search_flights", params)
             text = result.get("text", json.dumps(result))
             parsed = json.loads(text) if isinstance(text, str) else text
@@ -73,6 +75,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
 
             s = Settings()
             origin = travel.origin_airport_code or travel.origin
+            flex = travel.date_flexibility_days if travel.date_flexibility_days and travel.date_flexibility_days > 0 else None
             if travel.destination_airports:
                 flights, warnings = multi_source_search_flights_multi_dest(
                     origin,
@@ -83,6 +86,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=flex,
                 )
             else:
                 flights, warnings = multi_source_search_flights(
@@ -94,6 +98,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=flex,
                 )
             # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}

@@ -193,6 +193,7 @@ class SessionExecutor(BaseAgentExecutor):
 
             s = Settings()
             origin = travel.origin_airport_code or travel.origin
+            flex = travel.date_flexibility_days if travel.date_flexibility_days and travel.date_flexibility_days > 0 else None
             if travel.destination_airports:
                 flights, warnings = multi_source_search_flights_multi_dest(
                     origin,
@@ -203,6 +204,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=flex,
                 )
             else:
                 destination = travel.destination_airport_code or travel.destination
@@ -215,6 +217,7 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    date_flexibility_days=flex,
                 )
             # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}
