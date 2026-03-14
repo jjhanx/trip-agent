@@ -82,7 +82,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             else:
                 flights, warnings = multi_source_search_flights(
@@ -93,7 +93,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
-                    duffel_access_token=s.duffel_access_token,
+                    serpapi_api_key=s.serpapi_api_key,
                 )
             # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}

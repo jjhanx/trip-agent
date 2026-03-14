@@ -1,9 +1,9 @@
-"""Flight search logic - Duffel API (대한항공·아시아나 포함) + mock fallback."""
+"""Flight search logic - SerpApi (Google Flights) + mock fallback."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from mcp_servers.flight.api_clients import search_duffel
+from mcp_servers.flight.api_clients import search_serpapi
 
 
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
@@ -57,7 +57,7 @@ def _recommend_sort_key(
     return (cat, dur, price)
 
 
-async def _search_duffel_only(
+async def _search_serpapi_only(
     origin: str,
     destination: str,
     start_date: str,
@@ -67,19 +67,19 @@ async def _search_duffel_only(
     mileage_program: str | None,
     config: dict,
 ) -> tuple[list[dict], list[str], bool]:
-    """Duffel API 호출 (대한항공·아시아나 포함 300+ 항공사).
+    """SerpApi Google Flights 호출 (대한항공·아시아나 포함).
     Returns (flights, warnings, api_responded_ok)."""
-    api_key = config.get("duffel_access_token", "")
+    api_key = config.get("serpapi_api_key", "")
     if not api_key:
-        return [], ["Duffel API 키가 설정되지 않았습니다. .env에 DUFFEL_ACCESS_TOKEN 추가."], False
+        return [], ["SerpApi API 키가 설정되지 않았습니다. .env에 SERPAPI_API_KEY 추가."], False
 
     try:
-        flights, warnings = await search_duffel(
+        flights, warnings = await search_serpapi(
             origin, destination, start_date, end_date, api_key, seat_class
         )
         api_responded_ok = True
     except Exception as e:
-        return [], [f"Duffel API 오류: {e}"], False
+        return [], [f"SerpApi 오류: {e}"], False
 
     all_flights = flights
 
@@ -127,17 +127,17 @@ def multi_source_search_flights(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
-    duffel_access_token: str = "",
+    serpapi_api_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
-    Duffel API 검색 (대한항공·아시아나 포함).
+    SerpApi Google Flights 검색 (대한항공·아시아나 포함).
     mileage_program이 있으면 해당 마일리지 적립 항공사 편을 우선 노출.
     Returns (flights, warnings)
     """
-    config = {"duffel_access_token": duffel_access_token}
+    config = {"serpapi_api_key": serpapi_api_key}
 
     async def _run():
-        return await _search_duffel_only(
+        return await _search_serpapi_only(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program, config,
         )
@@ -190,7 +190,7 @@ def multi_source_search_flights_multi_dest(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
-    duffel_access_token: str = "",
+    serpapi_api_key: str = "",
 ) -> tuple[list[dict], list[str]]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
@@ -205,7 +205,7 @@ def multi_source_search_flights_multi_dest(
         flights, warnings = multi_source_search_flights(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
-            duffel_access_token=duffel_access_token,
+            serpapi_api_key=serpapi_api_key,
         )
         label = airport_labels.get(dest, dest)
         for f in flights:

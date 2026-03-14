@@ -1,4 +1,4 @@
-"""Flight MCP Server - 항공편 검색 Tools (Duffel API, 대한항공·아시아나 포함)."""
+"""Flight MCP Server - 항공편 검색 Tools (SerpApi Google Flights, 대한항공·아시아나 포함)."""
 
 import json
 import os
@@ -15,7 +15,7 @@ mcp = FastMCP("flight-search", port=8001)
 
 def _get_config():
     return {
-        "duffel_access_token": os.environ.get("DUFFEL_ACCESS_TOKEN", ""),
+        "serpapi_api_key": os.environ.get("SERPAPI_API_KEY", ""),
     }
 
 
@@ -31,7 +31,7 @@ def search_flights(
     destination_airports: list[str] | None = None,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    Duffel API 사용 (대한항공·아시아나 포함 300+ 항공사). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
+    SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
@@ -56,13 +56,13 @@ def search_flights(
             seat_class,
             use_miles,
             mileage_program=mileage_program or None,
-            duffel_access_token=cfg["duffel_access_token"],
+            serpapi_api_key=cfg["serpapi_api_key"],
         )
     else:
         flights, warnings = multi_source_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
-            duffel_access_token=cfg["duffel_access_token"],
+            serpapi_api_key=cfg["serpapi_api_key"],
         )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 
