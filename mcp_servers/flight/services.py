@@ -131,25 +131,8 @@ async def _search_serpapi_only(
             seen.add(key)
             unique.append(f)
 
-    # 마일리지 선호 시: API 결과에 선호 항공사가 0건이면 mock에서 해당 항공사만 보충
+    # mileage_eligible 표시 및 추천순 정렬 (검색 결과 있을 때 Mock 보충 안 함)
     preferred_airlines = _get_preferred_airlines(mileage_program)
-    if preferred_airlines:
-        preferred_in_results = [f for f in unique if _is_preferred_airline(f, preferred_airlines)]
-        if not preferred_in_results:
-            from mcp_servers.flight.mock_fallback import mock_search_flights
-
-            mock_all = mock_search_flights(origin, destination, start_date, end_date, seat_class, use_miles)
-            mock_preferred = [f for f in mock_all if _is_preferred_airline(f, preferred_airlines)]
-            for f in mock_preferred:
-                f["mileage_eligible"] = True
-                f["source"] = "mock_reference"  # API에 없어 참고용 추가
-            if mock_preferred:
-                unique = mock_preferred + unique
-                warnings.append(
-                    "선호 항공사 일정이 API에 없어 참고용 예시를 추가했습니다. 실제 예약·가격은 항공사 사이트에서 확인하세요."
-                )
-
-    # mileage_eligible 표시 및 추천순 정렬 (선호 직항 → 선호 경유 → 나머지 직항 → 나머지 경유, 각 그룹 내 비행시간↑ 가격↑)
     for f in unique:
         f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
     sort_fn = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
