@@ -99,6 +99,16 @@ header p {
   color: var(--bg);
 }
 
+.step-node.completed {
+  color: var(--muted);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.step-node.completed:not(.active):hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .step-node.done {
   color: var(--muted);
   border-color: rgba(56, 189, 248, 0.3);

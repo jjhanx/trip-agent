@@ -105,8 +105,10 @@ async def _search_serpapi_only(
     use_miles: bool,
     mileage_program: str | None,
     config: dict,
+    one_way: bool = False,
 ) -> tuple[list[dict], list[str], bool]:
     """SerpApi Google Flights 호출 (대한항공·아시아나 포함).
+    one_way=True 시 편도 검색.
     Returns (flights, warnings, api_responded_ok)."""
     api_key = config.get("serpapi_api_key", "")
     if not api_key:
@@ -114,7 +116,7 @@ async def _search_serpapi_only(
 
     try:
         flights, warnings = await search_serpapi(
-            origin, destination, start_date, end_date, api_key, seat_class
+            origin, destination, start_date, end_date, api_key, seat_class, one_way=one_way
         )
         api_responded_ok = True
     except Exception as e:
@@ -151,6 +153,7 @@ def multi_source_search_flights(
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
     date_flexibility_days: int | None = None,
+    one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi Google Flights 검색 (대한항공·아시아나 포함).
@@ -167,13 +170,13 @@ def multi_source_search_flights(
         if len(date_pairs) == 1:
             return await _search_serpapi_only(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
-                seat_class, use_miles, mileage_program, config,
+                seat_class, use_miles, mileage_program, config, one_way=one_way,
             )
         # 날짜 유연성: 여러 날짜 쌍 병렬 검색
         tasks = [
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
-                mileage_program, config,
+                mileage_program, config, one_way=one_way,
             )
             for ds, de in date_pairs
         ]
@@ -253,6 +256,7 @@ def multi_source_search_flights_multi_dest(
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
     date_flexibility_days: int | None = None,
+    one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
@@ -269,6 +273,7 @@ def multi_source_search_flights_multi_dest(
             mileage_program=mileage_program,
             serpapi_api_key=serpapi_api_key,
             date_flexibility_days=date_flexibility_days,
+            one_way=one_way,
         )
         label = airport_labels.get(dest, dest)
         for f in flights:

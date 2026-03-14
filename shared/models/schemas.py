@@ -104,6 +104,10 @@ class TravelInput(BaseModel):
         default_factory=TravelerComposition,
         description="일행 구성 (성인 남·여, 아동)",
     )
+    multi_cities: list[dict] | None = Field(
+        None,
+        description="다구간 여정: [{origin, destination, date}, ...]",
+    )
 
 
 class FlightResult(BaseModel):

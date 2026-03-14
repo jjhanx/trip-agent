@@ -161,9 +161,11 @@ async def search_serpapi(
     end_date: str,
     api_key: str,
     seat_class: str = "economy",
+    one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi Google Flights 검색. 대한항공·아시아나 포함.
+    one_way=True 시 편도만 검색 (type=2).
     Returns (flights, warnings)
     """
     if not api_key:
@@ -180,13 +182,14 @@ async def search_serpapi(
         "departure_id": o,
         "arrival_id": d,
         "outbound_date": start_date,
-        "return_date": end_date,
-        "type": "1",  # round trip
+        "type": "2" if one_way else "1",
         "api_key": api_key,
     }
+    if not one_way:
+        params["return_date"] = end_date
 
     if DEBUG_SERPAPI:
-        print(f"[SerpApi] Request: {o} -> {d}, {start_date} ~ {end_date}")
+        print(f"[SerpApi] Request: {o} -> {d}, {start_date}" + (f" ~ {end_date}" if not one_way else " (편도)"))
 
     url = "https://serpapi.com/search.json"
     async with httpx.AsyncClient(timeout=30.0) as client:

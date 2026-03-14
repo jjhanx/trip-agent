@@ -69,6 +69,25 @@ class SessionExecutor(BaseAgentExecutor):
         selected_flight = data.get("selected_flight")
         selected_itinerary = data.get("selected_itinerary")
         selected_accommodation = data.get("selected_accommodation")
+        selected_local_transport = data.get("selected_local_transport")
+        flight_leg = data.get("flight_leg")  # "outbound" | "return" | "multi_city_0", ...
+        selected_outbound_flight = data.get("selected_outbound_flight")
+        selected_multi_city_flights = data.get("selected_multi_city_flights") or []
+        multi_cities = getattr(travel, "multi_cities", None) or data.get("multi_cities") or []
+
+        def _is_flight_complete(sf) -> bool:
+            if not sf:
+                return False
+            if travel.trip_type == "one_way":
+                return bool(sf.get("outbound") if isinstance(sf, dict) else sf)
+            if travel.trip_type == "round_trip":
+                return bool(sf.get("outbound")) and bool(sf.get("return"))
+            if travel.trip_type == "multi_city":
+                legs = sf.get("legs") if isinstance(sf, dict) else []
+                return len(legs) >= len(multi_cities) if multi_cities else bool(legs)
+            return bool(sf)
+
+        flight_complete = _is_flight_complete(selected_flight)
 
         if selected_flight and selected_itinerary and selected_accommodation:
             resp = await self._call_agent(
@@ -96,7 +115,7 @@ class SessionExecutor(BaseAgentExecutor):
                 )
             return
 
-        if selected_flight and selected_itinerary:
+        if selected_flight and selected_itinerary and not selected_accommodation:
             acc_priority = [t.value for t in travel.accommodation_priority] if travel.accommodation_priority else [travel.accommodation_type.value]
             acc_payload = {
                 "location": travel.destination,
@@ -155,7 +174,7 @@ class SessionExecutor(BaseAgentExecutor):
             )
             return
 
-        if selected_flight:
+        if flight_complete and selected_local_transport and not selected_itinerary:
             it_payload = {
                 "destination": travel.destination,
                 "start_date": travel.start_date.isoformat(),
@@ -181,7 +200,66 @@ class SessionExecutor(BaseAgentExecutor):
                 )
             return
 
-        flight_resp = await self._call_agent("flight", base)
+        if flight_complete and not selected_local_transport:
+            lt_payload = {
+                "pickup": travel.destination,
+                "dropoff": travel.destination,
+                "start_date": travel.start_date.isoformat(),
+                "end_date": travel.end_date.isoformat(),
+                "origin": travel.origin,
+                "destination": travel.destination,
+                "date_time": travel.start_date.isoformat(),
+            }
+            if travel.local_transport == LocalTransportType.RENTAL_CAR:
+                lt_resp = await self._call_agent("rental_car", lt_payload)
+                if not lt_resp:
+                    from mcp_servers.rental_car.services import mock_search_rentals
+                    from datetime import datetime
+
+                    d1 = datetime.strptime(lt_payload["start_date"], "%Y-%m-%d")
+                    d2 = datetime.strptime(lt_payload["end_date"], "%Y-%m-%d")
+                    days = max(1, (d2 - d1).days)
+                    lt_resp = json.dumps(
+                        mock_search_rentals(
+                            lt_payload["pickup"],
+                            lt_payload["dropoff"],
+                            "compact",
+                            days,
+                        )
+                    )
+            else:
+                lt_resp = await self._call_agent("transit", lt_payload)
+                if not lt_resp:
+                    lt_resp = json.dumps([
+                        {"route_id": "TR001", "description": "Metro + Bus", "duration_minutes": 40},
+                        {"route_id": "TR002", "description": "City Pass", "pass_price_krw": 15000},
+                    ])
+            result = {
+                "step": "rental",
+                "local_transport": json.loads(lt_resp) if lt_resp and lt_resp.startswith("[") else lt_resp or [],
+            }
+            await event_queue.enqueue_event(
+                new_agent_text_message(json.dumps(result, ensure_ascii=False))
+            )
+            return
+
+        flight_payload = dict(base)
+        if "multi_cities" not in flight_payload and multi_cities:
+            flight_payload["multi_cities"] = multi_cities
+        if flight_leg:
+            flight_payload["flight_leg"] = flight_leg
+        if selected_outbound_flight:
+            flight_payload["selected_outbound_flight"] = selected_outbound_flight
+        if selected_multi_city_flights:
+            flight_payload["selected_multi_city_flights"] = selected_multi_city_flights
+        if travel.trip_type == "round_trip" and not selected_flight and not flight_leg:
+            flight_payload["flight_leg"] = "outbound"
+        if travel.trip_type == "one_way" and not selected_flight:
+            flight_payload["flight_leg"] = "outbound"
+        if travel.trip_type == "multi_city" and multi_cities and not flight_leg:
+            flight_payload["flight_leg"] = "multi_city_0"
+
+        flight_resp = await self._call_agent("flight", flight_payload)
         if flight_resp:
             await event_queue.enqueue_event(new_agent_text_message(flight_resp))
         else:

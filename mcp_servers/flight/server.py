@@ -30,21 +30,24 @@ def search_flights(
     mileage_program: str | None = None,
     destination_airports: list[str] | None = None,
     date_flexibility_days: int | None = None,
+    one_way: bool = False,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
     SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
     date_flexibility_days > 0 시 ±일 범위 내 여러 날짜 병렬 검색.
+    one_way=True 시 편도만 검색 (왕복의 가는 편/오는 편 별도 검색용).
 
     Args:
         origin: Departure city/code (e.g. ICN, GMP)
         destination: Arrival city/code (e.g. KIX, NRT)
-        start_date: Outbound date (YYYY-MM-DD)
-        end_date: Return date (YYYY-MM-DD)
+        start_date: Outbound date (YYYY-MM-DD). one_way 시 검색할 출발일
+        end_date: Return date (YYYY-MM-DD). one_way 시 무시
         seat_class: economy, premium_economy, business, first
         use_miles: Whether to search mileage redemption options
         mileage_program: 마일리지 프로그램 (Skypass, Asiana, Miles&More 등). 해당 항공사 편 우선 표시
         destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
         date_flexibility_days: 날짜 유연성 (±일). 0/None이면 해당 날짜만 검색
+        one_way: 편도 검색 (왕복 시 가는 편/오는 편 각각 검색 시 True)
 
     Returns:
         JSON object with "flights" array and "warnings" array
@@ -69,6 +72,7 @@ def search_flights(
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
             date_flexibility_days=flex,
+            one_way=one_way,
         )
     return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
 

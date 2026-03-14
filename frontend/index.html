@@ -192,7 +192,10 @@
       </section>
 
       <section id="step-flights" class="card hidden">
-        <h2>2. 항공편 선택</h2>
+        <h2 id="step-flights-title">2a. 출국 항공편 선택</h2>
+        <div id="outbound-summary" class="hidden" style="margin-bottom: 1rem; padding: 0.8rem; background: rgba(56, 189, 248, 0.08); border-radius: 8px; font-size: 0.9em;">
+          <strong>선택한 출국:</strong> <span id="outbound-summary-text"></span>
+        </div>
         <div id="flight-mock-notice" class="mock-notice hidden"></div>
         <div id="flight-warnings" class="api-warnings hidden"></div>
 
@@ -221,21 +224,31 @@
         <div id="flights-list" class="options-grid" style="display: flex; flex-direction: column;"></div>
 
         <div style="margin-top: 1.5rem;">
-          <button id="btn-next-flights" disabled title="리스트에서 항공편을 최종 선택해주세요"
-            style="opacity: 0.5; cursor: not-allowed;">다음 단계 (숙소/일정) 로 이동</button>
+          <button id="btn-next-flights" disabled title="리스트에서 항공편을 선택해주세요"
+            style="opacity: 0.5; cursor: not-allowed;">다음</button>
           <button id="btn-back-flights" class="secondary">뒤로</button>
         </div>
       </section>
 
+      <section id="step-rental" class="card hidden">
+        <h2>3. 렌트카/대중교통</h2>
+        <p class="muted">선택한 현지 이동 수단의 옵션입니다.</p>
+        <div id="rental-list" class="options-grid"></div>
+        <div style="margin-top: 1.5rem;">
+          <button id="btn-next-rental">다음</button>
+          <button id="btn-back-rental" class="secondary">뒤로</button>
+        </div>
+      </section>
+
       <section id="step-itineraries" class="card hidden">
-        <h2>3. 일정 선택</h2>
+        <h2>4. 여행 일정</h2>
         <div id="itineraries-list" class="options-grid"></div>
         <button id="btn-next-itineraries">다음</button>
         <button id="btn-back-itineraries" class="secondary">뒤로</button>
       </section>
 
       <section id="step-accommodation" class="card hidden">
-        <h2>4. 숙소 선택</h2>
+        <h2>5. 숙소 선택</h2>
         <div id="accommodations-list" class="options-grid"></div>
         <div id="local-transport-info"></div>
         <button id="btn-confirm-booking">일정 확정</button>
@@ -243,7 +256,7 @@
       </section>
 
       <section id="step-confirm" class="card hidden">
-        <h2>5. 일정 확정</h2>
+        <h2>6. 일정 확정</h2>
         <div id="booking-guidance"></div>
       </section>
 

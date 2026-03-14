@@ -79,12 +79,18 @@ let state = {
   origin_airport_code: null,
   destination_airport_code: null,
   flights: [],
+  flightsByLeg: {},
+  selectedOutboundFlight: null,
+  selectedReturnFlight: null,
+  selectedMultiCityFlights: [],
   selectedFlight: null,
+  flightLeg: 'outbound',
   itineraries: [],
   selectedItinerary: null,
   accommodations: [],
   selectedAccommodation: null,
   localTransport: [],
+  selectedLocalTransport: null,
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -95,12 +101,23 @@ const STEP_IDS = {
   'step-origin-airports': 'input',
   'step-destination-airports': 'input',
   'step-flights': 'flights',
+  'step-rental': 'rental',
   'step-itineraries': 'itineraries',
   'step-accommodation': 'accommodation',
   'step-confirm': 'booking',
 };
 
-function show(id) {
+const STEP_TO_SECTION = {
+  input: 'step-input',
+  flights: 'step-flights',
+  rental: 'step-rental',
+  itineraries: 'step-itineraries',
+  accommodation: 'step-accommodation',
+  confirm: 'step-confirm',
+  booking: 'step-confirm',
+};
+
+function show(id, fromStepClick = false) {
   $$('section').forEach(s => s.classList.add('hidden'));
   const el = $(`#${id}`);
   if (el) el.classList.remove('hidden');
@@ -108,8 +125,122 @@ function show(id) {
   if (step) {
     $$('#step-indicator .step-node').forEach(node => {
       node.classList.toggle('active', node.dataset.step === step);
+      node.classList.remove('completed');
     });
+    updateStepCompletedState();
+    if (fromStepClick && step) {
+      refreshStepView(step);
+    }
   }
+}
+
+function updateStepCompletedState() {
+  const nodes = $$('#step-indicator .step-node');
+  const steps = ['input', 'flights', 'rental', 'itineraries', 'accommodation', 'confirm', 'booking'];
+  steps.forEach((s, i) => {
+    const node = nodes[i];
+    if (!node) return;
+    const hasData = s === 'input' && state.travelInput
+      || s === 'flights' && buildSelectedFlight()
+      || s === 'rental' && (state.localTransport?.length > 0 || state.selectedLocalTransport)
+      || s === 'itineraries' && (state.itineraries?.length > 0 || state.selectedItinerary)
+      || s === 'accommodation' && (state.accommodations?.length > 0 || state.selectedAccommodation)
+      || (s === 'confirm' || s === 'booking') && state.selectedAccommodation;
+    if (hasData && !node.classList.contains('active')) {
+      node.classList.add('completed');
+    }
+  });
+}
+
+function refreshStepView(step) {
+  if (step === 'input' && state.travelInput) {
+    const form = $('#travel-form');
+    if (form && state.travelInput) {
+      const ti = state.travelInput;
+      const setVal = (el, v) => { if (el && v != null) el.value = String(v); };
+      setVal(form.origin, ti.origin);
+      setVal(form.destination, ti.destination);
+      setVal($('#start_date_input') || form.start_date, ti.start_date);
+      setVal($('#end_date_input') || form.end_date, ti.end_date);
+      setVal($('#trip_type_select') || form.trip_type, ti.trip_type);
+      if (ti.travelers) {
+        setVal(form.travelers_male, ti.travelers?.male);
+        setVal(form.travelers_female, ti.travelers?.female);
+        setVal(form.travelers_children, ti.travelers?.children);
+      }
+      initTripTypeUI();
+      if (ti.trip_type === 'multi_city' && (ti.multi_cities || state.multi_cities)?.length) {
+        state.multi_cities = ti.multi_cities || state.multi_cities;
+        renderMultiCityLegs();
+      }
+      saveFormToStorage();
+    }
+  }
+  if (step === 'flights') {
+    const sf = buildSelectedFlight();
+    const flightsToShow = state.currentFlights || state.flights || (state.trip_type === 'multi_city' ? Object.values(state.flightsByLeg || {}).flat() : []);
+    if (sf && flightsToShow.length) {
+      renderFlights(flightsToShow, state.flightWarnings || []);
+      showFlightSummaryForEdit(sf);
+    } else if (flightsToShow.length) {
+      renderFlights(flightsToShow, state.flightWarnings || []);
+      $('#flights-list').classList.remove('hidden');
+      $('#flight-sort-bar').classList.remove('hidden');
+      $('#selected-flight-summary').classList.add('hidden');
+    }
+  }
+  if (step === 'rental' && state.localTransport?.length) {
+    renderRentalOptions(state.localTransport);
+  }
+  if (step === 'itineraries' && state.itineraries?.length) {
+    renderItineraries(state.itineraries);
+  }
+  if (step === 'accommodation' && state.accommodations?.length) {
+    renderAccommodations(state.accommodations);
+  }
+}
+
+function showFlightSummaryForEdit(sf) {
+  const summary = $('#selected-flight-summary');
+  const summaryText = $('#selected-flight-text');
+  const list = $('#flights-list');
+  const sortBar = $('#flight-sort-bar');
+  if (!summary || !summaryText) return;
+  list.classList.add('hidden');
+  sortBar.classList.add('hidden');
+  let html = '';
+  if (sf.outbound) {
+    const f = sf.outbound;
+    const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+    const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+    html += `[출국] ${f.airline} ${f.flight_number} ${f.origin} → ${destL} (${price})`;
+  }
+  if (sf.return) {
+    const f = sf.return;
+    const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+    html += (html ? '<br>' : '') + `[귀국] ${f.airline} ${f.flight_number} ${f.origin} → ${f.destination || ''} (${price})`;
+  }
+  if (sf.legs?.length) {
+    html = sf.legs.map((f, i) => {
+      const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+      const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+      return `[구간${i + 1}] ${f.airline} ${f.flight_number} ${f.origin} → ${destL} (${price})`;
+    }).join('<br>');
+  }
+  summaryText.innerHTML = html || '선택된 항공편 없음';
+  summary.classList.remove('hidden');
+  const nextBtn = $('#btn-next-flights');
+  if (nextBtn) {
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    nextBtn.style.cursor = 'pointer';
+  }
+}
+
+function navigateToStep(stepName) {
+  const sectionId = STEP_TO_SECTION[stepName];
+  if (!sectionId) return;
+  show(sectionId, true);
 }
 
 function showError(msg) {
@@ -194,7 +325,7 @@ function buildTravelInput() {
     origin: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].origin : form.origin.value,
     destination: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[multi_cities.length - 1].destination : form.destination.value,
     start_date: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].date : form.start_date.value,
-    end_date: trip_type === 'round_trip' ? form.end_date.value : null,
+    end_date: trip_type === 'round_trip' ? form.end_date?.value : (trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[multi_cities.length - 1].date : null) || form.start_date?.value || form.end_date?.value,
     multi_cities: trip_type === 'multi_city' ? multi_cities : null,
     date_flexibility_days: isNaN(flex) || flex <= 0 ? null : flex,
     local_transport: form.local_transport.value,
@@ -309,11 +440,27 @@ function renderDestAirports() {
   });
 }
 
-async function doFlightSearch() {
+async function doFlightSearch(leg) {
   state.travelInput = buildTravelInput();
+  state.trip_type = state.travelInput?.trip_type || $('#trip_type_select')?.value || 'round_trip';
+  state.multi_cities = state.travelInput?.multi_cities || state.multi_cities || [];
+  state.flightLeg = leg || (state.trip_type === 'multi_city' ? 'multi_city_0' : 'outbound');
+  const payload = { ...state.travelInput };
+  if (state.trip_type === 'round_trip' || state.trip_type === 'one_way') {
+    payload.flight_leg = state.flightLeg;
+  }
+  if (state.trip_type === 'multi_city') {
+    payload.flight_leg = state.flightLeg;
+    if (state.selectedMultiCityFlights?.length > 0) {
+      payload.selected_multi_city_flights = state.selectedMultiCityFlights;
+    }
+  }
+  if (state.flightLeg === 'return' && state.selectedOutboundFlight) {
+    payload.selected_outbound_flight = state.selectedOutboundFlight;
+  }
   show('loading');
   try {
-    let data = await callAgent(state.travelInput);
+    let data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
     let flights = Array.isArray(data) ? data : (data?.flights || []);
     if (!Array.isArray(flights) && typeof data === 'object' && !data.step) {
@@ -321,7 +468,15 @@ async function doFlightSearch() {
     }
     const warnings = data?.warnings || [];
     state.flights = flights;
+    state.flightsByLeg[state.flightLeg] = flights;
+    state.flightWarnings = warnings;
     renderFlights(flights, warnings);
+    if (state.flightLeg === 'return' || (state.trip_type === 'multi_city' && state.flightLeg !== 'multi_city_0')) {
+      $('#flights-list').classList.remove('hidden');
+      $('#flight-sort-bar').classList.remove('hidden');
+      $('#selected-flight-summary').classList.add('hidden');
+      if (state.flightLeg === 'return') state.selectedReturnFlight = null;
+    }
     show('step-flights');
   } catch (err) {
     showError(err.message);
@@ -393,8 +548,38 @@ function renderFlights(flights, warnings) {
   const warnEl = $('#flight-warnings');
   const mockEl = $('#flight-mock-notice');
   const sortBar = $('#flight-sort-bar');
+  const stepTitle = $('#step-flights-title');
   const warns = warnings || [];
 
+  if (stepTitle) {
+    if (state.trip_type === 'multi_city') {
+      const legNum = state.flightLeg.match(/multi_city_(\d+)/)?.[1];
+      stepTitle.textContent = legNum != null ? `2-${parseInt(legNum) + 1}. 구간 ${parseInt(legNum) + 1} 항공편 선택` : '2. 항공편 선택';
+    } else {
+      stepTitle.textContent = state.flightLeg === 'return'
+        ? '2b. 귀국 항공편 선택'
+        : (state.trip_type === 'one_way' ? '2. 항공편 선택' : '2a. 출국 항공편 선택');
+    }
+  }
+  const outboundSummary = $('#outbound-summary');
+  const outboundSummaryText = $('#outbound-summary-text');
+  if (outboundSummary && outboundSummaryText) {
+    if (state.flightLeg === 'return' && state.selectedOutboundFlight) {
+      const f = state.selectedOutboundFlight;
+      const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+      outboundSummaryText.textContent = `선택한 출국: ${f.airline} ${f.flight_number} ${f.origin} → ${destL}`;
+      outboundSummary.classList.remove('hidden');
+    } else if (state.trip_type === 'multi_city' && state.flightLeg !== 'multi_city_0' && state.selectedMultiCityFlights?.length > 0) {
+      const prevLegs = state.selectedMultiCityFlights.filter(Boolean).map((f, i) => {
+        const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
+        return `구간${i + 1}: ${f.airline} ${f.flight_number} ${f.origin}→${destL}`;
+      });
+      outboundSummaryText.textContent = '선택 완료: ' + prevLegs.join(' | ');
+      outboundSummary.classList.remove('hidden');
+    } else {
+      outboundSummary.classList.add('hidden');
+    }
+  }
   if (flights) {
     state.currentFlights = flights;
   }
@@ -560,7 +745,16 @@ function renderFlights(flights, warnings) {
 }
 
 function selectFlight(f) {
-  state.selectedFlight = f;
+  if (state.trip_type === 'multi_city') {
+    const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
+    state.selectedMultiCityFlights = state.selectedMultiCityFlights || [];
+    state.selectedMultiCityFlights[idx] = f;
+  } else if (state.flightLeg === 'return') {
+    state.selectedReturnFlight = f;
+  } else {
+    state.selectedOutboundFlight = f;
+  }
+  state.selectedFlight = buildSelectedFlight();
   const list = $('#flights-list');
   const sortBar = $('#flight-sort-bar');
   const summary = $('#selected-flight-summary');
@@ -572,7 +766,10 @@ function selectFlight(f) {
 
   const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
   const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
-  summaryText.innerHTML = `${f.airline} ${f.flight_number} - ${f.origin} → ${destLabel} (${price})`;
+  const legLabel = state.trip_type === 'multi_city'
+    ? `[구간${parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10) + 1}] `
+    : (state.flightLeg === 'return' ? '[귀국] ' : '[출국] ');
+  summaryText.innerHTML = legLabel + `${f.airline} ${f.flight_number} - ${f.origin} → ${destLabel} (${price})`;
   summary.classList.remove('hidden');
 
   nextBtn.disabled = false;
@@ -580,8 +777,35 @@ function selectFlight(f) {
   nextBtn.style.cursor = 'pointer';
 }
 
+function buildSelectedFlight() {
+  if (state.trip_type === 'multi_city') {
+    const legs = (state.selectedMultiCityFlights || []).filter(Boolean);
+    const mc = state.multi_cities || state.travelInput?.multi_cities || [];
+    return legs.length > 0 ? { legs } : null;
+  }
+  if (state.trip_type === 'one_way' && state.selectedOutboundFlight) {
+    return { outbound: state.selectedOutboundFlight };
+  }
+  if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && state.selectedReturnFlight) {
+    return { outbound: state.selectedOutboundFlight, return: state.selectedReturnFlight };
+  }
+  if (state.selectedOutboundFlight) {
+    return { outbound: state.selectedOutboundFlight };
+  }
+  return null;
+}
+
 $('#btn-cancel-flight').addEventListener('click', () => {
-  state.selectedFlight = null;
+  if (state.trip_type === 'multi_city') {
+    const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
+    state.selectedMultiCityFlights = state.selectedMultiCityFlights || [];
+    state.selectedMultiCityFlights[idx] = undefined;
+  } else if (state.flightLeg === 'return') {
+    state.selectedReturnFlight = null;
+  } else {
+    state.selectedOutboundFlight = null;
+  }
+  state.selectedFlight = buildSelectedFlight();
   $('#flights-list').classList.remove('hidden');
   $('#flight-sort-bar').classList.remove('hidden');
   $('#selected-flight-summary').classList.add('hidden');
@@ -649,21 +873,89 @@ $('#btn-back-flights').addEventListener('click', () => {
 });
 
 $('#btn-next-flights').addEventListener('click', async () => {
-  if (!state.selectedFlight) { alert('항공편을 선택해 주세요.'); return; }
+  if (state.trip_type === 'multi_city') {
+    const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
+    const selected = state.selectedMultiCityFlights?.[idx];
+    if (!selected) {
+      alert('항공편을 선택해 주세요.');
+      return;
+    }
+    const mc = state.multi_cities || state.travelInput?.multi_cities || [];
+    if (idx + 1 < mc.length) {
+      state.flightLeg = `multi_city_${idx + 1}`;
+      await doFlightSearch(state.flightLeg);
+      return;
+    }
+  } else {
+    if (state.flightLeg === 'outbound' && !state.selectedOutboundFlight) {
+      alert('항공편을 선택해 주세요.');
+      return;
+    }
+    if (state.flightLeg === 'return' && !state.selectedReturnFlight) {
+      alert('항공편을 선택해 주세요.');
+      return;
+    }
+    if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
+      await doFlightSearch('return');
+      return;
+    }
+  }
+  state.selectedFlight = buildSelectedFlight();
   show('loading');
   try {
     const payload = { ...state.travelInput, selected_flight: state.selectedFlight };
     let data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
-    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
-    if (!Array.isArray(itin)) itin = [itin];
-    state.itineraries = itin;
-    renderItineraries(state.itineraries);
-    show('step-itineraries');
+    if (data?.step === 'rental') {
+      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      renderRentalOptions(state.localTransport);
+      show('step-rental');
+    } else {
+      let itin = Array.isArray(data) ? data : (data?.itineraries || data);
+      if (!Array.isArray(itin)) itin = [itin];
+      state.itineraries = itin;
+      renderItineraries(state.itineraries);
+      show('step-itineraries');
+    }
   } catch (err) {
     showError(err.message);
   }
 });
+
+function renderRentalOptions(items) {
+  const list = $('#rental-list');
+  if (!list) return;
+  const isRental = state.travelInput?.local_transport === 'rental_car';
+  list.innerHTML = (items || []).map((opt, i) => {
+    let title = '', desc = '';
+    if (isRental) {
+      title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}` : opt.car_type || `옵션 ${i + 1}`;
+      desc = [opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ');
+      if (opt.price_total_krw) desc += ` | ${opt.price_total_krw.toLocaleString()}원`;
+    } else {
+      title = opt.description || opt.route_id || `옵션 ${i + 1}`;
+      desc = opt.duration_minutes ? `약 ${opt.duration_minutes}분` : '';
+      if (opt.pass_price_krw) desc += ` | ${opt.pass_price_krw.toLocaleString()}원`;
+    }
+    return `
+      <div class="option-item" data-idx="${i}">
+        <h3>${title}</h3>
+        <p>${desc}</p>
+      </div>
+    `;
+  }).join('');
+  list.querySelectorAll('.option-item').forEach(el => {
+    el.addEventListener('click', () => {
+      list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
+      el.classList.add('selected');
+      state.selectedLocalTransport = items[parseInt(el.dataset.idx)];
+    });
+  });
+  if (items && items.length > 0 && !state.selectedLocalTransport) {
+    state.selectedLocalTransport = items[0];
+    list.querySelector('.option-item')?.classList.add('selected');
+  }
+}
 
 function renderItineraries(items) {
   const list = $('#itineraries-list');
@@ -682,7 +974,29 @@ function renderItineraries(items) {
   });
 }
 
-$('#btn-back-itineraries').addEventListener('click', () => show('step-flights'));
+$('#btn-back-rental').addEventListener('click', () => show('step-flights'));
+$('#btn-next-rental').addEventListener('click', async () => {
+  state.selectedLocalTransport = state.selectedLocalTransport || (state.localTransport && state.localTransport[0]) || {};
+  show('loading');
+  try {
+    const payload = {
+      ...state.travelInput,
+      selected_flight: buildSelectedFlight(),
+      selected_local_transport: state.selectedLocalTransport,
+    };
+    const data = await callAgent(payload);
+    if (data?.error) throw new Error(data.error);
+    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
+    if (!Array.isArray(itin)) itin = [itin];
+    state.itineraries = itin;
+    renderItineraries(state.itineraries);
+    show('step-itineraries');
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+$('#btn-back-itineraries').addEventListener('click', () => show('step-rental'));
 
 $('#btn-next-itineraries').addEventListener('click', async () => {
   if (!state.selectedItinerary) { alert('일정을 선택해 주세요.'); return; }
@@ -856,6 +1170,15 @@ function initStepIndicator() {
   show('step-input');
   loadFormFromStorage();
   initTripTypeUI();
+
+  $$('#step-indicator .step-node').forEach(node => {
+    node.style.cursor = 'pointer';
+    node.setAttribute('title', '클릭하여 해당 단계로 이동');
+    node.addEventListener('click', () => {
+      const step = node.dataset.step;
+      if (step) navigateToStep(step);
+    });
+  });
 }
 
 if (document.readyState === 'loading') {
