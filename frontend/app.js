@@ -875,6 +875,11 @@ $('#btn-back-flights').addEventListener('click', () => {
 $('#btn-next-flights').addEventListener('click', async () => {
   state.trip_type = state.travelInput?.trip_type || $('#trip_type_select')?.value || 'round_trip';
 
+  if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
+    await doFlightSearch('return');
+    return;
+  }
+
   if (state.trip_type === 'multi_city') {
     const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
     const selected = state.selectedMultiCityFlights?.[idx];
@@ -895,10 +900,6 @@ $('#btn-next-flights').addEventListener('click', async () => {
     }
     if (state.flightLeg === 'return' && !state.selectedReturnFlight) {
       alert('항공편을 선택해 주세요.');
-      return;
-    }
-    if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
-      await doFlightSearch('return');
       return;
     }
   }

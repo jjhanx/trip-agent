@@ -270,34 +270,63 @@ class SessionExecutor(BaseAgentExecutor):
             )
 
             s = Settings()
-            origin = travel.origin_airport_code or travel.origin
             flex = travel.date_flexibility_days if travel.date_flexibility_days and travel.date_flexibility_days > 0 else None
-            if travel.destination_airports:
+            leg = flight_payload.get("flight_leg")
+
+            if leg == "return":
+                origin = travel.destination_airport_code or travel.destination
+                dest = travel.origin_airport_code or travel.origin
+                start_d = end_d = travel.end_date.isoformat()
+                one_way = True
+            elif isinstance(leg, str) and leg.startswith("multi_city_"):
+                try:
+                    idx = int(leg.split("_")[-1])
+                except (ValueError, IndexError):
+                    idx = 0
+                mc = multi_cities or []
+                if idx < len(mc):
+                    lg = mc[idx]
+                    origin = lg.get("origin", travel.origin)
+                    dest = lg.get("destination", travel.destination)
+                    start_d = end_d = lg.get("date", travel.start_date.isoformat())
+                    one_way = True
+                else:
+                    origin = travel.origin_airport_code or travel.origin
+                    dest = travel.destination_airport_code or travel.destination
+                    start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
+                    one_way = True
+            else:
+                origin = travel.origin_airport_code or travel.origin
+                dest = travel.destination_airport_code or travel.destination
+                start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
+                one_way = travel.trip_type == "one_way" or leg == "outbound"
+
+            if travel.destination_airports and leg != "return" and not (isinstance(leg, str) and leg.startswith("multi_city_")):
                 flights, warnings = multi_source_search_flights_multi_dest(
                     origin,
                     travel.destination_airports[:4],
-                    travel.start_date.isoformat(),
-                    travel.end_date.isoformat(),
+                    start_d,
+                    end_d,
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
                     date_flexibility_days=flex,
+                    one_way=one_way,
                 )
             else:
-                destination = travel.destination_airport_code or travel.destination
                 flights, warnings = multi_source_search_flights(
                     origin,
-                    destination,
-                    travel.start_date.isoformat(),
-                    travel.end_date.isoformat(),
+                    dest,
+                    start_d,
+                    end_d,
                     travel.seat_class.value,
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
                     date_flexibility_days=flex,
+                    one_way=one_way,
                 )
-            # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
