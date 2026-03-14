@@ -477,6 +477,7 @@ async function doFlightSearch(leg) {
       $('#selected-flight-summary').classList.add('hidden');
       if (state.flightLeg === 'return') state.selectedReturnFlight = null;
     }
+    updateFlightNextButtonLabel();
     show('step-flights');
   } catch (err) {
     showError(err.message);
@@ -775,6 +776,22 @@ function selectFlight(f) {
   nextBtn.disabled = false;
   nextBtn.style.opacity = '1';
   nextBtn.style.cursor = 'pointer';
+  updateFlightNextButtonLabel();
+}
+
+function updateFlightNextButtonLabel() {
+  const btn = $('#btn-next-flights');
+  if (!btn) return;
+  const tt = $('#trip_type_select')?.value || state.trip_type || 'round_trip';
+  const isOutboundStep = state.flightLeg === 'outbound';
+  const needsReturn = tt === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight;
+  if (isOutboundStep && needsReturn) {
+    btn.textContent = '귀국편 검색';
+    btn.title = '목적지→출발지 귀국편 검색';
+  } else {
+    btn.textContent = '다음';
+    btn.title = '리스트에서 항공편을 선택해주세요';
+  }
 }
 
 function buildSelectedFlight() {
@@ -873,9 +890,10 @@ $('#btn-back-flights').addEventListener('click', () => {
 });
 
 $('#btn-next-flights').addEventListener('click', async () => {
-  state.trip_type = state.travelInput?.trip_type || $('#trip_type_select')?.value || 'round_trip';
+  state.trip_type = $('#trip_type_select')?.value || state.travelInput?.trip_type || 'round_trip';
+  const needsReturnSearch = state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight;
 
-  if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
+  if (needsReturnSearch) {
     await doFlightSearch('return');
     return;
   }
