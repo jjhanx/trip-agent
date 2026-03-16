@@ -2,6 +2,7 @@
 
 const API_BASE = window.location.origin + '/a2a/';
 const STORAGE_KEY = 'trip-agent-form';
+const PLANS_STORAGE_KEY = 'trip-agent-plans';
 
 function loadFormFromStorage() {
   try {
@@ -72,6 +73,249 @@ function saveFormToStorage() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (_) { /* ignore */ }
 }
+
+/* === 계획 저장/불러오기 (파일처럼 편집·저장·열기) === */
+function getFormDataForPlan() {
+  const form = $('#travel-form');
+  if (!form) return {};
+  updateStateFromMultiCityDOM();
+  return {
+    trip_type: form.trip_type?.value || 'round_trip',
+    origin: form.origin?.value,
+    destination: form.destination?.value,
+    start_date: form.start_date?.value,
+    end_date: form.end_date?.value,
+    travelers_male: form.travelers_male?.value,
+    travelers_female: form.travelers_female?.value,
+    travelers_children: form.travelers_children?.value,
+    date_flexibility_days: form.date_flexibility_days?.value,
+    local_transport: form.local_transport?.value,
+    accommodation_priority_1: form.accommodation_priority_1?.value,
+    accommodation_priority_2: form.accommodation_priority_2?.value,
+    accommodation_priority_3: form.accommodation_priority_3?.value,
+    seat_class: form.seat_class?.value,
+    pace: form.pace?.value,
+    budget_level: form.budget_level?.value,
+    mileage_balance: form.mileage_balance?.value,
+    mileage_program: form.mileage_program?.value,
+    use_miles: form.use_miles?.checked,
+    origin_airport_code: state.origin_airport_code,
+    destination_airport_code: state.destination_airport_code,
+    multi_cities: state.multi_cities,
+  };
+}
+
+function setFormFromPlanData(data) {
+  const form = $('#travel-form');
+  if (!form || !data) return;
+  const set = (name, v) => { const el = form[name]; if (el && v != null) el.value = String(v); };
+  const setCheck = (name, v) => { const el = form[name]; if (el) el.checked = !!v; };
+  if (data.trip_type) set('trip_type', data.trip_type);
+  if (data.origin != null) set('origin', data.origin);
+  if (data.destination != null) set('destination', data.destination);
+  if (data.start_date != null) set('start_date', data.start_date);
+  if (data.end_date != null) set('end_date', data.end_date);
+  if (data.travelers_male != null) set('travelers_male', data.travelers_male);
+  if (data.travelers_female != null) set('travelers_female', data.travelers_female);
+  if (data.travelers_children != null) set('travelers_children', data.travelers_children);
+  if (data.date_flexibility_days != null) set('date_flexibility_days', data.date_flexibility_days);
+  if (data.local_transport != null) set('local_transport', data.local_transport);
+  if (data.accommodation_priority_1 != null) set('accommodation_priority_1', data.accommodation_priority_1);
+  if (data.accommodation_priority_2 != null) set('accommodation_priority_2', data.accommodation_priority_2);
+  if (data.accommodation_priority_3 != null) set('accommodation_priority_3', data.accommodation_priority_3);
+  if (data.seat_class != null) set('seat_class', data.seat_class);
+  if (data.pace != null) set('pace', data.pace);
+  if (data.budget_level != null) set('budget_level', data.budget_level);
+  if (data.mileage_balance != null) set('mileage_balance', data.mileage_balance);
+  if (data.mileage_program != null) set('mileage_program', data.mileage_program);
+  setCheck('use_miles', data.use_miles);
+  if (data.origin_airport_code != null) state.origin_airport_code = data.origin_airport_code;
+  if (data.destination_airport_code != null) state.destination_airport_code = data.destination_airport_code;
+  if (Array.isArray(data.multi_cities)) state.multi_cities = data.multi_cities;
+  initTripTypeUI();
+  if (state.multi_cities?.length) renderMultiCityLegs();
+}
+
+function getFullPlanState() {
+  return {
+    formData: getFormDataForPlan(),
+    travelInput: state.travelInput,
+    trip_type: state.trip_type,
+    multi_cities: state.multi_cities,
+    origin_airport_code: state.origin_airport_code,
+    destination_airport_code: state.destination_airport_code,
+    flights: state.flights,
+    flightsByLeg: state.flightsByLeg || {},
+    currentFlights: state.currentFlights,
+    flightWarnings: state.flightWarnings,
+    selectedOutboundFlight: state.selectedOutboundFlight,
+    selectedReturnFlight: state.selectedReturnFlight,
+    selectedMultiCityFlights: state.selectedMultiCityFlights,
+    selectedFlight: state.selectedFlight,
+    flightLeg: state.flightLeg,
+    itineraries: state.itineraries,
+    selectedItinerary: state.selectedItinerary,
+    accommodations: state.accommodations,
+    selectedAccommodation: state.selectedAccommodation,
+    localTransport: state.localTransport,
+    selectedLocalTransport: state.selectedLocalTransport,
+  };
+}
+
+function loadPlanIntoState(data) {
+  if (!data) return;
+  if (data.formData) setFormFromPlanData(data.formData);
+  state.travelInput = data.travelInput ?? null;
+  state.trip_type = data.trip_type ?? 'round_trip';
+  state.multi_cities = Array.isArray(data.multi_cities) ? data.multi_cities : [];
+  state.origin_airport_code = data.origin_airport_code ?? null;
+  state.destination_airport_code = data.destination_airport_code ?? null;
+  state.flights = Array.isArray(data.flights) ? data.flights : [];
+  state.flightsByLeg = data.flightsByLeg && typeof data.flightsByLeg === 'object' ? data.flightsByLeg : {};
+  state.currentFlights = Array.isArray(data.currentFlights) ? data.currentFlights : (state.flights.length ? state.flights : null);
+  state.flightWarnings = Array.isArray(data.flightWarnings) ? data.flightWarnings : [];
+  state.selectedOutboundFlight = data.selectedOutboundFlight ?? null;
+  state.selectedReturnFlight = data.selectedReturnFlight ?? null;
+  state.selectedMultiCityFlights = Array.isArray(data.selectedMultiCityFlights) ? data.selectedMultiCityFlights : [];
+  state.selectedFlight = data.selectedFlight ?? null;
+  state.flightLeg = data.flightLeg ?? 'outbound';
+  state.itineraries = Array.isArray(data.itineraries) ? data.itineraries : [];
+  state.selectedItinerary = data.selectedItinerary ?? null;
+  state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
+  state.selectedAccommodation = data.selectedAccommodation ?? null;
+  state.localTransport = Array.isArray(data.localTransport) ? data.localTransport : [];
+  state.selectedLocalTransport = data.selectedLocalTransport ?? null;
+}
+
+function getSavedPlans() {
+  try {
+    const s = localStorage.getItem(PLANS_STORAGE_KEY);
+    if (!s) return [];
+    const arr = JSON.parse(s);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+
+function savePlansToStorage(plans) {
+  try {
+    localStorage.setItem(PLANS_STORAGE_KEY, JSON.stringify(plans));
+  } catch (_) { /* ignore */ }
+}
+
+function savePlan(name, isSaveAs = false) {
+  const plans = getSavedPlans();
+  const planState = getFullPlanState();
+  const now = new Date().toISOString();
+
+  if (state.currentPlanId && !isSaveAs) {
+    const idx = plans.findIndex(p => p.id === state.currentPlanId);
+    if (idx >= 0) {
+      plans[idx] = { ...plans[idx], name: plans[idx].name, data: planState, updatedAt: now };
+      savePlansToStorage(plans);
+      state.currentPlanName = plans[idx].name;
+      return true;
+    }
+  }
+
+  const newName = name || prompt('계획 이름을 입력하세요 (예: 3월 오사카 여행):', getDefaultPlanName());
+  if (!newName || !newName.trim()) return false;
+
+  const newPlan = {
+    id: crypto.randomUUID(),
+    name: newName.trim(),
+    createdAt: now,
+    updatedAt: now,
+    data: planState,
+  };
+  plans.unshift(newPlan);
+  const maxPlans = 50;
+  if (plans.length > maxPlans) plans.length = maxPlans;
+  savePlansToStorage(plans);
+  state.currentPlanId = newPlan.id;
+  state.currentPlanName = newPlan.name;
+  return true;
+}
+
+function getDefaultPlanName() {
+  const ti = state.travelInput;
+  const dest = ti?.destination || $('#travel-form')?.destination?.value || '';
+  const start = ti?.start_date || $('#travel-form')?.start_date?.value || '';
+  if (dest || start) return `${dest || '여행'} ${(start || '').slice(0, 7)}`.trim();
+  return `여행 계획 ${new Date().toLocaleDateString('ko-KR')}`;
+}
+
+function openPlan(planId) {
+  const plans = getSavedPlans();
+  const plan = plans.find(p => p.id === planId);
+  if (!plan || !plan.data) return;
+  loadPlanIntoState(plan.data);
+  state.currentPlanId = plan.id;
+  state.currentPlanName = plan.name;
+  saveFormToStorage();
+  renderPlanUI();
+
+  const step = resolveCurrentStep();
+  const sectionId = STEP_TO_SECTION[step] || 'step-input';
+  show(sectionId, true);
+}
+
+function resolveCurrentStep() {
+  if (state.selectedAccommodation) return 'confirm';
+  if (state.accommodations?.length) return 'accommodation';
+  if (state.selectedItinerary && !state.accommodations?.length) return 'itineraries';
+  if (state.itineraries?.length) return 'itineraries';
+  if (state.selectedLocalTransport || state.localTransport?.length) return 'rental';
+  if (buildSelectedFlight()) return state.localTransport?.length ? 'rental' : 'rental';
+  if (state.flights?.length || (state.flightsByLeg && Object.keys(state.flightsByLeg).length)) return 'flights';
+  return 'input';
+}
+
+function deletePlan(planId) {
+  const plans = getSavedPlans().filter(p => p.id !== planId);
+  savePlansToStorage(plans);
+  if (state.currentPlanId === planId) {
+    state.currentPlanId = null;
+    state.currentPlanName = null;
+    renderPlanUI();
+  }
+}
+
+function newPlan() {
+  state.currentPlanId = null;
+  state.currentPlanName = null;
+  state.travelInput = null;
+  state.trip_type = 'round_trip';
+  state.multi_cities = [];
+  state.origin_airport_code = null;
+  state.destination_airport_code = null;
+  state.flights = [];
+  state.flightsByLeg = {};
+  state.currentFlights = null;
+  state.selectedOutboundFlight = null;
+  state.selectedReturnFlight = null;
+  state.selectedMultiCityFlights = [];
+  state.selectedFlight = null;
+  state.flightLeg = 'outbound';
+  state.itineraries = [];
+  state.selectedItinerary = null;
+  state.accommodations = [];
+  state.selectedAccommodation = null;
+  state.localTransport = [];
+  state.selectedLocalTransport = null;
+  state.flightWarnings = [];
+  loadFormFromStorage();
+  initTripTypeUI();
+  renderPlanUI();
+  show('step-input');
+}
+
+function renderPlanUI() {
+  const bar = $('#plan-toolbar');
+  if (!bar) return;
+  const nameEl = $('#current-plan-name');
+  if (nameEl) nameEl.textContent = state.currentPlanName ? `"${state.currentPlanName}"` : '(저장 안 함)';
+}
+
 let state = {
   travelInput: null,
   trip_type: 'round_trip',
@@ -91,6 +335,8 @@ let state = {
   selectedAccommodation: null,
   localTransport: [],
   selectedLocalTransport: null,
+  currentPlanId: null,
+  currentPlanName: null,
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -132,6 +378,7 @@ function show(id, fromStepClick = false) {
       refreshStepView(step);
     }
   }
+  if (id === 'step-flights') updateFlightNextButtonLabel();
 }
 
 function updateStepCompletedState() {
@@ -197,6 +444,10 @@ function refreshStepView(step) {
   }
   if (step === 'accommodation' && state.accommodations?.length) {
     renderAccommodations(state.accommodations);
+    const ltEl = $('#local-transport-info');
+    if (ltEl) ltEl.innerHTML = state.localTransport?.length
+      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+      : '';
   }
 }
 
@@ -235,6 +486,7 @@ function showFlightSummaryForEdit(sf) {
     nextBtn.style.opacity = '1';
     nextBtn.style.cursor = 'pointer';
   }
+  updateFlightNextButtonLabel();
 }
 
 function navigateToStep(stepName) {
@@ -782,9 +1034,9 @@ function selectFlight(f) {
 function updateFlightNextButtonLabel() {
   const btn = $('#btn-next-flights');
   if (!btn) return;
-  const tt = $('#trip_type_select')?.value || state.trip_type || 'round_trip';
+  const tt = state.trip_type || $('#trip_type_select')?.value || 'round_trip';
   const isOutboundStep = state.flightLeg === 'outbound';
-  const needsReturn = tt === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight;
+  const needsReturn = tt === 'round_trip' && !!state.selectedOutboundFlight && !state.selectedReturnFlight;
   if (isOutboundStep && needsReturn) {
     btn.textContent = '귀국편 검색';
     btn.title = '목적지→출발지 귀국편 검색';
@@ -831,6 +1083,7 @@ $('#btn-cancel-flight').addEventListener('click', () => {
   nextBtn.disabled = true;
   nextBtn.style.opacity = '0.5';
   nextBtn.style.cursor = 'not-allowed';
+  updateFlightNextButtonLabel();
 });
 
 // Sorting Logic
@@ -1223,6 +1476,7 @@ function initStepIndicator() {
   show('step-input');
   loadFormFromStorage();
   initTripTypeUI();
+  renderPlanUI();
 
   $$('#step-indicator .step-node').forEach(node => {
     node.style.cursor = 'pointer';
@@ -1349,6 +1603,88 @@ $('#btn-add-leg')?.addEventListener('click', () => {
 
 $('#travel-form')?.addEventListener('input', saveFormToStorage);
 $('#travel-form')?.addEventListener('change', saveFormToStorage);
+
+/* 계획 저장/열기 버튼 */
+$('#btn-new-plan')?.addEventListener('click', () => {
+  if (state.currentPlanId || state.travelInput || state.flights?.length) {
+    if (!confirm('현재 진행 중인 내용이 저장되지 않을 수 있습니다. 새 계획을 만드시겠습니까?')) return;
+  }
+  newPlan();
+});
+$('#btn-save-plan')?.addEventListener('click', () => {
+  if (savePlan()) {
+    alert('저장되었습니다.');
+    renderPlanUI();
+  }
+});
+$('#btn-save-as-plan')?.addEventListener('click', () => {
+  if (savePlan(null, true)) {
+    alert('다른 이름으로 저장되었습니다.');
+    renderPlanUI();
+  }
+});
+function renderPlanListInModal() {
+  const plans = getSavedPlans();
+  const list = $('#plan-list');
+  if (!list) return;
+  if (plans.length === 0) {
+    list.innerHTML = '<p class="muted">저장된 계획이 없습니다.</p>';
+    return;
+  }
+  list.innerHTML = plans.map(p => `
+    <div class="plan-list-item" data-id="${p.id}">
+      <div class="plan-item-main">
+        <strong>${escapeHtml(p.name)}</strong>
+        <span class="plan-item-meta">${formatPlanDate(p.updatedAt)}</span>
+      </div>
+      <div class="plan-item-actions">
+        <button type="button" class="plan-btn-open" data-id="${p.id}">열기</button>
+        <button type="button" class="plan-btn-delete secondary" data-id="${p.id}" title="삭제">삭제</button>
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('.plan-btn-open').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      openPlan(e.target.dataset.id);
+      closePlanModal();
+    });
+  });
+  list.querySelectorAll('.plan-btn-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('이 계획을 삭제하시겠습니까?')) {
+        deletePlan(e.target.dataset.id);
+        renderPlanListInModal();
+      }
+    });
+  });
+}
+
+$('#btn-open-plan')?.addEventListener('click', () => {
+  renderPlanListInModal();
+  $('#plan-open-modal').classList.remove('hidden');
+  $('#plan-open-modal').setAttribute('aria-hidden', 'false');
+});
+$('#btn-close-plan-modal')?.addEventListener('click', closePlanModal);
+$('#plan-open-modal .modal-backdrop')?.addEventListener('click', closePlanModal);
+
+function closePlanModal() {
+  $('#plan-open-modal')?.classList.add('hidden');
+  $('#plan-open-modal')?.setAttribute('aria-hidden', 'true');
+}
+function escapeHtml(s) {
+  if (!s) return '';
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+function formatPlanDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return iso; }
+}
 
 $('#btn-calendar-start').addEventListener('click', () => openCalendar('start'));
 $('#btn-calendar-end').addEventListener('click', () => openCalendar('end'));
