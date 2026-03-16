@@ -232,13 +232,10 @@
 
         <div id="selected-flight-summary" class="hidden"
           style="margin-bottom: 1rem; padding: 1rem; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); border-radius: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <span style="font-weight: bold; color: var(--accent);">✅ 선택완료:</span>
-              <span id="selected-flight-text" style="margin-left: 0.5rem; font-weight: bold;"></span>
-            </div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+            <div id="selected-flight-text" class="selected-flight-detail" style="flex: 1; min-width: 0;"></div>
             <button type="button" id="btn-cancel-flight" class="secondary"
-              style="margin:0; padding: 0.3rem 0.6rem; font-size: 0.8rem;">취소 / 변경</button>
+              style="margin:0; padding: 0.3rem 0.6rem; font-size: 0.8rem; flex-shrink: 0;">취소 / 변경</button>
           </div>
         </div>
 

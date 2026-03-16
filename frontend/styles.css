@@ -48,6 +48,7 @@ header p {
   color: var(--muted);
   margin: 0;
   font-size: 0.95rem;
+  white-space: nowrap;
 }
 
 .header-row {
@@ -498,6 +499,20 @@ button.secondary:hover {
 .option-item h3 { margin: 0 0 0.5rem; font-size: 1rem; }
 .option-item p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 .option-item .price { color: var(--accent); font-weight: 600; }
+
+.selected-flight-detail { font-size: 0.9rem; }
+.selected-flight-header { font-weight: bold; color: var(--accent); margin-bottom: 0.75rem; }
+.selected-flight-card {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.selected-flight-card:last-child { border-bottom: none; }
+.selected-flight-label { font-size: 0.8rem; color: var(--accent); margin-bottom: 0.25rem; }
+.selected-flight-main { font-weight: 600; margin-bottom: 0.25rem; }
+.selected-flight-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.25rem; }
+.selected-flight-price { color: var(--accent); font-weight: 600; }
+.selected-flight-segments { margin-top: 0.5rem; padding-left: 1rem; font-size: 0.8rem; color: var(--muted); }
+.flight-seg { margin-bottom: 0.2rem; }
 
 #loading p { margin: 0; }
 #error-message { color: var(--error); }
