@@ -1193,10 +1193,24 @@ $('#btn-next-flights').addEventListener('click', async () => {
       return;
     }
     if (Array.isArray(data?.flights) && data.flights.length > 0 && !data?.step) {
-      // Flight search results (fallback: incomplete selection triggered search)
+      // Flight search results (fallback): incomplete selection triggered search
+      const hasCompleteRoundTrip = state.trip_type === 'round_trip' && state.selectedOutboundFlight && state.selectedReturnFlight;
+      if (hasCompleteRoundTrip) {
+        // 출국+귀국 모두 선택됐는데 flights가 온 경우: rental 재요청 (백엔드가 잘못된 경로로 간 경우)
+        const retryPayload = { ...state.travelInput, selected_flight: state.selectedFlight };
+        const retryData = await callAgent(retryPayload);
+        if (retryData?.step === 'rental') {
+          state.localTransport = Array.isArray(retryData?.local_transport) ? retryData.local_transport : [];
+          renderRentalOptions(state.localTransport);
+          show('step-rental');
+          return;
+        }
+        if (retryData?.error) throw new Error(retryData.error);
+        throw new Error('다음 단계로 진행할 수 없습니다. 다시 시도해 주세요.');
+      }
       state.flights = data.flights;
       state.flightWarnings = data?.warnings || [];
-      if (state.trip_type === 'round_trip' && state.selectedOutboundFlight) {
+      if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
         state.flightLeg = 'return';
         state.selectedReturnFlight = null;
       }
@@ -1477,6 +1491,7 @@ function initStepIndicator() {
   loadFormFromStorage();
   initTripTypeUI();
   renderPlanUI();
+  initPlanToolbar();
 
   $$('#step-indicator .step-node').forEach(node => {
     node.style.cursor = 'pointer';
@@ -1604,25 +1619,47 @@ $('#btn-add-leg')?.addEventListener('click', () => {
 $('#travel-form')?.addEventListener('input', saveFormToStorage);
 $('#travel-form')?.addEventListener('change', saveFormToStorage);
 
-/* 계획 저장/열기 버튼 */
-$('#btn-new-plan')?.addEventListener('click', () => {
-  if (state.currentPlanId || state.travelInput || state.flights?.length) {
+function initPlanToolbar() {
+  const btnNew = $('#btn-new-plan');
+  const btnSave = $('#btn-save-plan');
+  const btnSaveAs = $('#btn-save-as-plan');
+  const btnOpen = $('#btn-open-plan');
+  if (btnNew) btnNew.addEventListener('click', onNewPlanClick);
+  if (btnSave) btnSave.addEventListener('click', onSavePlanClick);
+  if (btnSaveAs) btnSaveAs.addEventListener('click', onSaveAsPlanClick);
+  if (btnOpen) btnOpen.addEventListener('click', onOpenPlanClick);
+  $('#btn-close-plan-modal')?.addEventListener('click', closePlanModal);
+  $('#plan-open-modal .modal-backdrop')?.addEventListener('click', closePlanModal);
+}
+function onNewPlanClick() {
+  if (state.currentPlanId || state.travelInput || state.flights?.length || state.itineraries?.length) {
     if (!confirm('현재 진행 중인 내용이 저장되지 않을 수 있습니다. 새 계획을 만드시겠습니까?')) return;
   }
   newPlan();
-});
-$('#btn-save-plan')?.addEventListener('click', () => {
-  if (savePlan()) {
+}
+function onSavePlanClick() {
+  const ok = savePlan();
+  if (ok) {
     alert('저장되었습니다.');
     renderPlanUI();
+  } else {
+    alert('저장할 내용이 없거나 이름 입력이 취소되었습니다.');
   }
-});
-$('#btn-save-as-plan')?.addEventListener('click', () => {
-  if (savePlan(null, true)) {
+}
+function onSaveAsPlanClick() {
+  const ok = savePlan(null, true);
+  if (ok) {
     alert('다른 이름으로 저장되었습니다.');
     renderPlanUI();
+  } else {
+    alert('저장할 내용이 없거나 이름 입력이 취소되었습니다.');
   }
-});
+}
+function onOpenPlanClick() {
+  renderPlanListInModal();
+  $('#plan-open-modal').classList.remove('hidden');
+  $('#plan-open-modal').setAttribute('aria-hidden', 'false');
+}
 function renderPlanListInModal() {
   const plans = getSavedPlans();
   const list = $('#plan-list');
@@ -1659,14 +1696,6 @@ function renderPlanListInModal() {
     });
   });
 }
-
-$('#btn-open-plan')?.addEventListener('click', () => {
-  renderPlanListInModal();
-  $('#plan-open-modal').classList.remove('hidden');
-  $('#plan-open-modal').setAttribute('aria-hidden', 'false');
-});
-$('#btn-close-plan-modal')?.addEventListener('click', closePlanModal);
-$('#plan-open-modal .modal-backdrop')?.addEventListener('click', closePlanModal);
 
 function closePlanModal() {
   $('#plan-open-modal')?.classList.add('hidden');
