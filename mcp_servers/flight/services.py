@@ -255,7 +255,7 @@ def multi_source_search_flights(
         for f in flights:
             f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
         flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
-        # API 정상 연결됐으나 0건 → 예약 기간 밖 가능성. 그 외(인증/검색 실패 등)는 일반 메시지
+        # API 정상 연결됐으나 0건. 원인: 예약기간·노선/날짜 조합·SerpApi 일시적 빈 결과 등 다양함
         api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
         has_api_error = any(
             any(kw in w for kw in api_error_keywords)
@@ -263,8 +263,7 @@ def multi_source_search_flights(
         )
         if api_responded_ok and not has_api_error:
             warnings.append(
-                "아직 예약 가능한 기간이 아닙니다. "
-                "(항공편 예약은 보통 출발일 기준 약 11개월 전부터 열립니다.) "
+                "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, SerpApi 일시적 오류 등) "
                 "예시(Mock) 데이터로 보여드립니다."
             )
         else:

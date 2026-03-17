@@ -262,6 +262,7 @@ async def search_serpapi(
         "outbound_date": start_date,
         "type": "2" if one_way else "1",
         "api_key": api_key,
+        "no_cache": "true",  # SerpApi 빈 결과 버그 완화 (GitHub #2188 등)
     }
     if not one_way:
         params["return_date"] = end_date
