@@ -1,4 +1,4 @@
-"""Unified server: Session Agent (A2A) + static frontend."""
+"""Unified server: Session Agent (A2A) + static frontend + Plans API."""
 
 import uvicorn
 from pathlib import Path
@@ -8,10 +8,28 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from starlette.applications import Starlette
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from api.plans import (
+    delete_plan,
+    get_plan,
+    list_plans,
+    register_user,
+    save_plan,
+    upsert_plan,
+)
 from agents.session.executor import SessionExecutor
+
+_api_routes = [
+    Route("/users/register", register_user, methods=["POST"]),
+    Route("/plans", list_plans, methods=["GET"]),
+    Route("/plans", save_plan, methods=["POST"]),
+    Route("/plans/{id}", get_plan, methods=["GET"]),
+    Route("/plans/{id}", upsert_plan, methods=["PUT"]),
+    Route("/plans/{id}", delete_plan, methods=["DELETE"]),
+]
+_api_app = Starlette(routes=_api_routes)
 
 
 def create_app():
@@ -43,6 +61,7 @@ def create_app():
     if frontend.exists():
         routes = [
             Mount("/a2a", a2a_built),
+            Mount("/api", _api_app),
             Mount("/", StaticFiles(directory=str(frontend), html=True)),
         ]
     else:

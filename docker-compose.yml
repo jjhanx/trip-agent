@@ -4,6 +4,8 @@ services:
     command: ["python", "main.py"]
     ports:
       - "9000:9000"
+    volumes:
+      - ./data:/app/data
     environment:
       - FLIGHT_AGENT_URL=http://flight:9001
       - ITINERARY_AGENT_URL=http://itinerary:9002

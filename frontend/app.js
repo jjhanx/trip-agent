@@ -1,8 +1,44 @@
 /* Trip Agent - Web UI */
 
 const API_BASE = window.location.origin + '/a2a/';
+const API_PLANS = window.location.origin + '/api';
 const STORAGE_KEY = 'trip-agent-form';
 const PLANS_STORAGE_KEY = 'trip-agent-plans';
+const USER_ID_KEY = 'trip-agent-user-id';
+
+function getUserId() {
+  return localStorage.getItem(USER_ID_KEY) || null;
+}
+
+function setUserId(uid) {
+  if (uid) localStorage.setItem(USER_ID_KEY, uid);
+}
+
+async function ensureUserId() {
+  let uid = getUserId();
+  if (uid) return uid;
+  try {
+    const r = await fetch(`${API_PLANS}/users/register`, { method: 'POST' });
+    if (!r.ok) throw new Error('Register failed');
+    const j = await r.json();
+    uid = j.user_id;
+    if (uid) {
+      setUserId(uid);
+      return uid;
+    }
+  } catch (_) { /* ignore */ }
+  return null;
+}
+
+async function plansApi(method, path, body) {
+  const uid = await ensureUserId();
+  if (!uid) return { error: 'No user id' };
+  const opts = { method, headers: { 'X-User-Id': uid, 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(`${API_PLANS}${path}`, opts);
+  const j = r.ok ? await r.json().catch(() => ({})) : null;
+  return { ok: r.ok, status: r.status, data: j };
+}
 
 function loadFormFromStorage() {
   try {
@@ -202,37 +238,36 @@ function savePlansToStorage(plans) {
   } catch (_) { /* ignore */ }
 }
 
-function savePlan(name, isSaveAs = false) {
-  const plans = getSavedPlans();
-  const planState = getFullPlanState();
-  const now = new Date().toISOString();
+async function getSavedPlansFromServer() {
+  const res = await plansApi('GET', '/plans');
+  if (!res.ok || !res.data?.plans) return [];
+  return res.data.plans.map(p => ({ ...p, data: null }));
+}
 
-  if (state.currentPlanId && !isSaveAs) {
-    const idx = plans.findIndex(p => p.id === state.currentPlanId);
-    if (idx >= 0) {
-      plans[idx] = { ...plans[idx], name: plans[idx].name, data: planState, updatedAt: now };
-      savePlansToStorage(plans);
-      state.currentPlanName = plans[idx].name;
-      return true;
-    }
+async function savePlan(name, isSaveAs = false) {
+  const planState = getFullPlanState();
+  const uid = await ensureUserId();
+  if (!uid) {
+    alert('서버 연결을 위해 연결 코드를 먼저 확인해 주세요.');
+    return false;
   }
 
-  const newName = name || prompt('계획 이름을 입력하세요 (예: 3월 오사카 여행):', getDefaultPlanName());
-  if (!newName || !newName.trim()) return false;
+  const finalName = name || state.currentPlanName || prompt('계획 이름을 입력하세요 (예: 3월 오사카 여행):', getDefaultPlanName());
+  if (!finalName || !finalName.trim()) return false;
 
-  const newPlan = {
-    id: crypto.randomUUID(),
-    name: newName.trim(),
-    createdAt: now,
-    updatedAt: now,
-    data: planState,
-  };
-  plans.unshift(newPlan);
-  const maxPlans = 50;
-  if (plans.length > maxPlans) plans.length = maxPlans;
-  savePlansToStorage(plans);
-  state.currentPlanId = newPlan.id;
-  state.currentPlanName = newPlan.name;
+  const isUpdate = state.currentPlanId && !isSaveAs;
+  const path = isUpdate ? `/plans/${state.currentPlanId}` : '/plans';
+  const method = isUpdate ? 'PUT' : 'POST';
+  const body = isUpdate ? { name: finalName.trim(), data: planState } : { name: finalName.trim(), data: planState, id: state.currentPlanId || undefined };
+
+  const res = await plansApi(method, path, body);
+  if (!res.ok) {
+    alert(res.data?.error || '저장에 실패했습니다.');
+    return false;
+  }
+
+  state.currentPlanId = res.data.id;
+  state.currentPlanName = finalName.trim();
   return true;
 }
 
@@ -244,10 +279,19 @@ function getDefaultPlanName() {
   return `여행 계획 ${new Date().toLocaleDateString('ko-KR')}`;
 }
 
-function openPlan(planId) {
-  const plans = getSavedPlans();
-  const plan = plans.find(p => p.id === planId);
-  if (!plan || !plan.data) return;
+async function openPlan(planId) {
+  const res = await plansApi('GET', `/plans/${planId}`);
+  let plan = null;
+  if (res.ok && res.data?.data) {
+    plan = res.data;
+  } else {
+    const local = getSavedPlans().find(p => p.id === planId);
+    if (local?.data) plan = local;
+  }
+  if (!plan || !plan.data) {
+    alert('계획을 불러올 수 없습니다.');
+    return;
+  }
   loadPlanIntoState(plan.data);
   state.currentPlanId = plan.id;
   state.currentPlanName = plan.name;
@@ -270,7 +314,9 @@ function resolveCurrentStep() {
   return 'input';
 }
 
-function deletePlan(planId) {
+async function deletePlan(planId) {
+  const res = await plansApi('DELETE', `/plans/${planId}`);
+  if (!res.ok) alert(res.data?.error || '삭제에 실패했습니다.');
   const plans = getSavedPlans().filter(p => p.id !== planId);
   savePlansToStorage(plans);
   if (state.currentPlanId === planId) {
@@ -1651,6 +1697,25 @@ function initPlanToolbar() {
   if (btnOpen) btnOpen.addEventListener('click', onOpenPlanClick);
   $('#btn-close-plan-modal')?.addEventListener('click', closePlanModal);
   $('#plan-open-modal .modal-backdrop')?.addEventListener('click', closePlanModal);
+  $('#btn-copy-code')?.addEventListener('click', () => {
+    const uid = getUserId();
+    if (uid && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(uid);
+      alert('연결 코드가 복사되었습니다.');
+    }
+  });
+  $('#btn-link-device')?.addEventListener('click', async () => {
+    const input = $('#user-code-input');
+    const code = input?.value?.trim();
+    if (!code || code.length < 4) {
+      alert('연결 코드를 입력하세요 (4자 이상).');
+      return;
+    }
+    setUserId(code);
+    updateUserCodeDisplay();
+    if (input) input.value = '';
+    await renderPlanListInModal();
+  });
 }
 function onNewPlanClick() {
   if (state.currentPlanId || state.travelInput || state.flights?.length || state.itineraries?.length) {
@@ -1658,8 +1723,8 @@ function onNewPlanClick() {
   }
   newPlan();
 }
-function onSavePlanClick() {
-  const ok = savePlan();
+async function onSavePlanClick() {
+  const ok = await savePlan();
   if (ok) {
     alert('저장되었습니다.');
     renderPlanUI();
@@ -1667,8 +1732,8 @@ function onSavePlanClick() {
     alert('저장할 내용이 없거나 이름 입력이 취소되었습니다.');
   }
 }
-function onSaveAsPlanClick() {
-  const ok = savePlan(null, true);
+async function onSaveAsPlanClick() {
+  const ok = await savePlan(null, true);
   if (ok) {
     alert('다른 이름으로 저장되었습니다.');
     renderPlanUI();
@@ -1676,46 +1741,53 @@ function onSaveAsPlanClick() {
     alert('저장할 내용이 없거나 이름 입력이 취소되었습니다.');
   }
 }
-function onOpenPlanClick() {
-  renderPlanListInModal();
+async function onOpenPlanClick() {
   $('#plan-open-modal').classList.remove('hidden');
   $('#plan-open-modal').setAttribute('aria-hidden', 'false');
+  updateUserCodeDisplay();
+  await renderPlanListInModal();
 }
-function renderPlanListInModal() {
-  const plans = getSavedPlans();
+function updateUserCodeDisplay() {
+  const el = $('#user-code-display');
+  if (el) el.textContent = getUserId() || '-';
+}
+async function renderPlanListInModal() {
   const list = $('#plan-list');
   if (!list) return;
+  list.innerHTML = '<p class="muted">불러오는 중...</p>';
+  await ensureUserId();
+  const plans = await getSavedPlansFromServer();
   if (plans.length === 0) {
     list.innerHTML = '<p class="muted">저장된 계획이 없습니다.</p>';
-    return;
+  } else {
+    list.innerHTML = plans.map(p => `
+      <div class="plan-list-item" data-id="${p.id}">
+        <div class="plan-item-main">
+          <strong>${escapeHtml(p.name)}</strong>
+          <span class="plan-item-meta">${formatPlanDate(p.updatedAt)}</span>
+        </div>
+        <div class="plan-item-actions">
+          <button type="button" class="plan-btn-open" data-id="${p.id}">열기</button>
+          <button type="button" class="plan-btn-delete secondary" data-id="${p.id}" title="삭제">삭제</button>
+        </div>
+      </div>
+    `).join('');
+    list.querySelectorAll('.plan-btn-open').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        await openPlan(e.target.dataset.id);
+        closePlanModal();
+      });
+    });
+    list.querySelectorAll('.plan-btn-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm('이 계획을 삭제하시겠습니까?')) {
+          await deletePlan(e.target.dataset.id);
+          await renderPlanListInModal();
+        }
+      });
+    });
   }
-  list.innerHTML = plans.map(p => `
-    <div class="plan-list-item" data-id="${p.id}">
-      <div class="plan-item-main">
-        <strong>${escapeHtml(p.name)}</strong>
-        <span class="plan-item-meta">${formatPlanDate(p.updatedAt)}</span>
-      </div>
-      <div class="plan-item-actions">
-        <button type="button" class="plan-btn-open" data-id="${p.id}">열기</button>
-        <button type="button" class="plan-btn-delete secondary" data-id="${p.id}" title="삭제">삭제</button>
-      </div>
-    </div>
-  `).join('');
-  list.querySelectorAll('.plan-btn-open').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      openPlan(e.target.dataset.id);
-      closePlanModal();
-    });
-  });
-  list.querySelectorAll('.plan-btn-delete').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (confirm('이 계획을 삭제하시겠습니까?')) {
-        deletePlan(e.target.dataset.id);
-        renderPlanListInModal();
-      }
-    });
-  });
 }
 
 function closePlanModal() {
