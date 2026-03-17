@@ -7,67 +7,55 @@ from datetime import datetime, timedelta
 from mcp_servers.flight.api_clients import search_serpapi
 
 
-def _date_pairs_with_flexibility(
+def _outbound_return_dates_with_flex(
     start_date: str,
     end_date: str,
     date_flexibility_days: int,
-) -> list[tuple[str, str]]:
-    """날짜 유연성 적용 시 검색할 (출발일, 귀환일) 쌍.
-    출발·귀환을 동시에 shift + 출발만/귀환만 각각 shift하여 더 많은 조합 시도 (최대 9쌍).
+) -> tuple[list[str], list[str], str, str]:
+    """날짜 유연성 적용 시 검색할 출발일·귀환일 목록.
+    Returns (outbound_dates, return_dates, outbound_range_str, return_range_str) for no-results message.
     """
     if not date_flexibility_days or date_flexibility_days <= 0:
-        return [(start_date, end_date)]
+        return ([start_date], [end_date], start_date, end_date)
 
     try:
         sd = datetime.strptime(start_date, "%Y-%m-%d").date()
         ed = datetime.strptime(end_date, "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        return [(start_date, end_date)]
+        return ([start_date], [end_date], start_date, end_date)
 
     flex = min(int(date_flexibility_days), 7)  # 최대 ±7일
+    offsets = sorted(set([-flex, -1, 0, 1, flex]) if flex >= 2 else [-1, 0, 1])
+    outbound_dates = [(sd + timedelta(days=o)).strftime("%Y-%m-%d") for o in offsets]
+    return_dates = [(ed + timedelta(days=o)).strftime("%Y-%m-%d") for o in offsets]
+    ob_min = (sd - timedelta(days=flex)).strftime("%Y-%m-%d")
+    ob_max = (sd + timedelta(days=flex)).strftime("%Y-%m-%d")
+    ret_min = (ed - timedelta(days=flex)).strftime("%Y-%m-%d")
+    ret_max = (ed + timedelta(days=flex)).strftime("%Y-%m-%d")
+    return outbound_dates, return_dates, f"{ob_min}부터 {ob_max}", f"{ret_min}부터 {ret_max}"
 
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
 
-    def add(ns: str, ne: str) -> None:
-        if (ns, ne) not in seen and ns <= ne:  # 귀환일 ≥ 출발일
-            seen.add((ns, ne))
-            pairs.append((ns, ne))
-
-    # 1) 출발·귀환 동시 shift (기존)
-    for off in ([-flex, -1, 0, 1, flex] if flex >= 2 else [-1, 0, 1]):
-        ns = (sd + timedelta(days=off)).strftime("%Y-%m-%d")
-        ne = (ed + timedelta(days=off)).strftime("%Y-%m-%d")
-        add(ns, ne)
-
-    # 2) 출발일만 ±1 shift (귀환일 고정)
-    if flex >= 1:
-        for doff in [-1, 1]:
-            ns = (sd + timedelta(days=doff)).strftime("%Y-%m-%d")
-            ne = end_date
-            add(ns, ne)
-
-    # 3) 귀환일만 ±1 shift (출발일 고정)
-    if flex >= 1:
-        for eoff in [-1, 1]:
-            ns = start_date
-            ne = (ed + timedelta(days=eoff)).strftime("%Y-%m-%d")
-            add(ns, ne)
-
-    # 4) flex>=2 시 출발/귀환 각각 ±2 (총 9쌍 이내로 제한)
-    if flex >= 2 and len(pairs) < 9:
-        for doff in [-2, 2]:
-            ns = (sd + timedelta(days=doff)).strftime("%Y-%m-%d")
-            add(ns, end_date)
-            if len(pairs) >= 9:
-                break
-        for eoff in [-2, 2]:
-            if len(pairs) >= 9:
-                break
-            ne = (ed + timedelta(days=eoff)).strftime("%Y-%m-%d")
-            add(start_date, ne)
-
-    return pairs[:9] if pairs else [(start_date, end_date)]  # SerpApi 한도 고려 최대 9쌍
+def _date_pairs_with_flexibility(
+    start_date: str,
+    end_date: str,
+    date_flexibility_days: int,
+) -> list[tuple[str, str]]:
+    """날짜 유연성 적용 시 검색할 (출발일, 귀환일) 쌍. (편도조합 방식 아닐 때 폴백용)"""
+    if not date_flexibility_days or date_flexibility_days <= 0:
+        return [(start_date, end_date)]
+    try:
+        sd = datetime.strptime(start_date, "%Y-%m-%d").date()
+        ed = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return [(start_date, end_date)]
+    flex = min(int(date_flexibility_days), 7)
+    offsets = ([-flex, -1, 0, 1, flex] if flex >= 2 else [-1, 0, 1])
+    pairs = [
+        ((sd + timedelta(days=o)).strftime("%Y-%m-%d"), (ed + timedelta(days=e)).strftime("%Y-%m-%d"))
+        for o in offsets for e in offsets
+        if (sd + timedelta(days=o)) <= (ed + timedelta(days=e))
+    ]
+    return pairs[:15] if pairs else [(start_date, end_date)]
 
 
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
@@ -129,6 +117,101 @@ def _recommend_sort_key(
     else:
         cat = 3
     return (cat, dur, price)
+
+
+async def _search_round_trip_flex_outbound_return(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    seat_class: str,
+    use_miles: bool,
+    mileage_program: str | None,
+    config: dict,
+    date_flexibility_days: int,
+) -> tuple[list[dict], list[str], bool, str, str]:
+    """
+    왕복 + 날짜 유연성: 출발일±N·귀환일±N 각각 편도 검색 후 조합. 가격 싼 순.
+    Returns (flights, warnings, api_ok, ob_range_msg, ret_range_msg).
+    """
+    od_dates, rd_dates, ob_range, ret_range = _outbound_return_dates_with_flex(
+        start_date, end_date, date_flexibility_days
+    )
+    api_key = config.get("serpapi_api_key", "")
+    if not api_key:
+        return [], ["SerpApi API 키가 설정되지 않았습니다. .env에 SERPAPI_API_KEY 추가."], False, ob_range, ret_range
+
+    # 1) 출발편 편도 검색 (원래→목적지): 5일
+    tasks_out = [
+        _search_serpapi_only(
+            origin, destination, d, d, seat_class, use_miles,
+            mileage_program, config, one_way=True,
+        )
+        for d in od_dates
+    ]
+    # 2) 귀환편 편도 검색 (목적지→원래): 5일
+    tasks_ret = [
+        _search_serpapi_only(
+            destination, origin, r, r, seat_class, use_miles,
+            mileage_program, config, one_way=True,
+        )
+        for r in rd_dates
+    ]
+    out_results = await asyncio.gather(*tasks_out, return_exceptions=True)
+    ret_results = await asyncio.gather(*tasks_ret, return_exceptions=True)
+
+    all_warnings: list[str] = []
+    ob_by_date: dict[str, list[dict]] = {}
+    ret_by_date: dict[str, list[dict]] = {}
+    api_responded = False
+    for i, r in enumerate(out_results):
+        if isinstance(r, Exception):
+            all_warnings.append(f"출발일 검색 오류: {r}")
+            continue
+        fl, wa, ok = r
+        if ok:
+            api_responded = True
+        all_warnings.extend(wa)
+        ob_by_date[od_dates[i]] = fl
+    for i, r in enumerate(ret_results):
+        if isinstance(r, Exception):
+            all_warnings.append(f"귀환일 검색 오류: {r}")
+            continue
+        fl, wa, ok = r
+        if ok:
+            api_responded = True
+        all_warnings.extend(wa)
+        ret_by_date[rd_dates[i]] = fl
+
+    # 3) (출발편, 귀환편) 조합: 귀환 검색일 > 출발 검색일
+    combined: list[dict] = []
+    preferred = _get_preferred_airlines(mileage_program)
+    for ob_date, ob_flights in ob_by_date.items():
+        for ret_date, ret_flights in ret_by_date.items():
+            if ret_date <= ob_date:
+                continue
+            for ob in ob_flights:
+                for ret in ret_flights:
+                    p_ob = ob.get("price_krw") or ob.get("miles_required") or 999999999
+                    p_ret = ret.get("price_krw") or ret.get("miles_required") or 999999999
+                    total = (p_ob if p_ob != 999999999 else 0) + (p_ret if p_ret != 999999999 else 0)
+                    if total >= 999999999:
+                        continue
+                    rt = {
+                        "round_trip": True,
+                        "outbound": ob,
+                        "return": ret,
+                        "price_krw": total,
+                        "miles_required": None,
+                        "flight_id": f"{ob.get('flight_id', '')}_{ret.get('flight_id', '')}",
+                        "mileage_eligible": bool(preferred) and (
+                            _is_preferred_airline(ob, preferred) or _is_preferred_airline(ret, preferred)
+                        ),
+                    }
+                    combined.append(rt)
+
+    combined.sort(key=lambda x: (x.get("price_krw") or 999999999))
+    return combined[:100], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
 
 
 async def _search_serpapi_only(
@@ -200,22 +283,29 @@ def multi_source_search_flights(
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi Google Flights 검색 (대한항공·아시아나 포함).
-    date_flexibility_days > 0 시 해당 ±일 범위 내 여러 날짜로 병렬 검색 후 통합.
-    mileage_program이 있으면 해당 마일리지 적립 항공사 편을 우선 노출.
+    왕복 + date_flexibility_days>=2: 출발일±N·귀환일±N 각각 편도 검색 후 조합, 가격 싼 순.
+    그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
     Returns (flights, warnings)
     """
     config = {"serpapi_api_key": serpapi_api_key}
-    date_pairs = _date_pairs_with_flexibility(
-        start_date, end_date, date_flexibility_days or 0
-    )
+    flex = date_flexibility_days or 0
 
     async def _run():
+        # 왕복 + 날짜 유연성: 편도 출발×편도 귀환 조합 (가격 싼 순)
+        if not one_way and flex >= 1:
+            flights, warnings, api_ok, ob_range, ret_range = await _search_round_trip_flex_outbound_return(
+                origin, destination, start_date, end_date,
+                seat_class, use_miles, mileage_program, config, flex,
+            )
+            return flights, warnings, api_ok, ob_range, ret_range
+        # 단일 날짜 또는 편도
+        date_pairs = _date_pairs_with_flexibility(start_date, end_date, flex)
         if len(date_pairs) == 1:
-            return await _search_serpapi_only(
+            fl, wa, ok = await _search_serpapi_only(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
                 seat_class, use_miles, mileage_program, config, one_way=one_way,
             )
-        # 날짜 유연성: 여러 날짜 쌍 병렬 검색
+            return fl, wa, ok, "", ""
         tasks = [
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
@@ -236,7 +326,6 @@ def multi_source_search_flights(
             all_warnings.extend(wa)
             if ok:
                 api_responded_ok = True
-        # 중복 제거 및 정렬
         seen: set = set()
         unique: list = []
         for f in all_flights:
@@ -256,100 +345,41 @@ def multi_source_search_flights(
                 or (ret and _is_preferred_airline(ret, preferred))
             )
         unique.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
-        return unique, list(dict.fromkeys(all_warnings)), api_responded_ok
+        return unique, list(dict.fromkeys(all_warnings)), api_responded_ok, "", ""
 
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
     if loop is None:
-        flights, warnings, api_responded_ok = asyncio.run(_run())
+        flights, warnings, api_responded_ok, ob_range, ret_range = asyncio.run(_run())
     else:
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _run())
-            flights, warnings, api_responded_ok = future.result()
-
-    # 0건 시 flex가 0/None이었으면 flex=2로 재시도 (전달 누락 또는 단일 날짜 한정 회피)
-    used_flex = date_flexibility_days or 0
-    if not flights and used_flex < 2:
-        date_pairs_retry = _date_pairs_with_flexibility(start_date, end_date, 2)
-        if len(date_pairs_retry) > 1:
-            config = {"serpapi_api_key": serpapi_api_key}
-            try:
-                async def _retry_run():
-                    tasks = [
-                        _search_serpapi_only(
-                            origin, destination, ds, de, seat_class, use_miles,
-                            mileage_program, config, one_way=one_way,
-                        )
-                        for ds, de in date_pairs_retry
-                    ]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    all_f: list[dict] = []
-                    all_w: list[str] = []
-                    for r in results:
-                        if isinstance(r, Exception):
-                            all_w.append(f"날짜 유연 재검색 오류: {r}")
-                            continue
-                        fl, wa, _ = r
-                        all_f.extend(fl)
-                        all_w.extend(wa)
-                    seen_retry: set = set()
-                    unique_retry: list = []
-                    for f in all_f:
-                        if f.get("round_trip"):
-                            key = ("rt", f.get("flight_id"), (f.get("outbound") or {}).get("departure"), (f.get("return") or {}).get("departure"))
-                        else:
-                            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
-                        if key not in seen_retry:
-                            seen_retry.add(key)
-                            unique_retry.append(f)
-                    preferred_retry = _get_preferred_airlines(mileage_program)
-                    for f in unique_retry:
-                        ob = f.get("outbound") if f.get("round_trip") else f
-                        ret = f.get("return") if f.get("round_trip") else None
-                        f["mileage_eligible"] = bool(preferred_retry) and (
-                            _is_preferred_airline(ob, preferred_retry)
-                            or (ret and _is_preferred_airline(ret, preferred_retry))
-                        )
-                    unique_retry.sort(key=lambda x: _recommend_sort_key(x, preferred_retry, use_miles))
-                    return unique_retry, list(dict.fromkeys(all_w))
-                try:
-                    asyncio.get_running_loop()
-                    in_async = True
-                except RuntimeError:
-                    in_async = False
-                if in_async:
-                    with ThreadPoolExecutor(max_workers=1) as pool:
-                        flights, extra_w = pool.submit(lambda: asyncio.run(_retry_run())).result()
-                else:
-                    flights, extra_w = asyncio.run(_retry_run())
-                warnings.extend(extra_w)
-                if flights:
-                    warnings.append("날짜 유연성(±2일)으로 재검색하여 결과를 찾았습니다.")
-            except Exception:
-                pass  # 재시도 실패 시 기존 빈 결과로 Mock 진행
+            flights, warnings, api_responded_ok, ob_range, ret_range = future.result()
 
     if not flights:
+        # 0건 시: 날짜범위 메시지로 안내 (편도조합 방식 사용 시)
+        if ob_range and ret_range and flex >= 1 and not one_way:
+            warnings.append(
+                f"출발일 {ob_range}까지와 귀환일 {ret_range} 사이에 해당되는 왕복 항공편이 없습니다."
+            )
+            return [], warnings
+        # 그 외: Mock 폴백
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
         flights = mock_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles, one_way=one_way
         )
-        # Mock에도 추천순 정렬 적용 (선호 직항 → 선호 경유 → 나머지 직항 → 나머지 경유, 비행시간↑ 가격↑)
         preferred_airlines = _get_preferred_airlines(mileage_program)
         for f in flights:
             f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
         flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
-        # 추가 안내: 429(한도초과)는 api_clients에서 상세 메시지 반환. 그 외에만 일반 메시지 추가
         api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
         has_quota_msg = any("한도" in w or "429" in w for w in warnings)
-        has_api_error = any(
-            any(kw in w for kw in api_error_keywords)
-            for w in warnings
-        )
+        has_api_error = any(any(kw in w for kw in api_error_keywords) for w in warnings)
         if has_quota_msg:
-            pass  # api_clients에서 한도 초과 상세 안내 이미 포함
+            pass
         elif api_responded_ok and not has_api_error:
             warnings.append(
                 "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, SerpApi 일시적 오류 등) "
