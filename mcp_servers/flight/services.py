@@ -12,7 +12,9 @@ def _date_pairs_with_flexibility(
     end_date: str,
     date_flexibility_days: int,
 ) -> list[tuple[str, str]]:
-    """날짜 유연성 적용 시 검색할 (출발일, 귀환일) 쌍. 최대 5쌍으로 API 호출 절약."""
+    """날짜 유연성 적용 시 검색할 (출발일, 귀환일) 쌍.
+    출발·귀환을 동시에 shift + 출발만/귀환만 각각 shift하여 더 많은 조합 시도 (최대 9쌍).
+    """
     if not date_flexibility_days or date_flexibility_days <= 0:
         return [(start_date, end_date)]
 
@@ -25,24 +27,47 @@ def _date_pairs_with_flexibility(
     flex = min(int(date_flexibility_days), 7)  # 최대 ±7일
 
     pairs: list[tuple[str, str]] = []
-    # 대표 날짜: -flex, -1, 0, +1, +flex (최대 5쌍)
-    offsets = []
-    if flex >= 3:
-        offsets = [-flex, -1, 0, 1, flex]
-    elif flex >= 2:
-        offsets = [-flex, -1, 0, 1, flex]
-    elif flex >= 1:
-        offsets = [-1, 0, 1]
-
     seen: set[tuple[str, str]] = set()
-    for off in offsets:
-        ns = (sd + timedelta(days=off)).strftime("%Y-%m-%d")
-        ne = (ed + timedelta(days=off)).strftime("%Y-%m-%d")
-        if (ns, ne) not in seen:
+
+    def add(ns: str, ne: str) -> None:
+        if (ns, ne) not in seen and ns <= ne:  # 귀환일 ≥ 출발일
             seen.add((ns, ne))
             pairs.append((ns, ne))
 
-    return pairs if pairs else [(start_date, end_date)]
+    # 1) 출발·귀환 동시 shift (기존)
+    for off in ([-flex, -1, 0, 1, flex] if flex >= 2 else [-1, 0, 1]):
+        ns = (sd + timedelta(days=off)).strftime("%Y-%m-%d")
+        ne = (ed + timedelta(days=off)).strftime("%Y-%m-%d")
+        add(ns, ne)
+
+    # 2) 출발일만 ±1 shift (귀환일 고정)
+    if flex >= 1:
+        for doff in [-1, 1]:
+            ns = (sd + timedelta(days=doff)).strftime("%Y-%m-%d")
+            ne = end_date
+            add(ns, ne)
+
+    # 3) 귀환일만 ±1 shift (출발일 고정)
+    if flex >= 1:
+        for eoff in [-1, 1]:
+            ns = start_date
+            ne = (ed + timedelta(days=eoff)).strftime("%Y-%m-%d")
+            add(ns, ne)
+
+    # 4) flex>=2 시 출발/귀환 각각 ±2 (총 9쌍 이내로 제한)
+    if flex >= 2 and len(pairs) < 9:
+        for doff in [-2, 2]:
+            ns = (sd + timedelta(days=doff)).strftime("%Y-%m-%d")
+            add(ns, end_date)
+            if len(pairs) >= 9:
+                break
+        for eoff in [-2, 2]:
+            if len(pairs) >= 9:
+                break
+            ne = (ed + timedelta(days=eoff)).strftime("%Y-%m-%d")
+            add(start_date, ne)
+
+    return pairs[:9] if pairs else [(start_date, end_date)]  # SerpApi 한도 고려 최대 9쌍
 
 
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
