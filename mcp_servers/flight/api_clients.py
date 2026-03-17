@@ -318,4 +318,14 @@ async def search_serpapi(
         if f:
             flights.append(f)
 
+    # 왕복 0건 시 원인 파악: SerpApi가 비었는지, 파싱 실패인지
+    if not one_way and len(flights) == 0 and (len(best) > 0 or len(other) > 0):
+        warnings.append(
+            f"[진단] SerpApi 왕복 원본: best_flights={len(best)}, other_flights={len(other)} 있으나 파싱 0건 → 구조 불일치 가능"
+        )
+    elif not one_way and len(flights) == 0:
+        warnings.append(
+            f"[진단] SerpApi 왕복 원본: best_flights={len(best)}, other_flights={len(other)} → API가 빈 결과 반환"
+        )
+
     return flights, warnings
