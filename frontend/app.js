@@ -630,7 +630,8 @@ function buildTravelInput() {
   if (p2 && p2 !== p1) accommodation_priority.push(p2);
   if (p3 && p3 !== p1 && p3 !== p2) accommodation_priority.push(p3);
 
-  const flex = parseInt(form.date_flexibility_days?.value, 10);
+  const flexEl = form.elements?.date_flexibility_days ?? form.date_flexibility_days;
+  const flex = parseInt(flexEl?.value ?? '', 10);
   const male = parseInt(form.travelers_male?.value, 10) || 0;
   const female = parseInt(form.travelers_female?.value, 10) || 0;
   const children = parseInt(form.travelers_children?.value, 10) || 0;

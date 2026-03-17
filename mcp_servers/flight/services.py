@@ -269,6 +269,67 @@ def multi_source_search_flights(
             future = pool.submit(asyncio.run, _run())
             flights, warnings, api_responded_ok = future.result()
 
+    # 0건 시 flex가 0/None이었으면 flex=2로 재시도 (전달 누락 또는 단일 날짜 한정 회피)
+    used_flex = date_flexibility_days or 0
+    if not flights and used_flex < 2:
+        date_pairs_retry = _date_pairs_with_flexibility(start_date, end_date, 2)
+        if len(date_pairs_retry) > 1:
+            config = {"serpapi_api_key": serpapi_api_key}
+            try:
+                async def _retry_run():
+                    tasks = [
+                        _search_serpapi_only(
+                            origin, destination, ds, de, seat_class, use_miles,
+                            mileage_program, config, one_way=one_way,
+                        )
+                        for ds, de in date_pairs_retry
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    all_f: list[dict] = []
+                    all_w: list[str] = []
+                    for r in results:
+                        if isinstance(r, Exception):
+                            all_w.append(f"날짜 유연 재검색 오류: {r}")
+                            continue
+                        fl, wa, _ = r
+                        all_f.extend(fl)
+                        all_w.extend(wa)
+                    seen_retry: set = set()
+                    unique_retry: list = []
+                    for f in all_f:
+                        if f.get("round_trip"):
+                            key = ("rt", f.get("flight_id"), (f.get("outbound") or {}).get("departure"), (f.get("return") or {}).get("departure"))
+                        else:
+                            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+                        if key not in seen_retry:
+                            seen_retry.add(key)
+                            unique_retry.append(f)
+                    preferred_retry = _get_preferred_airlines(mileage_program)
+                    for f in unique_retry:
+                        ob = f.get("outbound") if f.get("round_trip") else f
+                        ret = f.get("return") if f.get("round_trip") else None
+                        f["mileage_eligible"] = bool(preferred_retry) and (
+                            _is_preferred_airline(ob, preferred_retry)
+                            or (ret and _is_preferred_airline(ret, preferred_retry))
+                        )
+                    unique_retry.sort(key=lambda x: _recommend_sort_key(x, preferred_retry, use_miles))
+                    return unique_retry, list(dict.fromkeys(all_w))
+                try:
+                    asyncio.get_running_loop()
+                    in_async = True
+                except RuntimeError:
+                    in_async = False
+                if in_async:
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        flights, extra_w = pool.submit(lambda: asyncio.run(_retry_run())).result()
+                else:
+                    flights, extra_w = asyncio.run(_retry_run())
+                warnings.extend(extra_w)
+                if flights:
+                    warnings.append("날짜 유연성(±2일)으로 재검색하여 결과를 찾았습니다.")
+            except Exception:
+                pass  # 재시도 실패 시 기존 빈 결과로 Mock 진행
+
     if not flights:
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
