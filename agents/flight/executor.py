@@ -58,20 +58,21 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     start_date = travel.start_date.isoformat()
                     end_date = travel.end_date.isoformat()
                     one_way = True
-            elif flight_leg == "return":
-                # 귀국편: 목적지→출발지, 귀환일
+            elif flight_leg == "return" and trip_type != "round_trip":
+                # 귀국편 (편도·다구간만: 왕복은 한 번에 검색)
                 origin = travel.destination_airport_code or travel.destination
                 dest = travel.origin_airport_code or travel.origin
                 start_date = travel.end_date.isoformat()
                 end_date = travel.end_date.isoformat()
                 one_way = True
             else:
-                # 가는 편 또는 편도
+                # 가는 편, 편도, 또는 왕복(한 번에 검색)
                 origin = travel.origin_airport_code or travel.origin
                 dest = travel.destination_airport_code or travel.destination
                 start_date = travel.start_date.isoformat()
                 end_date = travel.end_date.isoformat()
-                one_way = trip_type == "one_way" or flight_leg == "outbound"
+                # 왕복: one_way=False → SerpApi가 출발+귀환 포함 총 왕복 가격 반환
+                one_way = trip_type != "round_trip"
 
             params = {
                 "origin": origin,
@@ -130,7 +131,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     dest = travel.destination_airport_code or travel.destination
                     start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
                     one_way = True
-            elif flight_leg == "return":
+            elif flight_leg == "return" and data.get("trip_type") != "round_trip":
                 origin = travel.destination_airport_code or travel.destination
                 dest = travel.origin_airport_code or travel.origin
                 start_d, end_d = travel.end_date.isoformat(), travel.end_date.isoformat()
@@ -139,7 +140,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 origin = travel.origin_airport_code or travel.origin
                 dest = travel.destination_airport_code or travel.destination
                 start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
-                one_way = (data.get("trip_type") == "one_way") or (flight_leg == "outbound")
+                one_way = data.get("trip_type") != "round_trip"
 
             if travel.destination_airports and flight_leg != "return" and not (isinstance(flight_leg, str) and flight_leg.startswith("multi_city_")):
                 flights, warnings = multi_source_search_flights_multi_dest(

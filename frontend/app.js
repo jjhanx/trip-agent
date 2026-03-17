@@ -497,13 +497,14 @@ function refreshStepView(step) {
   }
 }
 
-function formatFlightDetailForSummary(f, label) {
+function formatFlightDetailForSummary(f, label, hidePrice, isRoundTripTotal) {
   const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
   const route = `${f.origin || ''} → ${destL}`;
   const dep = fmtFlightDateTime(f.departure);
   const arr = fmtFlightDateTime(f.arrival);
   const dur = f.duration_hours ? `약 ${f.duration_hours}시간` : '';
-  const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+  const priceStr = hidePrice ? '' : (f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일');
+  const price = priceStr ? (priceStr + (isRoundTripTotal ? ' (왕복)' : '')) : '';
   let segHtml = '';
   if (f.segments && f.segments.length > 0) {
     segHtml = f.segments.map((seg, si) => {
@@ -520,7 +521,7 @@ function formatFlightDetailForSummary(f, label) {
       <div class="selected-flight-label">${label}</div>
       <div class="selected-flight-main">${f.airline || '항공사'} ${f.flight_number || ''} · ${route}</div>
       <div class="selected-flight-meta">출발 ${dep} · 도착 ${arr} ${dur ? '· 비행 ' + dur : ''}</div>
-      <div class="selected-flight-price">${price}</div>
+      ${price ? `<div class="selected-flight-price">${price}</div>` : ''}
       ${segHtml ? '<div class="selected-flight-segments">' + segHtml + '</div>' : ''}
     </div>`;
 }
@@ -533,12 +534,13 @@ function showFlightSummaryForEdit(sf) {
   if (!summary || !summaryText) return;
   list.classList.add('hidden');
   sortBar.classList.add('hidden');
+  const isRoundTrip = !!(sf.outbound && sf.return);
   let html = '<div class="selected-flight-header">✅ 선택완료</div>';
   if (sf.outbound) {
-    html += formatFlightDetailForSummary(sf.outbound, '출국편');
+    html += formatFlightDetailForSummary(sf.outbound, '출국편', false, isRoundTrip);
   }
   if (sf.return) {
-    html += formatFlightDetailForSummary(sf.return, '귀국편');
+    html += formatFlightDetailForSummary(sf.return, '귀국편', isRoundTrip);
   }
   if (sf.legs?.length) {
     html = '<div class="selected-flight-header">✅ 선택완료</div>' + sf.legs.map((f, i) =>
@@ -875,6 +877,8 @@ function renderFlights(flights, warnings) {
     if (state.trip_type === 'multi_city') {
       const legNum = state.flightLeg.match(/multi_city_(\d+)/)?.[1];
       stepTitle.textContent = legNum != null ? `2-${parseInt(legNum) + 1}. 구간 ${parseInt(legNum) + 1} 항공편 선택` : '2. 항공편 선택';
+    } else if (state.trip_type === 'round_trip') {
+      stepTitle.textContent = '2. 왕복 항공편 선택';
     } else {
       stepTitle.textContent = state.flightLeg === 'return'
         ? '2b. 귀국 항공편 선택'
@@ -935,25 +939,33 @@ function renderFlights(flights, warnings) {
   }
 
   list.innerHTML = currentFlights.map((f, i) => {
-    const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
-    const route = `${f.origin || ''} → ${destLabel}`;
-    const timeRange = `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
-    const duration = f.duration_hours ? ` · 약 ${f.duration_hours}시간` : '';
-    const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+    const isRt = f.round_trip === true;
+    const ob = isRt ? (f.outbound || f) : f;
+    const ret = isRt ? (f.return || {}) : null;
+    const destLabel = (ob.destination_label ? `${ob.destination || ''} (${ob.destination_label})` : ob.destination) || (f.destination_label ? `${f.destination || ''} (${f.destination_label})` : f.destination) || '';
+    const route = isRt ? `${ob.origin || ''} ⇌ ${destLabel}` : `${f.origin || ''} → ${destLabel}`;
+    const timeRange = isRt ? `${fmtFlightDateTime(ob.departure)} ~ ${fmtFlightDateTime(ret.arrival || ob.arrival)}` : `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
+    const durOb = ob.duration_hours || 0;
+    const durRet = ret.duration_hours || 0;
+    const totalDur = isRt ? durOb + durRet : durOb;
+    const duration = totalDur ? ` · 약 ${totalDur}시간` : '';
+    const priceDisplay = (f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일') + (isRt ? ' (왕복)' : '');
     const mileageBadge = f.mileage_eligible ? '<span class="flight-badge mileage">마일리지 적립</span>' : '';
-    const mockBadge = (f.source === 'mock_reference' || f.source === 'mock')
+    const mockBadge = (ob.source === 'mock_reference' || ob.source === 'mock' || f.source === 'mock')
       ? '<span class="flight-badge" style="background:#fff3cd; color:#856404; margin-left: 5px;">예시(Mock) 참고용</span>'
       : '';
 
     // Segments and layovers details
     let detailsHtml = '';
-    if (f.segments && f.segments.length > 0) {
+    const segsForDetails = isRt ? [...(ob.segments || []), ...(ret.segments || [])] : (f.segments || []);
+    if (segsForDetails.length > 0) {
       detailsHtml += `<div class="flight-details hidden" id="flight-details-${i}" style="margin-top: 1rem; padding: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px;">`;
 
       let isReturnFlightStarted = false;
-      const outboundDateStart = f.departure ? f.departure.substring(0, 10) : "";
+      const outboundDateStart = ob.departure ? ob.departure.substring(0, 10) : "";
+      const obSegCount = (ob.segments || []).length;
 
-      f.segments.forEach((seg, sIdx) => {
+      segsForDetails.forEach((seg, sIdx) => {
         const dAirport = seg.departure_airport?.name || seg.departure_airport?.id || "";
         const aAirport = seg.arrival_airport?.name || seg.arrival_airport?.id || "";
         const dTimeStr = seg.departure_airport?.time?.substring(0, 19) || "";
@@ -963,26 +975,26 @@ function renderFlights(flights, warnings) {
 
         // Detect if this segment is part of the return trip (if it is a round trip)
         const currentSegmentDate = dTimeStr.substring(0, 10);
-        const isRoundTrip = state.travelInput?.trip_type === 'round_trip';
+        const showingRoundTripSegments = isRt || state.travelInput?.trip_type === 'round_trip';
 
-        if (isRoundTrip && !isReturnFlightStarted && currentSegmentDate > outboundDateStart) {
-          // Check if there is a massive gap in days (layover duration logic below is usually for hours)
-          // Or typically if the destination of the entire outbound journey is reached, but comparing dates is safer for SerpApi's flat array
+        if (isRt && sIdx >= obSegCount && !isReturnFlightStarted) {
+          isReturnFlightStarted = true;
+          detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
+          detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
+        } else if (showingRoundTripSegments && !isRt && !isReturnFlightStarted && currentSegmentDate > outboundDateStart) {
           if (f.layovers && f.layovers[sIdx - 1] && f.layovers[sIdx - 1].duration > 1440) {
             isReturnFlightStarted = true;
             detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
             detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
-          } else if (dAirport.includes(f.destination) || seg.departure_airport?.id === f.destination) {
+          } else if (dAirport.includes(ob.destination) || (seg.departure_airport?.id || '') === (ob.destination || '')) {
             isReturnFlightStarted = true;
             detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
             detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
           }
         }
 
-        if (sIdx === 0) {
-          if (isRoundTrip) {
-            detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[가는 편]</div>`;
-          }
+        if (sIdx === 0 && showingRoundTripSegments) {
+          detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[가는 편]</div>`;
         }
 
         detailsHtml += `
@@ -993,7 +1005,7 @@ function renderFlights(flights, warnings) {
           </div>
         `;
         // Layover after this segment?
-        if (f.layovers && f.layovers[sIdx]) {
+        if ((f.layovers || [])[sIdx]) {
           const lay = f.layovers[sIdx];
           // Ignore massive "layovers" that are actually just the destination stay for round trips
           if (lay.duration && lay.duration < 1440) {
@@ -1018,16 +1030,15 @@ function renderFlights(flights, warnings) {
         </div>`;
     }
 
-    const isRoundTrip = state.travelInput?.trip_type === 'round_trip';
-    const routeDisplay = isRoundTrip ? `${f.origin || ''} ⇌ ${destLabel}` : route;
+    const routeDisplay = isRt ? route : (state.travelInput?.trip_type === 'round_trip' ? `${ob.origin || ''} ⇌ ${destLabel}` : route);
 
     return `
     <div class="option-item" data-idx="${i}" style="flex-direction: column; align-items: stretch; padding: 0;">
       <div class="flight-summary" style="padding: 1rem;">
-        <h3>${f.airline || '항공사'} ${f.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
+        <h3>${ob.airline || '항공사'} ${ob.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
         <p class="flight-route">${routeDisplay}</p>
         <p class="flight-time">${timeRange}${duration}</p>
-        <p class="price">${price}</p>
+        <p class="price">${priceDisplay}</p>
         <div style="text-align: right; margin-top: -1.5rem;">
           <span style="font-size:0.8em; color:var(--accent); text-decoration: underline;">상세 보기 ▼</span>
         </div>
@@ -1069,6 +1080,9 @@ function selectFlight(f) {
     const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
     state.selectedMultiCityFlights = state.selectedMultiCityFlights || [];
     state.selectedMultiCityFlights[idx] = f;
+  } else if (f.round_trip) {
+    state.selectedOutboundFlight = { ...(f.outbound || {}), price_krw: f.price_krw, miles_required: f.miles_required };
+    state.selectedReturnFlight = f.return || null;
   } else if (state.flightLeg === 'return') {
     state.selectedReturnFlight = f;
   } else {
@@ -1084,12 +1098,13 @@ function selectFlight(f) {
   list.classList.add('hidden');
   sortBar.classList.add('hidden');
 
-  const destLabel = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
-  const price = f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일';
+  const disp = f.round_trip ? (f.outbound || f) : f;
+  const destLabel = disp.destination_label ? `${disp.destination || ''} (${disp.destination_label})` : (disp.destination || '');
+  const price = f.price_krw ? f.price_krw.toLocaleString() + '원 (왕복)' : (f.miles_required || 0) + '마일';
   const legLabel = state.trip_type === 'multi_city'
     ? `[구간${parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10) + 1}] `
-    : (state.flightLeg === 'return' ? '[귀국] ' : '[출국] ');
-  summaryText.innerHTML = legLabel + `${f.airline} ${f.flight_number} - ${f.origin} → ${destLabel} (${price})`;
+    : (f.round_trip ? '[왕복] ' : (state.flightLeg === 'return' ? '[귀국] ' : '[출국] '));
+  summaryText.innerHTML = legLabel + `${disp.airline} ${disp.flight_number} - ${disp.origin} → ${destLabel} (${price})`;
   summary.classList.remove('hidden');
 
   nextBtn.disabled = false;
@@ -1163,20 +1178,23 @@ $$('.sort-btn').forEach(btn => {
 
     let flights = [...state.currentFlights];
 
+    const dur = (f) => {
+      if (f.round_trip) return ((f.outbound || {}).duration_hours || 0) + ((f.return || {}).duration_hours || 0) || 999;
+      return f.duration_hours || 999;
+    };
+    const price = (f) => f.price_krw ?? f.miles_required ?? 99999999;
     if (sortType === 'recommend') {
-      // 추천순: 1) 선호 직항 2) 선호 경유(비행시간↑) 3) 나머지 직항 4) 나머지 경유(비행시간↑). 동일 카테고리 내 비행시간↑ 가격↑. 다중 도착 시 airport_priority 반영
       flights.sort((a, b) => {
         const cat = (f) => {
+          const ob = f.round_trip ? (f.outbound || f) : f;
           const pref = !!f.mileage_eligible;
-          const direct = f.is_direct !== false;
+          const direct = f.round_trip ? ((ob.is_direct !== false) && ((f.return || {}).is_direct !== false)) : (ob.is_direct !== false);
           if (pref && direct) return 0;
           if (pref && !direct) return 1;
           if (!pref && direct) return 2;
           return 3;
         };
         const ap = (f) => f.airport_priority ?? 99;
-        const dur = (f) => f.duration_hours ?? 999;
-        const price = (f) => f.price_krw ?? f.miles_required ?? 99999999;
         const ca = cat(a), cb = cat(b);
         if (ca !== cb) return ca - cb;
         if (ap(a) !== ap(b)) return ap(a) - ap(b);
@@ -1184,17 +1202,9 @@ $$('.sort-btn').forEach(btn => {
         return price(a) - price(b);
       });
     } else if (sortType === 'price') {
-      flights.sort((a, b) => {
-        const aPrice = a.price_krw || a.miles_required || 99999999;
-        const bPrice = b.price_krw || b.miles_required || 99999999;
-        return aPrice - bPrice;
-      });
+      flights.sort((a, b) => price(a) - price(b));
     } else if (sortType === 'duration') {
-      flights.sort((a, b) => {
-        const aDur = a.duration_hours || 999;
-        const bDur = b.duration_hours || 999;
-        return aDur - bDur;
-      });
+      flights.sort((a, b) => dur(a) - dur(b));
     }
 
     // Sort된 데이터를 state에 다시 담고 다시 렌더 (경고도 빈 배열로 처리, 상단 배너 안 건드리게)

@@ -80,10 +80,20 @@ def _recommend_sort_key(
     같은 카테고리 내: 비행시간 짧은 순 → 최저가 순
     Returns (category, duration_hours, price).
     """
-    is_pref = bool(preferred_airlines) and _is_preferred_airline(flight, preferred_airlines)
-    is_direct = flight.get("is_direct", True)
-    dur = flight.get("duration_hours") or 999.0
-    price = (flight.get("miles_required") or flight.get("price_krw") or 999999999)
+    if flight.get("round_trip"):
+        ob = flight.get("outbound") or {}
+        price = (flight.get("miles_required") or flight.get("price_krw") or 999999999)
+        dur = (ob.get("duration_hours") or 999.0) + (flight.get("return") or {}).get("duration_hours", 0)
+        is_pref = bool(preferred_airlines) and (
+            _is_preferred_airline(ob, preferred_airlines)
+            or _is_preferred_airline(flight.get("return") or {}, preferred_airlines)
+        )
+        is_direct = ob.get("is_direct", True) and (flight.get("return") or {}).get("is_direct", True)
+    else:
+        is_pref = bool(preferred_airlines) and _is_preferred_airline(flight, preferred_airlines)
+        is_direct = flight.get("is_direct", True)
+        dur = flight.get("duration_hours") or 999.0
+        price = (flight.get("miles_required") or flight.get("price_krw") or 999999999)
 
     if is_pref and is_direct:
         cat = 0
@@ -124,11 +134,14 @@ async def _search_serpapi_only(
 
     all_flights = flights
 
-    # 중복 제거 (airline+flight_number+departure 기준)
+    # 중복 제거 (왕복은 flight_id, 편도는 airline+flight_number+departure)
     seen: set = set()
     unique: list = []
     for f in all_flights:
-        key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+        if f.get("round_trip"):
+            key = ("rt", f.get("flight_id"), (f.get("outbound") or {}).get("departure"), (f.get("return") or {}).get("departure"))
+        else:
+            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
         if key not in seen:
             seen.add(key)
             unique.append(f)
@@ -136,7 +149,12 @@ async def _search_serpapi_only(
     # mileage_eligible 표시 및 추천순 정렬 (검색 결과 있을 때 Mock 보충 안 함)
     preferred_airlines = _get_preferred_airlines(mileage_program)
     for f in unique:
-        f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
+        ob = f.get("outbound") if f.get("round_trip") else f
+        ret = f.get("return") if f.get("round_trip") else None
+        f["mileage_eligible"] = bool(preferred_airlines) and (
+            _is_preferred_airline(ob, preferred_airlines)
+            or (ret and _is_preferred_airline(ret, preferred_airlines))
+        )
     sort_fn = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
     unique.sort(key=sort_fn)
 
@@ -197,13 +215,21 @@ def multi_source_search_flights(
         seen: set = set()
         unique: list = []
         for f in all_flights:
-            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+            if f.get("round_trip"):
+                key = ("rt", f.get("flight_id"), (f.get("outbound") or {}).get("departure"), (f.get("return") or {}).get("departure"))
+            else:
+                key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
             if key not in seen:
                 seen.add(key)
                 unique.append(f)
         preferred = _get_preferred_airlines(mileage_program)
         for f in unique:
-            f["mileage_eligible"] = bool(preferred) and _is_preferred_airline(f, preferred)
+            ob = f.get("outbound") if f.get("round_trip") else f
+            ret = f.get("return") if f.get("round_trip") else None
+            f["mileage_eligible"] = bool(preferred) and (
+                _is_preferred_airline(ob, preferred)
+                or (ret and _is_preferred_airline(ret, preferred))
+            )
         unique.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
         return unique, list(dict.fromkeys(all_warnings)), api_responded_ok
 
@@ -222,7 +248,7 @@ def multi_source_search_flights(
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
         flights = mock_search_flights(
-            origin, destination, start_date, end_date, seat_class, use_miles
+            origin, destination, start_date, end_date, seat_class, use_miles, one_way=one_way
         )
         # Mock에도 추천순 정렬 적용 (선호 직항 → 선호 경유 → 나머지 직항 → 나머지 경유, 비행시간↑ 가격↑)
         preferred_airlines = _get_preferred_airlines(mileage_program)
@@ -287,7 +313,11 @@ def multi_source_search_flights_multi_dest(
     seen: set[tuple] = set()
     unique = []
     for f in all_flights:
-        key = (f.get("airline"), f.get("flight_number"), f.get("departure"), f.get("destination"))
+        if f.get("round_trip"):
+            ob = f.get("outbound") or {}
+            key = ("rt", f.get("flight_id"), ob.get("departure"), (f.get("return") or {}).get("departure"), f.get("destination_airport"))
+        else:
+            key = (f.get("airline"), f.get("flight_number"), f.get("departure"), f.get("destination"))
         if key not in seen:
             seen.add(key)
             unique.append(f)

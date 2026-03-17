@@ -67,12 +67,90 @@ def _parse_serpapi_time(t: str) -> str:
     return t
 
 
+def _segments_to_leg(segs: list, o: str, d: str) -> dict | None:
+    """세그먼트 리스트 → 출발/도착/항공사 등 하나의 leg 정보."""
+    if not segs:
+        return None
+    s0, s_last = segs[0], segs[-1]
+    dep = s0.get("departure_airport") or {}
+    arr = s_last.get("arrival_airport") or {}
+    dur_min = sum(s.get("duration") or 0 for s in segs)
+    dur_h = round(dur_min / 60, 1) if dur_min else None
+    segs_ui = [
+        {
+            "departure_airport": {"id": (x.get("departure_airport") or {}).get("id"), "name": (x.get("departure_airport") or {}).get("name"), "time": (x.get("departure_airport") or {}).get("time")},
+            "arrival_airport": {"id": (x.get("arrival_airport") or {}).get("id"), "name": (x.get("arrival_airport") or {}).get("name"), "time": (x.get("arrival_airport") or {}).get("time")},
+            "duration": x.get("duration"),
+            "airline": x.get("airline"),
+            "flight_number": x.get("flight_number"),
+        }
+        for x in segs
+    ]
+    return {
+        "airline": s0.get("airline", ""),
+        "flight_number": s0.get("flight_number", ""),
+        "departure": _parse_serpapi_time(dep.get("time", "")),
+        "arrival": _parse_serpapi_time(arr.get("time", "")),
+        "origin": dep.get("id", o) or o,
+        "destination": arr.get("id", d) or d,
+        "duration_hours": dur_h,
+        "is_direct": len(segs) == 1,
+        "segments": segs_ui,
+    }
+
+
+def _trip_to_round_trip(trip: dict, origin: str, destination: str) -> dict | None:
+    """SerpApi 왕복 trip → round_trip 구조 (outbound + return + 총가격)."""
+    flights = trip.get("flights", [])
+    if not flights:
+        return None
+
+    dest_upper = destination.upper()[:3]
+    orig_upper = origin.upper()[:3]
+
+    outbound_segs: list = []
+    return_segs: list = []
+    in_return = False
+    for seg in flights:
+        dep_id = (seg.get("departure_airport") or {}).get("id", "")
+        arr_id = (seg.get("arrival_airport") or {}).get("id", "")
+        dep_3 = str(dep_id).upper()[:3] if dep_id else ""
+        arr_3 = str(arr_id).upper()[:3] if arr_id else ""
+        if not in_return:
+            outbound_segs.append(seg)
+            if arr_3 == dest_upper:
+                in_return = True
+        else:
+            return_segs.append(seg)
+
+    ob = _segments_to_leg(outbound_segs, origin, destination)
+    ret = _segments_to_leg(return_segs, destination, origin)
+    if not ob or not ret:
+        return None
+
+    price = trip.get("price")
+    try:
+        price_krw = int(price) if price is not None else None
+    except (TypeError, ValueError):
+        price_krw = None
+
+    return {
+        "round_trip": True,
+        "price_krw": price_krw,
+        "miles_required": None,
+        "outbound": {**ob, "flight_id": trip.get("departure_token")},
+        "return": ret,
+        "flight_id": trip.get("departure_token"),
+        "layovers": trip.get("layovers") or [],
+    }
+
+
 def _trip_to_flight(
     trip: dict,
     origin: str,
     destination: str,
 ) -> dict | None:
-    """SerpApi trip(best_flights/other_flights 항목) → 통일된 flight dict."""
+    """SerpApi trip(best_flights/other_flights 항목) → 통일된 flight dict (편도)."""
     flights = trip.get("flights", [])
     if not flights:
         return None
@@ -217,7 +295,10 @@ async def search_serpapi(
 
     flights = []
     for trip in all_trips[:25]:
-        f = _trip_to_flight(trip, o, d)
+        if one_way:
+            f = _trip_to_flight(trip, o, d)
+        else:
+            f = _trip_to_round_trip(trip, o, d)
         if f:
             flights.append(f)
 
