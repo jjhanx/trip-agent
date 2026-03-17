@@ -284,7 +284,7 @@ async def _search_round_trip_flex_2phase(
         f["mileage_eligible"] = bool(preferred) and (
             _is_preferred_airline(ob, preferred) or _is_preferred_airline(ret, preferred)
         )
-    all_flights.sort(key=lambda x: (x.get("price_krw") or 999999999))
+    all_flights.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
     return all_flights[:100], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
 
 
