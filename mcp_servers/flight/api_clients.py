@@ -274,7 +274,8 @@ async def search_serpapi(
         print(f"[SerpApi] Request: {o} -> {d}, {start_date}" + (f" ~ {end_date}" if not one_way else " (편도)"))
 
     url = "https://serpapi.com/search.json"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    timeout = 60.0 if deep_search else 30.0  # deep_search는 응답 지연 가능
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.get(url, params=params)
 
     if resp.status_code != 200:
