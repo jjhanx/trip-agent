@@ -186,15 +186,28 @@ async def _search_round_trip_flex_2phase(
         all_warnings.extend(wa)
         ret_by_date[rd_dates[i]] = fl
 
+    # 1단계 진단: 편도 검색 결과 요약
+    ob_counts = {d: len(ob_by_date.get(d, [])) for d in od_dates}
+    ret_counts = {d: len(ret_by_date.get(d, [])) for d in rd_dates}
+    ob_with_flights = [d for d in od_dates if ob_counts[d] > 0]
+    ret_with_flights = [d for d in rd_dates if ret_counts[d] > 0]
+    diag_phase1 = (
+        f"[진단] 1단계 편도: 출발 {ob_counts} → {len(ob_with_flights)}일 유효, "
+        f"귀환 {ret_counts} → {len(ret_with_flights)}일 유효"
+    )
+    all_warnings.append(diag_phase1)
+
     # 가능한 (출발일, 귀환일) 조합: 출발·귀환 모두 편도 결과 있음 & 귀환 > 출발
     viable_pairs: list[tuple[str, str]] = [
         (ob_d, ret_d) for ob_d in od_dates for ret_d in rd_dates
         if ret_d > ob_d and ob_by_date.get(ob_d) and ret_by_date.get(ret_d)
     ]
-    # 편도 0건이어도 왕복은 있을 수 있음(SerpApi 동작 차이) → fallback으로 날짜쌍 사용
+    used_fallback = False
     if not viable_pairs:
         fallback_pairs = _date_pairs_with_flexibility(start_date, end_date, date_flexibility_days)
         viable_pairs = fallback_pairs[:12]
+        used_fallback = True
+        all_warnings.append(f"[진단] 편도 조합 0쌍 → 날짜쌍 fallback {len(viable_pairs)}쌍 사용")
 
     # 2단계: 각 날짜 조합으로 왕복 검색(deep_search=true) → 정확한 왕복가
     preferred = _get_preferred_airlines(mileage_program)
@@ -212,9 +225,11 @@ async def _search_round_trip_flex_2phase(
 
     all_flights: list[dict] = []
     seen: set = set()
+    rt_deep_errors = 0
     for r in round_trip_results:
         if isinstance(r, Exception):
             all_warnings.append(f"왕복 가격 검색 오류: {r}")
+            rt_deep_errors += 1
             continue
         fl, wa = r
         all_warnings.extend(wa)
@@ -224,20 +239,29 @@ async def _search_round_trip_flex_2phase(
                 seen.add(key)
                 all_flights.append(f)
 
+    all_warnings.append(
+        f"[진단] 2단계 왕복(deep_search): {len(pairs_to_try)}쌍 검색 → {len(all_flights)}건"
+        + (f", 오류 {rt_deep_errors}건" if rt_deep_errors else "")
+    )
+
     # deep_search 0건 시 일반 왕복 검색으로 재시도 (타임아웃/동작 차이 회피)
     if not all_flights and pairs_to_try:
+        retry_pairs = pairs_to_try[:5]
         retry_results = await asyncio.gather(
             *[
                 _search_serpapi_round_trip(  # deep_search 없음
                     origin, destination, ob_d, ret_d, seat_class, config,
                 )
-                for ob_d, ret_d in pairs_to_try[:5]
+                for ob_d, ret_d in retry_pairs
             ],
             return_exceptions=True,
         )
+        retry_flights = 0
+        retry_errors = 0
         for r in retry_results:
             if isinstance(r, Exception):
                 all_warnings.append(f"왕복 재검색 오류: {r}")
+                retry_errors += 1
                 continue
             fl, wa = r
             all_warnings.extend(wa)
@@ -246,6 +270,11 @@ async def _search_round_trip_flex_2phase(
                 if key not in seen:
                     seen.add(key)
                     all_flights.append(f)
+                    retry_flights += 1
+        all_warnings.append(
+            f"[진단] 3단계 왕복(일반): {len(retry_pairs)}쌍 재시도 → {retry_flights}건"
+            + (f", 오류 {retry_errors}건" if retry_errors else "")
+        )
         if all_flights:
             all_warnings.append("일반 검색으로 결과를 찾았습니다. (deep_search 0건)")
 
