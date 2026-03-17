@@ -50,3 +50,46 @@ Trip Agent의 항공편 검색 모듈은 3단계 오케스트레이션으로 작
    - 디버깅을 위해 `mcp_servers/flight/api_clients.py` 파일 내의 `DEBUG_SERPAPI = True` 플래그를 통해 검색 요청/응답 결과를 터미널에서 확인할 수 있습니다.
 2. **Playwright Fallback**: 월 무료 250건 한도를 다 썼거나 SerpApi 쪽에 오류가 나면 사용자 화면에 `SerpApi 무료 한도 초과: Playwright 크롤링으로 전환합니다...`라는 경고를 띄우고, 백그라운드 브라우저(Headless Chrome)를 열어 스크래핑을 시도합니다. 
 3. **Mock 데이터 (최후의 보루)**: 위 1, 2번이 모두 실패하거나 출발일이 너무 멀어서 예약 불가능한 기간일 경우 Mock 데이터를 화면에 뿌리고 에러 상황을 우회합니다. (실제 데이터가 단 하나라도 검색 가능한 상황에서는 Mock 데이터가 강제로 주입되지 않습니다.)
+
+---
+
+## 4. SerpApi 한도 초과 시 점검 방법
+
+검색 결과 대신 **"SerpApi 월 한도(250회) 초과"** 안내가 표시되면 아래 순서로 확인하세요.
+
+### 4.1 대시보드에서 확인
+1. [serpapi.com/dashboard](https://serpapi.com/dashboard) 로그인
+2. 대시보드에서 **이번 달 사용량**(Searches used)과 **잔여 횟수**(Searches left) 확인
+3. 무료 플랜(250회/월) 초과 시: 다음 달 1일 리셋 대기, 또는 유료 플랜 업그레이드
+
+### 4.2 Account API로 조회 (터미널)
+API 키로 잔여 횟수를 직접 확인하려면:
+
+```bash
+curl "https://serpapi.com/account.json?api_key=YOUR_API_KEY"
+```
+
+응답 예시:
+```json
+{
+  "plan_searches_left": 120,
+  "this_month_usage": 130,
+  "searches_per_month": 250,
+  "last_hour_searches": 5,
+  "account_rate_limit_per_hour": 50
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `plan_searches_left` | 이번 달 남은 검색 횟수 |
+| `this_month_usage` | 이번 달 사용량 |
+| `searches_per_month` | 월 한도 (무료: 250) |
+| `last_hour_searches` | 최근 1시간 사용량 |
+| `account_rate_limit_per_hour` | 시간당 한도 (초과 시에도 429) |
+
+Account API 호출은 **검색 한도에 포함되지 않음** (무료).
+
+### 4.3 대응 방법
+- **월 한도 소진**: 다음 달 1일까지 대기, 또는 [Pricing](https://serpapi.com/pricing)에서 플랜 업그레이드
+- **시간당 한도 초과**: 1시간 후 재시도

@@ -275,8 +275,19 @@ async def search_serpapi(
         resp = await client.get(url, params=params)
 
     if resp.status_code != 200:
-        err = resp.text[:200]
-        return [], [f"SerpApi 검색 실패: {resp.status_code} - {err}"]
+        err = resp.text[:500]
+        try:
+            data_err = resp.json()
+            err_msg = data_err.get("error", err)
+        except Exception:
+            err_msg = err
+        if resp.status_code == 429:
+            return [], [
+                "SerpApi 월 한도(250회) 초과 또는 시간당 한도 초과입니다. "
+                "점검: https://serpapi.com/dashboard 로그인 후 사용량 확인. 자세한 절차는 FLIGHT_API_SETUP.md §4 참조. "
+                f"(원문: {err_msg})",
+            ]
+        return [], [f"SerpApi 검색 실패: {resp.status_code} - {err_msg}"]
 
     try:
         data = resp.json()

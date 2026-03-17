@@ -255,13 +255,16 @@ def multi_source_search_flights(
         for f in flights:
             f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
         flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
-        # API 정상 연결됐으나 0건. 원인: 예약기간·노선/날짜 조합·SerpApi 일시적 빈 결과 등 다양함
+        # 추가 안내: 429(한도초과)는 api_clients에서 상세 메시지 반환. 그 외에만 일반 메시지 추가
         api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
+        has_quota_msg = any("한도" in w or "429" in w for w in warnings)
         has_api_error = any(
             any(kw in w for kw in api_error_keywords)
             for w in warnings
         )
-        if api_responded_ok and not has_api_error:
+        if has_quota_msg:
+            pass  # api_clients에서 한도 초과 상세 안내 이미 포함
+        elif api_responded_ok and not has_api_error:
             warnings.append(
                 "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, SerpApi 일시적 오류 등) "
                 "예시(Mock) 데이터로 보여드립니다."
