@@ -318,14 +318,117 @@ async def search_serpapi(
         if f:
             flights.append(f)
 
-    # 왕복 0건 시 원인 파악: SerpApi가 비었는지, 파싱 실패인지
+    # 왕복 0건: SerpApi 1차 응답은 출발편만 포함. departure_token으로 2차 요청 필요
     if not one_way and len(flights) == 0 and (len(best) > 0 or len(other) > 0):
-        warnings.append(
-            f"[진단] SerpApi 왕복 원본: best_flights={len(best)}, other_flights={len(other)} 있으나 파싱 0건 → 구조 불일치 가능"
+        flights, extra_w = await _search_serpapi_round_trip_via_tokens(
+            origin, destination, start_date, end_date, api_key, seat_class,
+            best + other, o, d, deep_search,
         )
+        warnings.extend(extra_w)
+
     elif not one_way and len(flights) == 0:
         warnings.append(
             f"[진단] SerpApi 왕복 원본: best_flights={len(best)}, other_flights={len(other)} → API가 빈 결과 반환"
         )
 
     return flights, warnings
+
+
+async def _search_serpapi_round_trip_via_tokens(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    api_key: str,
+    seat_class: str,
+    outbound_trips: list[dict],
+    o: str,
+    d: str,
+    deep_search: bool,
+) -> tuple[list[dict], list[str]]:
+    """
+    SerpApi 왕복 2단계: 1차는 출발편만 있음. departure_token으로 2차 요청해 귀환편+총가격 획득.
+    """
+    warnings: list[str] = []
+    all_round_trips: list[dict] = []
+    dest_upper = d
+    orig_upper = o
+
+    # 출발편 파싱 (1차 응답의 flights = 출발 구간)
+    outbound_options: list[tuple[dict, str]] = []  # (outbound_leg, departure_token)
+    for trip in outbound_trips[:3]:  # 최대 3개 출발편에 대해 2차 요청 (API 한도 고려)
+        token = trip.get("departure_token")
+        if not token:
+            continue
+        flights = trip.get("flights", [])
+        if not flights:
+            continue
+        ob = _segments_to_leg(flights, o, d)
+        if not ob:
+            continue
+        outbound_options.append((ob, token))
+
+    if not outbound_options:
+        return [], [*warnings, "[진단] 출발편에서 departure_token 없음"]
+
+    # 각 출발편마다 2차 요청 → 귀환편 옵션 (각 항목에 price=왕복총가)
+    url = "https://serpapi.com/search.json"
+    timeout = 60.0 if deep_search else 30.0
+
+    for ob_leg, token in outbound_options:
+        params = {
+            "engine": "google_flights",
+            "hl": "ko",
+            "gl": "kr",
+            "currency": "KRW",
+            "departure_id": o,
+            "arrival_id": d,
+            "outbound_date": start_date,
+            "return_date": end_date,
+            "type": "1",
+            "departure_token": token,
+            "api_key": api_key,
+            "no_cache": "true",
+        }
+        if deep_search:
+            params["deep_search"] = "true"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url, params=params)
+        except Exception as e:
+            warnings.append(f"2차 요청 오류: {e}")
+            continue
+        if resp.status_code != 200:
+            continue
+        try:
+            data = resp.json()
+        except Exception:
+            continue
+        if data.get("error"):
+            continue
+        ret_trips = (data.get("best_flights") or []) + (data.get("other_flights") or [])
+        for rt in ret_trips[:10]:
+            ret_flights = rt.get("flights", [])
+            if not ret_flights:
+                continue
+            ret_leg = _segments_to_leg(ret_flights, d, o)  # 귀환: destination→origin
+            if not ret_leg:
+                continue
+            price = rt.get("price")
+            try:
+                price_krw = int(price) if price is not None else None
+            except (TypeError, ValueError):
+                price_krw = None
+            if price_krw is None:
+                continue
+            all_round_trips.append({
+                "round_trip": True,
+                "price_krw": price_krw,
+                "miles_required": None,
+                "outbound": {**ob_leg, "flight_id": token[:20]},
+                "return": ret_leg,
+                "flight_id": f"{token[:12]}_{rt.get('departure_token', '')[:12]}",
+                "layovers": rt.get("layovers") or [],
+            })
+
+    return all_round_trips, warnings
