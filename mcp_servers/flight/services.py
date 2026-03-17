@@ -119,7 +119,7 @@ def _recommend_sort_key(
     return (cat, dur, price)
 
 
-async def _search_round_trip_flex_outbound_return(
+async def _search_round_trip_flex_2phase(
     origin: str,
     destination: str,
     start_date: str,
@@ -131,7 +131,9 @@ async def _search_round_trip_flex_outbound_return(
     date_flexibility_days: int,
 ) -> tuple[list[dict], list[str], bool, str, str]:
     """
-    왕복 + 날짜 유연성: 출발일±N·귀환일±N 각각 편도 검색 후 조합. 가격 싼 순.
+    2단계 왕복 검색:
+    1) 편도 검색으로 가능한 (출발일, 귀환일) 조합 추출
+    2) 추출된 조합별 왕복 검색(deep_search=true)으로 정확한 가격 획득
     Returns (flights, warnings, api_ok, ob_range_msg, ret_range_msg).
     """
     od_dates, rd_dates, ob_range, ret_range = _outbound_return_dates_with_flex(
@@ -141,7 +143,7 @@ async def _search_round_trip_flex_outbound_return(
     if not api_key:
         return [], ["SerpApi API 키가 설정되지 않았습니다. .env에 SERPAPI_API_KEY 추가."], False, ob_range, ret_range
 
-    # 1) 출발편 편도 검색 (원래→목적지): 5일
+    # 1단계: 편도 검색으로 존재 여부 파악 → 가능한 날짜 조합 추출
     tasks_out = [
         _search_serpapi_only(
             origin, destination, d, d, seat_class, use_miles,
@@ -149,7 +151,6 @@ async def _search_round_trip_flex_outbound_return(
         )
         for d in od_dates
     ]
-    # 2) 귀환편 편도 검색 (목적지→원래): 5일
     tasks_ret = [
         _search_serpapi_only(
             destination, origin, r, r, seat_class, use_miles,
@@ -167,6 +168,7 @@ async def _search_round_trip_flex_outbound_return(
     for i, r in enumerate(out_results):
         if isinstance(r, Exception):
             all_warnings.append(f"출발일 검색 오류: {r}")
+            ob_by_date[od_dates[i]] = []
             continue
         fl, wa, ok = r
         if ok:
@@ -176,6 +178,7 @@ async def _search_round_trip_flex_outbound_return(
     for i, r in enumerate(ret_results):
         if isinstance(r, Exception):
             all_warnings.append(f"귀환일 검색 오류: {r}")
+            ret_by_date[rd_dates[i]] = []
             continue
         fl, wa, ok = r
         if ok:
@@ -183,35 +186,73 @@ async def _search_round_trip_flex_outbound_return(
         all_warnings.extend(wa)
         ret_by_date[rd_dates[i]] = fl
 
-    # 3) (출발편, 귀환편) 조합: 귀환 검색일 > 출발 검색일
-    combined: list[dict] = []
-    preferred = _get_preferred_airlines(mileage_program)
-    for ob_date, ob_flights in ob_by_date.items():
-        for ret_date, ret_flights in ret_by_date.items():
-            if ret_date <= ob_date:
-                continue
-            for ob in ob_flights:
-                for ret in ret_flights:
-                    p_ob = ob.get("price_krw") or ob.get("miles_required") or 999999999
-                    p_ret = ret.get("price_krw") or ret.get("miles_required") or 999999999
-                    total = (p_ob if p_ob != 999999999 else 0) + (p_ret if p_ret != 999999999 else 0)
-                    if total >= 999999999:
-                        continue
-                    rt = {
-                        "round_trip": True,
-                        "outbound": ob,
-                        "return": ret,
-                        "price_krw": total,
-                        "miles_required": None,
-                        "flight_id": f"{ob.get('flight_id', '')}_{ret.get('flight_id', '')}",
-                        "mileage_eligible": bool(preferred) and (
-                            _is_preferred_airline(ob, preferred) or _is_preferred_airline(ret, preferred)
-                        ),
-                    }
-                    combined.append(rt)
+    # 가능한 (출발일, 귀환일) 조합: 출발·귀환 모두 편도 결과 있음 & 귀환 > 출발
+    viable_pairs: list[tuple[str, str]] = [
+        (ob_d, ret_d) for ob_d in od_dates for ret_d in rd_dates
+        if ret_d > ob_d and ob_by_date.get(ob_d) and ret_by_date.get(ret_d)
+    ]
+    if not viable_pairs:
+        return [], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
 
-    combined.sort(key=lambda x: (x.get("price_krw") or 999999999))
-    return combined[:100], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
+    # 2단계: 각 날짜 조합으로 왕복 검색(deep_search=true) → 정확한 왕복가
+    preferred = _get_preferred_airlines(mileage_program)
+    round_trip_results = await asyncio.gather(
+        *[
+            _search_serpapi_round_trip_deep(
+                origin, destination, ob_d, ret_d, seat_class, use_miles,
+                mileage_program, config,
+            )
+            for ob_d, ret_d in viable_pairs[:12]  # API 한도 고려 최대 12쌍
+        ],
+        return_exceptions=True,
+    )
+
+    all_flights: list[dict] = []
+    seen: set = set()
+    for r in round_trip_results:
+        if isinstance(r, Exception):
+            all_warnings.append(f"왕복 가격 검색 오류: {r}")
+            continue
+        fl, wa = r
+        all_warnings.extend(wa)
+        for f in fl:
+            key = ("rt", f.get("flight_id"), (f.get("outbound") or {}).get("departure"), (f.get("return") or {}).get("departure"))
+            if key not in seen:
+                seen.add(key)
+                all_flights.append(f)
+
+    for f in all_flights:
+        ob = f.get("outbound") or {}
+        ret = f.get("return") or {}
+        f["mileage_eligible"] = bool(preferred) and (
+            _is_preferred_airline(ob, preferred) or _is_preferred_airline(ret, preferred)
+        )
+    all_flights.sort(key=lambda x: (x.get("price_krw") or 999999999))
+    return all_flights[:100], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
+
+
+async def _search_serpapi_round_trip_deep(
+    origin: str,
+    destination: str,
+    ob_date: str,
+    ret_date: str,
+    seat_class: str,
+    use_miles: bool,
+    mileage_program: str | None,
+    config: dict,
+) -> tuple[list[dict], list[str]]:
+    """왕복 검색 + deep_search=true (Google Flights 동일 결과·가격)."""
+    api_key = config.get("serpapi_api_key", "")
+    if not api_key:
+        return [], ["SerpApi API 키가 설정되지 않았습니다."]
+    try:
+        flights, warnings = await search_serpapi(
+            origin, destination, ob_date, ret_date, api_key, seat_class,
+            one_way=False, deep_search=True,
+        )
+        return flights, warnings
+    except Exception as e:
+        return [], [f"SerpApi 왕복 검색 오류: {e}"]
 
 
 async def _search_serpapi_only(
@@ -291,9 +332,9 @@ def multi_source_search_flights(
     flex = date_flexibility_days or 0
 
     async def _run():
-        # 왕복 + 날짜 유연성: 편도 출발×편도 귀환 조합 (가격 싼 순)
+        # 왕복 + 날짜 유연성: 2단계 (편도로 조합 추출 → 왕복 deep_search로 정확한 가격)
         if not one_way and flex >= 1:
-            flights, warnings, api_ok, ob_range, ret_range = await _search_round_trip_flex_outbound_return(
+            flights, warnings, api_ok, ob_range, ret_range = await _search_round_trip_flex_2phase(
                 origin, destination, start_date, end_date,
                 seat_class, use_miles, mileage_program, config, flex,
             )
