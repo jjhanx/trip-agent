@@ -311,6 +311,8 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    amadeus_client_id=s.amadeus_client_id,
+                    amadeus_client_secret=s.amadeus_client_secret,
                     date_flexibility_days=flex,
                     one_way=one_way,
                 )
@@ -324,6 +326,8 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.use_miles,
                     mileage_program=travel.mileage_program,
                     serpapi_api_key=s.serpapi_api_key,
+                    amadeus_client_id=s.amadeus_client_id,
+                    amadeus_client_secret=s.amadeus_client_secret,
                     date_flexibility_days=flex,
                     one_way=one_way,
                 )

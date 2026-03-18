@@ -397,6 +397,8 @@ def multi_source_search_flights(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    amadeus_client_id: str = "",
+    amadeus_client_secret: str = "",
     date_flexibility_days: int | None = None,
     one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
@@ -406,7 +408,11 @@ def multi_source_search_flights(
     그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
     Returns (flights, warnings)
     """
-    config = {"serpapi_api_key": serpapi_api_key}
+    config = {
+        "serpapi_api_key": serpapi_api_key,
+        "amadeus_client_id": amadeus_client_id,
+        "amadeus_client_secret": amadeus_client_secret,
+    }
     flex = date_flexibility_days or 0
 
     async def _run():
@@ -484,6 +490,40 @@ def multi_source_search_flights(
                 f"출발일 {ob_range}까지와 귀환일 {ret_range} 사이에 해당되는 왕복 항공편이 없습니다."
             )
             return [], warnings
+        # SerpAPI 한도 초과 시 Amadeus fallback 시도
+        has_quota_msg = any("한도" in w or "429" in w for w in warnings)
+        if has_quota_msg and amadeus_client_id and amadeus_client_secret:
+            from mcp_servers.flight.amadeus_clients import search_amadeus
+
+            try:
+                amadeus_flights, amadeus_warnings = asyncio.run(
+                    search_amadeus(
+                        origin,
+                        destination,
+                        start_date,
+                        end_date,
+                        amadeus_client_id,
+                        amadeus_client_secret,
+                        one_way=one_way,
+                        seat_class=seat_class,
+                    )
+                )
+                if amadeus_flights:
+                    flights = amadeus_flights
+                    warnings.extend(amadeus_warnings)
+                    preferred_airlines = _get_preferred_airlines(mileage_program)
+                    for f in flights:
+                        ob = f.get("outbound") if f.get("round_trip") else f
+                        ret = f.get("return") if f.get("round_trip") else None
+                        f["mileage_eligible"] = bool(preferred_airlines) and (
+                            _is_preferred_airline(ob or {}, preferred_airlines)
+                            or (ret and _is_preferred_airline(ret, preferred_airlines))
+                        )
+                    flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
+                    return flights, warnings
+                warnings.extend(amadeus_warnings)
+            except Exception as e:
+                warnings.append(f"Amadeus fallback 실패: {e}")
         # 그 외: Mock 폴백
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
@@ -518,6 +558,8 @@ def multi_source_search_flights_multi_dest(
     use_miles: bool = False,
     mileage_program: str | None = None,
     serpapi_api_key: str = "",
+    amadeus_client_id: str = "",
+    amadeus_client_secret: str = "",
     date_flexibility_days: int | None = None,
     one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
@@ -535,6 +577,8 @@ def multi_source_search_flights_multi_dest(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
             serpapi_api_key=serpapi_api_key,
+            amadeus_client_id=amadeus_client_id,
+            amadeus_client_secret=amadeus_client_secret,
             date_flexibility_days=date_flexibility_days,
             one_way=one_way,
         )

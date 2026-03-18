@@ -16,6 +16,8 @@ mcp = FastMCP("flight-search", port=8001)
 def _get_config():
     return {
         "serpapi_api_key": os.environ.get("SERPAPI_API_KEY", ""),
+        "amadeus_client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
+        "amadeus_client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
     }
 
 
@@ -64,6 +66,8 @@ def search_flights(
             use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
+            amadeus_client_id=cfg["amadeus_client_id"],
+            amadeus_client_secret=cfg["amadeus_client_secret"],
             date_flexibility_days=flex,
         )
     else:
@@ -71,6 +75,8 @@ def search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
             serpapi_api_key=cfg["serpapi_api_key"],
+            amadeus_client_id=cfg["amadeus_client_id"],
+            amadeus_client_secret=cfg["amadeus_client_secret"],
             date_flexibility_days=flex,
             one_way=one_way,
         )

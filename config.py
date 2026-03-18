@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     # Flight API - SerpApi (Google Flights, 대한항공·아시아나 포함, 월 250회 무료)
     serpapi_api_key: str = ""
+    # Flight API - Amadeus (SerpApi 한도 초과 시 fallback)
+    amadeus_client_id: str = ""
+    amadeus_client_secret: str = ""
 
     # A2A agent URLs (for Session Agent to call other agents)
     flight_agent_url: str = "http://localhost:9001"

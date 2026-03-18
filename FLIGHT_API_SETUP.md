@@ -1,8 +1,8 @@
-# Flight API 키 발급 및 설정 가이드 (SerpApi Google Flights)
+# Flight API 키 발급 및 설정 가이드 (SerpApi + Amadeus fallback)
 
-항공편 검색에 **SerpApi (Google Flights 연동)**를 사용합니다. 대한항공·아시아나를 포함한 전 세계 주요 항공사의 실제 운항 데이터를 구글 항공권(Google Flights) 검색엔진을 통해 제공받습니다.
+항공편 검색에 **SerpApi (Google Flights 연동)**를 1차로 사용합니다. 대한항공·아시아나를 포함한 전 세계 주요 항공사의 실제 운항 데이터를 구글 항공권(Google Flights) 검색엔진을 통해 제공받습니다.
 
-> API 키를 설정하지 않거나 무료 한도를 모두 소진하면 자동으로 Playwright 기반 크롤링으로 전환(Fallback)되며, 이마저 실패할 경우 **Mock(예시) 데이터**가 표시됩니다.
+> API 키를 설정하지 않거나 SerpApi 무료 한도(250회/월)를 소진하면 **Amadeus API**로 자동 fallback 됩니다. Amadeus 인증 정보가 없거나 Amadeus 검색도 실패하면 **Mock(예시) 데이터**가 표시됩니다.
 
 ---
 
@@ -16,9 +16,31 @@
 | 구분 | 내용 |
 |------|------|
 | **무료 플랜 (Developer)** | 매월 **250회** 검색 무료 제공 |
-| 한도 초과 시 | 자동 Playwright 브라우저 크롤링으로 대체 (Trip Agent 내재 기능) |
+| 한도 초과 시 | **Amadeus API**로 자동 fallback (AMADEUS_CLIENT_ID/SECRET 설정 시) |
 
-※ 개발 및 소규모 테스트 목적이라면 무료 250건 한도로 충분하며, 한도 초과 시 내장된 Playwright가 자동으로 작동하여 Google Flights 웹페이지를 긁어오므로 검색이 멈추지 않습니다.
+※ 개발 및 소규모 테스트 목적이라면 무료 250건 한도로 충분합니다. 한도 초과 시 Amadeus API가 설정되어 있으면 실시간 검색이 계속되며, 없으면 Mock 데이터로 대체됩니다.
+
+---
+
+## 1.1 Amadeus API (SerpApi 한도 초과 시 fallback)
+
+### 특징
+- SerpApi 429(한도 초과) 응답 시 자동으로 Amadeus Flight Offers Search API를 호출합니다.
+- [Amadeus for Developers](https://developers.amadeus.com) 무료 플랜으로 API 키 발급 가능합니다.
+
+### 설정 (선택)
+`.env`에 다음 변수를 추가합니다. 비워두면 fallback 시 Amadeus 호출을 건너뛰고 Mock으로 대체됩니다.
+
+```env
+AMADEUS_CLIENT_ID=발급받은_API_Key
+AMADEUS_CLIENT_SECRET=발급받은_API_Secret
+```
+
+### 발급 절차
+1. [developers.amadeus.com](https://developers.amadeus.com) 회원가입
+2. My Self-Service APIs → Create New App
+3. Flight Offers Search API 선택 후 App 생성
+4. API Key / API Secret 복사하여 `.env`에 설정
 
 ---
 
@@ -38,9 +60,9 @@ SERPAPI_API_KEY=발급받은_api_key_입력
 
 ---
 
-## 3. 작동 원리 (SerpApi + Play로켓 Fallback)
+## 3. 작동 원리 (SerpApi → Amadeus fallback → Mock)
 
-Trip Agent의 항공편 검색 모듈은 3단계 오케스트레이션으로 작동합니다.
+Trip Agent의 항공편 검색 모듈은 3단계로 작동합니다.
 
 1. **SerpApi 호출**: `SERPAPI_API_KEY`를 이용해 구글 플라이트 결과를 조회합니다.
    - **왕복(Round-trip)**: `type=1` (UI상에서는 '가는 편', '오는 편'이 자동으로 분리되어 아코디언 패널에 표시됩니다.)
@@ -48,8 +70,8 @@ Trip Agent의 항공편 검색 모듈은 3단계 오케스트레이션으로 작
    - **다구간(Multi-city)**: `type=3` (최대 20개 구간의 출도착지/날짜 파라미터 배열 조합)
    - **날짜 유연성 (Date Flexibility)**: 2단계 검색. 1) 편도 검색으로 출발일±N·귀환일±N 중 가능한 날짜 조합 추출. 2) 추출된 조합별 왕복 검색(`deep_search=true`)으로 Google Flights와 동일한 실제 왕복가 획득. (최대 12쌍 왕복 검색)
    - 디버깅을 위해 `mcp_servers/flight/api_clients.py` 파일 내의 `DEBUG_SERPAPI = True` 플래그를 통해 검색 요청/응답 결과를 터미널에서 확인할 수 있습니다.
-2. **Playwright Fallback**: 월 무료 250건 한도를 다 썼거나 SerpApi 쪽에 오류가 나면 사용자 화면에 `SerpApi 무료 한도 초과: Playwright 크롤링으로 전환합니다...`라는 경고를 띄우고, 백그라운드 브라우저(Headless Chrome)를 열어 스크래핑을 시도합니다. 
-3. **Mock 데이터 (최후의 보루)**: 위 1, 2번이 모두 실패하거나 출발일이 너무 멀어서 예약 불가능한 기간일 경우 Mock 데이터를 화면에 뿌리고 에러 상황을 우회합니다. (실제 데이터가 단 하나라도 검색 가능한 상황에서는 Mock 데이터가 강제로 주입되지 않습니다.)
+2. **Amadeus Fallback**: SerpApi 429(한도 초과) 응답 시 `AMADEUS_CLIENT_ID`/`AMADEUS_CLIENT_SECRET`이 설정되어 있으면 Amadeus Flight Offers Search API를 호출하여 실시간 검색 결과를 반환합니다.
+3. **Mock 데이터 (최후의 보루)**: SerpApi와 Amadeus가 모두 실패하거나 출발일이 너무 멀어서 예약 불가능한 기간일 경우 Mock 데이터를 표시합니다. (실제 데이터가 단 하나라도 검색 가능한 상황에서는 Mock 데이터가 강제로 주입되지 않습니다.)
 
 ---
 
