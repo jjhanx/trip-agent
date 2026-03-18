@@ -1327,7 +1327,8 @@ function renderRentalOptions(items) {
   list.innerHTML = (items || []).map((opt, i) => {
     let title = '', desc = '';
     if (isRental) {
-      title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}` : opt.car_type || `옵션 ${i + 1}`;
+      const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
+      title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
       desc = [opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ');
       if (opt.price_total_krw) desc += ` | ${opt.price_total_krw.toLocaleString()}원`;
     } else {

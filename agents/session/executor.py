@@ -14,6 +14,53 @@ from shared.models import TravelInput, LocalTransportType
 from shared.utils import A2AClient, new_agent_text_message
 
 
+def _extract_rental_dates_from_flight(selected_flight: dict | None, fallback_start: str, fallback_end: str) -> tuple[str, str]:
+    """선택한 항공편의 현지 도착일·출발일을 렌트카 시작일·반납일로 추출.
+
+    - 왕복: outbound.arrival → start_date, return.departure → end_date
+    - 편도: outbound.arrival → start_date, fallback_end → end_date
+    - 다구간: 첫 leg 도착 → start_date, 마지막 leg 출발 → end_date
+    """
+    if not selected_flight or not isinstance(selected_flight, dict):
+        return fallback_start, fallback_end
+
+    def _date_only(s: str | None) -> str | None:
+        if not s or not isinstance(s, str):
+            return None
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return s[:10]
+        return None
+
+    trip_type = selected_flight.get("_trip_type") or "round_trip"
+    legs = selected_flight.get("legs")  # multi_city
+
+    if legs and isinstance(legs, list) and len(legs) > 0:
+        first = legs[0]
+        last = legs[-1]
+        start = _date_only((first.get("arrival") or first.get("departure")) if isinstance(first, dict) else None)
+        end = _date_only((last.get("departure") or last.get("arrival")) if isinstance(last, dict) else None)
+        return start or fallback_start, end or fallback_end
+
+    outbound = selected_flight.get("outbound")
+    ret = selected_flight.get("return")
+    if not outbound:
+        return fallback_start, fallback_end
+    start = _date_only(outbound.get("arrival") if isinstance(outbound, dict) else None) or fallback_start
+    if ret and isinstance(ret, dict):
+        end = _date_only(ret.get("departure")) or fallback_end
+    else:
+        end = fallback_end
+    return start, end
+
+
+def _total_passengers(travel) -> int:
+    """일행 총 인원 (성인 남·여 + 아동)."""
+    t = getattr(travel, "travelers", None)
+    if not t:
+        return 1
+    return max(1, (getattr(t, "male", 0) or 0) + (getattr(t, "female", 0) or 0) + (getattr(t, "children", 0) or 0))
+
+
 class SessionExecutor(BaseAgentExecutor):
     """Session Agent - orchestrates Flight, Itinerary, Accommodation, Local Transport, Booking."""
 
@@ -131,14 +178,18 @@ class SessionExecutor(BaseAgentExecutor):
                 acc_resp = json.dumps(
                     mock_search_hotels(travel.destination, travel.accommodation_type.value)
                 )
+            start_d, end_d = _extract_rental_dates_from_flight(
+                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+            )
             lt_payload = {
                 "pickup": travel.destination,
                 "dropoff": travel.destination,
-                "start_date": travel.start_date.isoformat(),
-                "end_date": travel.end_date.isoformat(),
+                "start_date": start_d,
+                "end_date": end_d,
                 "origin": travel.origin,
                 "destination": travel.destination,
-                "date_time": travel.start_date.isoformat(),
+                "date_time": start_d,
+                "passengers": _total_passengers(travel),
             }
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
                 lt_resp = await self._call_agent("rental_car", lt_payload)
@@ -155,6 +206,7 @@ class SessionExecutor(BaseAgentExecutor):
                             lt_payload["dropoff"],
                             "compact",
                             days,
+                            passengers=lt_payload["passengers"],
                         )
                     )
             else:
@@ -201,14 +253,18 @@ class SessionExecutor(BaseAgentExecutor):
             return
 
         if flight_complete and not selected_local_transport:
+            start_d, end_d = _extract_rental_dates_from_flight(
+                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+            )
             lt_payload = {
                 "pickup": travel.destination,
                 "dropoff": travel.destination,
-                "start_date": travel.start_date.isoformat(),
-                "end_date": travel.end_date.isoformat(),
+                "start_date": start_d,
+                "end_date": end_d,
                 "origin": travel.origin,
                 "destination": travel.destination,
-                "date_time": travel.start_date.isoformat(),
+                "date_time": start_d,
+                "passengers": _total_passengers(travel),
             }
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
                 lt_resp = await self._call_agent("rental_car", lt_payload)
@@ -225,6 +281,7 @@ class SessionExecutor(BaseAgentExecutor):
                             lt_payload["dropoff"],
                             "compact",
                             days,
+                            passengers=lt_payload["passengers"],
                         )
                     )
             else:

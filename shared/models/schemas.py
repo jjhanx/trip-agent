@@ -168,6 +168,7 @@ class RentalCarOption(BaseModel):
     pickup_location: str
     dropoff_location: str
     price_total_krw: int | None = None
+    seats: int | None = Field(None, description="최대 탑승 인원")
 
 
 class TransitOption(BaseModel):

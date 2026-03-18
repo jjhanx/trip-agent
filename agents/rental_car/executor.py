@@ -33,20 +33,21 @@ class RentalCarExecutor(BaseAgentExecutor):
             start_date = data.get("start_date", "")
             end_date = data.get("end_date", "")
             car_type = data.get("car_type", "compact")
+            passengers = data.get("passengers")
         except Exception as e:
             await event_queue.enqueue_event(new_agent_text_message(f"입력 오류: {e}"))
             return
+        mcp_args = {
+            "pickup": pickup,
+            "dropoff": dropoff,
+            "start_date": start_date,
+            "end_date": end_date,
+            "car_type": car_type,
+        }
+        if passengers is not None:
+            mcp_args["passengers"] = passengers
         try:
-            result = await self.mcp.call_tool(
-                "search_rentals",
-                {
-                    "pickup": pickup,
-                    "dropoff": dropoff,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "car_type": car_type,
-                },
-            )
+            result = await self.mcp.call_tool("search_rentals", mcp_args)
             text = result.get("text", json.dumps(result))
             rentals = json.loads(text) if isinstance(text, str) else text
         except Exception:
@@ -57,7 +58,10 @@ class RentalCarExecutor(BaseAgentExecutor):
             d1 = datetime.strptime(start_date, "%Y-%m-%d")
             d2 = datetime.strptime(end_date, "%Y-%m-%d")
             days = max(1, (d2 - d1).days)
-            rentals = mock_search_rentals(pickup, dropoff, car_type, days)
+            kwargs = {"pickup": pickup, "dropoff": dropoff, "car_type": car_type, "days": days}
+            if passengers is not None:
+                kwargs["passengers"] = passengers
+            rentals = mock_search_rentals(**kwargs)
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(rentals, ensure_ascii=False))
         )
