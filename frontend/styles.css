@@ -569,6 +569,25 @@ button.secondary:hover {
   transition: background 0.2s;
 }
 .btn-booking:hover { background: var(--accent-hover); color: var(--bg); }
+.rental-badge.recommended {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  margin-left: 0.35rem;
+  background: rgba(34, 197, 94, 0.25);
+  color: #22c55e;
+  font-weight: 600;
+}
+.rental-price-basis { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
+.rental-disclaimer {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0.5rem 0.75rem;
+  background: rgba(0,0,0,0.2);
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+.rental-result-count { font-size: 0.9rem; margin-bottom: 0.5rem; }
 a.btn-primary {
   display: inline-flex;
   align-items: center;

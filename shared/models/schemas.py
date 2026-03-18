@@ -174,7 +174,9 @@ class RentalCarOption(BaseModel):
     features: list[str] | None = Field(None, description="편의 기능 목록")
     luggage_capacity: str | None = Field(None, description="수하물 적재량")
     image_url: str | None = Field(None, description="차량 이미지 URL")
-    booking_url: str | None = Field(None, description="예약 사이트 연결 URL")
+    booking_url: str | None = Field(None, description="검색 날짜·조건 반영 예약 사이트 URL")
+    price_basis: str | None = Field(None, description="가격 산정 근거 설명")
+    recommended: bool | None = Field(None, description="여행가방 고려 추천 여부")
 
 
 class TransitOption(BaseModel):

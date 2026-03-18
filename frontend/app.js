@@ -1329,15 +1329,17 @@ function renderRentalOptions(items) {
       const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
       const title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
       const features = Array.isArray(opt.features) ? opt.features.join(' · ') : opt.features || '';
+      const recommendedBadge = opt.recommended ? '<span class="rental-badge recommended">여행가방 추천</span>' : '';
       const imgHtml = opt.image_url ? `<img src="${opt.image_url}" alt="${opt.vehicle_name || opt.car_type}" class="rental-card-img" loading="lazy">` : '';
       const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
-      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">예약 사이트 연결</a>` : '';
+      const priceBasis = opt.price_basis || '';
+      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">날짜·조건 반영 예약 사이트</a>` : '';
       return `
         <div class="option-item rental-card" data-idx="${i}">
           <div class="rental-card-media">${imgHtml}</div>
           <div class="rental-card-body">
-            <h3>${title}</h3>
+            <h3>${title} ${recommendedBadge}</h3>
             ${detailHtml}
             ${features ? `<p class="rental-features">${features}</p>` : ''}
             ${luggageHtml}
@@ -1346,6 +1348,7 @@ function renderRentalOptions(items) {
               <span class="price">${opt.price_total_krw ? opt.price_total_krw.toLocaleString() + '원' : ''}</span>
               ${bookingBtn}
             </div>
+            ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}
           </div>
         </div>
       `;
@@ -1380,6 +1383,13 @@ function renderRentalOptions(items) {
   if (items && items.length > 0 && !state.selectedLocalTransport) {
     state.selectedLocalTransport = items[0];
     list.querySelector('.option-item')?.classList.add('selected');
+  }
+  // 결과 수 및 가격 면책 표시
+  const countEl = $('#rental-result-count');
+  if (countEl) countEl.textContent = isRental && items?.length ? `총 ${items.length}건의 후보` : '';
+  const discEl = $('#rental-price-disclaimer');
+  if (discEl) {
+    discEl.classList.toggle('hidden', !isRental || !items?.length || !items.some(o => o.price_total_krw));
   }
   updateRentalBookingButton();
 }

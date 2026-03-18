@@ -5,8 +5,24 @@ import math
 # 차급별 최대 탑승 인원 (compact=4, sedan=5, suv=7, van=8)
 _CAR_SEATS = {"compact": 4, "sedan": 5, "suv": 7, "van": 8, "minivan": 8}
 
-# 여행 가방 고려: 일행 x 1.5 좌석 필요
+# 여행 가방 고려: 일행 x 1.5 좌석 → "추천" 배지. 최소 seats >= passengers 인 차량은 모두 표시
 _CAPACITY_MULTIPLIER = 1.5
+
+# Mock 가격: 일당 8만원 기준 예상 (실제 예약 시 사이트별 상이)
+_PRICE_PER_DAY_KRW = 80000
+
+# 공항코드 → Rentalcars 경로 (나라/공항코드)
+_AIRPORT_TO_RENTALCARS = {
+    "MXP": ("it", "mxp"), "FCO": ("it", "fco"), "NAP": ("it", "nap"),
+    "ICN": ("kr", "icn"), "GMP": ("kr", "gmp"),
+    "NRT": ("jp", "nrt"), "HND": ("jp", "hnd"), "KIX": ("jp", "kix"),
+    "LHR": ("gb", "lhr"), "LGW": ("gb", "lgw"),
+    "CDG": ("fr", "cdg"), "ORY": ("fr", "ory"),
+    "FRA": ("de", "fra"), "MUC": ("de", "muc"),
+    "BCN": ("es", "bcn"), "MAD": ("es", "mad"), "AGP": ("es", "agp"),
+    "AMS": ("nl", "ams"), "SIN": ("sg", "sin"), "BKK": ("th", "bkk"),
+}
+DEFAULT_COUNTRY = "us"  # Rentalcars 기본
 
 
 def _min_car_type_for_passengers(required_seats: int) -> str:
@@ -21,18 +37,30 @@ def _min_car_type_for_passengers(required_seats: int) -> str:
 
 
 def _build_booking_url(
-    provider: str, pickup: str, dropoff: str, start_date: str, end_date: str
+    pickup: str,
+    dropoff: str,
+    start_date: str,
+    end_date: str,
+    travelers: int = 1,
 ) -> str:
-    """업체별 예약 사이트 URL (픽업·반납·날짜 파라미터 포함)."""
-    base = {
-        "Hertz": "https://www.hertz.com/rentacar/reservation/",
-        "Avis": "https://www.avis.com/car-rental/reservations/",
-        "Sixt": "https://www.sixt.com/car-rental/",
-        "Local Rent": "https://www.rentalcars.com/",
-    }.get(provider, "https://www.rentalcars.com/")
-    params = f"pickupLocation={pickup}&dropoffLocation={dropoff}&from={start_date}&to={end_date}"
-    sep = "&" if "?" in base else "?"
-    return f"{base}{sep}{params}"
+    """검색 조건(픽업·반납·날짜·인원)이 반영된 예약 사이트 URL.
+    Rentalcars.com 공항 페이지 + 날짜 파라미터 시도.
+    """
+    pickup_upper = (pickup or "").strip().upper()[:3]
+    country, code = _AIRPORT_TO_RENTALCARS.get(
+        pickup_upper, (DEFAULT_COUNTRY, pickup_upper.lower() if pickup_upper else "search")
+    )
+    rc_base = f"https://www.rentalcars.com/us/airport/{country}/{code}/"
+    # 날짜가 있으면 쿼리 파라미터 추가 (사이트 지원 시 검색 폼 자동 채움)
+    if start_date and len(start_date) >= 10 and end_date and len(end_date) >= 10:
+        from urllib.parse import urlencode
+        q = urlencode({
+            "pickupDate": start_date[:10],
+            "dropoffDate": end_date[:10],
+            "driverAge": 30,
+        })
+        return f"{rc_base}?{q}"
+    return rc_base
 
 
 def mock_search_rentals(
@@ -44,17 +72,15 @@ def mock_search_rentals(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict]:
-    """Generate mock rental car results. passengers x 1.5 좌석(여행가방 고려) 이상 차량만 반환."""
-    base = 80000 * days
-    # 여행 가방 고려: 일행 x 1.5 인원이 탈 수 있는 차량
+    """Generate mock rental car results.
+    - 일행이 탑승 가능한(seats >= passengers) 차량은 모두 표시
+    - 일행 x 1.5 좌석 이상은 recommended 표시 (여행가방 여유)
+    - 가격: 일당 8만원 기준 예상 (실제 예약 시 사이트별 상이)
+    """
+    base = _PRICE_PER_DAY_KRW * days
     raw_seats = passengers or 1
-    min_seats = max(1, math.ceil(raw_seats * _CAPACITY_MULTIPLIER))
-    min_type = _min_car_type_for_passengers(min_seats)
-    type_order = ["compact", "sedan", "suv", "van"]
-    try:
-        car_idx = type_order.index(min_type)
-    except ValueError:
-        car_idx = 0
+    min_seats = raw_seats  # 최소: 일행이 탈 수 있어야 함
+    recommended_seats = max(min_seats, math.ceil(raw_seats * _CAPACITY_MULTIPLIER))
 
     start_d = start_date or ""
     end_d = end_date or start_d
@@ -96,8 +122,9 @@ def mock_search_rentals(
     ]
     results = []
     for i, c in enumerate(candidates):
-        if c["seats"] >= min_seats and type_order.index(c["car_type"]) >= car_idx:
+        if c["seats"] >= min_seats:
             price = base + (i * 15000) - (5000 if c["car_type"] == "compact" else 0)
+            recommended = c["seats"] >= recommended_seats
             results.append({
                 "rental_id": c["rental_id"],
                 "provider": c["provider"],
@@ -111,7 +138,9 @@ def mock_search_rentals(
                 "pickup_location": pickup,
                 "dropoff_location": dropoff,
                 "price_total_krw": price,
-                "booking_url": _build_booking_url(c["provider"], pickup, dropoff, start_d, end_d),
+                "price_basis": f"일당 약 {_PRICE_PER_DAY_KRW:,}원 기준 예상 (실제 가격과 다를 수 있음)",
+                "recommended": recommended,
+                "booking_url": _build_booking_url(pickup, dropoff, start_d, end_d, travelers=raw_seats),
             })
     if not results:
         # fallback: 최소 한 건 (가장 큰 차량)
@@ -129,6 +158,8 @@ def mock_search_rentals(
             "pickup_location": pickup,
             "dropoff_location": dropoff,
             "price_total_krw": base + 20000,
-            "booking_url": _build_booking_url(fallback["provider"], pickup, dropoff, start_d, end_d),
+            "price_basis": f"일당 약 {_PRICE_PER_DAY_KRW:,}원 기준 예상 (실제 가격과 다를 수 있음)",
+            "recommended": True,
+            "booking_url": _build_booking_url(pickup, dropoff, start_d, end_d, travelers=raw_seats),
         }]
     return results
