@@ -493,8 +493,8 @@ def multi_source_search_flights(
         if has_quota_msg and amadeus_client_id and amadeus_client_secret:
             from mcp_servers.flight.amadeus_clients import search_amadeus
 
-            try:
-                amadeus_flights, amadeus_warnings = asyncio.run(
+            def _run_amadeus():
+                return asyncio.run(
                     search_amadeus(
                         origin,
                         destination,
@@ -506,6 +506,10 @@ def multi_source_search_flights(
                         seat_class=seat_class,
                     )
                 )
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    amadeus_flights, amadeus_warnings = pool.submit(_run_amadeus).result()
                 if amadeus_flights:
                     flights = amadeus_flights
                     warnings.extend(amadeus_warnings)
