@@ -197,6 +197,12 @@ async def _search_round_trip_flex_2phase(
     )
     all_warnings.append(diag_phase1)
 
+    # 1단계 편도 전부 0건 + SerpAPI 한도 초과 → 2·3단계 생략, Amadeus fallback으로 즉시 전달
+    has_quota_msg = any("한도" in w or "429" in w for w in all_warnings)
+    if has_quota_msg and len(ob_with_flights) == 0 and len(ret_with_flights) == 0:
+        all_warnings.append("[진단] 1단계 편도 전부 0건(SerpAPI 한도 초과) → 2·3단계 생략, Amadeus fallback으로 전달")
+        return [], all_warnings, False, ob_range, ret_range
+
     # 가능한 (출발일, 귀환일) 조합: 출발·귀환 모두 편도 결과 있음 & 귀환 > 출발
     viable_pairs: list[tuple[str, str]] = [
         (ob_d, ret_d) for ob_d in od_dates for ret_d in rd_dates
