@@ -497,9 +497,22 @@ def multi_source_search_flights(
                 "Amadeus API(AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET)를 .env에 설정하면 한도 초과 시 실시간 검색이 가능합니다. FLIGHT_API_SETUP.md §1.1 참조."
             )
         if has_quota_msg and amadeus_client_id and amadeus_client_secret:
-            from mcp_servers.flight.amadeus_clients import search_amadeus
+            from mcp_servers.flight.amadeus_clients import search_amadeus, search_amadeus_multi_pairs
 
             def _run_amadeus():
+                if flex >= 1 and not one_way:
+                    date_pairs = _date_pairs_with_flexibility(start_date, end_date, flex)
+                    return asyncio.run(
+                        search_amadeus_multi_pairs(
+                            origin,
+                            destination,
+                            date_pairs[:8],
+                            amadeus_client_id,
+                            amadeus_client_secret,
+                            one_way=one_way,
+                            seat_class=seat_class,
+                        )
+                    )
                 return asyncio.run(
                     search_amadeus(
                         origin,

@@ -4,6 +4,7 @@ SerpAPI 한도 초과(429) 시 fallback으로 사용.
 https://developers.amadeus.com/self-service/category/air/api-doc/flight-offers-search
 """
 
+import asyncio
 import re
 from typing import Any
 
@@ -250,3 +251,64 @@ async def search_amadeus(
     if flights:
         warnings.append("SerpApi 한도 초과로 Amadeus API로 조회했습니다.")
     return flights, list(dict.fromkeys(warnings))
+
+
+async def search_amadeus_multi_pairs(
+    origin: str,
+    destination: str,
+    date_pairs: list[tuple[str, str]],
+    client_id: str,
+    client_secret: str,
+    one_way: bool = False,
+    seat_class: str = "economy",
+    max_offers_per_pair: int = 8,
+) -> tuple[list[dict], list[str]]:
+    """
+    날짜 유연성 적용: 여러 (출발일, 귀환일) 쌍에 대해 Amadeus 검색 후 병합.
+    Returns (flights, warnings)
+    """
+    if not date_pairs:
+        return [], []
+
+    if len(date_pairs) == 1:
+        ob_d, ret_d = date_pairs[0]
+        return await search_amadeus(
+            origin, destination, ob_d, ret_d, client_id, client_secret,
+            one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
+        )
+
+    tasks = [
+        search_amadeus(
+            origin, destination, ob_d, ret_d, client_id, client_secret,
+            one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
+        )
+        for ob_d, ret_d in date_pairs
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_flights: list[dict] = []
+    all_warnings: list[str] = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            all_warnings.append(f"Amadeus 날짜쌍 검색 오류: {r}")
+            continue
+        fl, wa = r
+        all_flights.extend(fl)
+        all_warnings.extend(wa)
+
+    seen: set = set()
+    unique: list[dict] = []
+    for f in all_flights:
+        if f.get("round_trip"):
+            ob = f.get("outbound") or {}
+            ret = f.get("return") or {}
+            key = (ob.get("departure"), ob.get("arrival"), ret.get("departure"), ret.get("arrival"))
+        else:
+            key = (f.get("departure"), f.get("arrival"), f.get("flight_number"))
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    if unique and "Amadeus" not in " ".join(all_warnings):
+        all_warnings.append("SerpApi 한도 초과로 Amadeus API로 조회했습니다.")
+    return unique, list(dict.fromkeys(all_warnings))
