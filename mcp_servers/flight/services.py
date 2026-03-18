@@ -484,14 +484,12 @@ def multi_source_search_flights(
             flights, warnings, api_responded_ok, ob_range, ret_range = future.result()
 
     if not flights:
-        # 0건 시: 날짜범위 메시지로 안내 (편도조합 방식 사용 시)
-        if ob_range and ret_range and flex >= 1 and not one_way:
-            warnings.append(
-                f"출발일 {ob_range}까지와 귀환일 {ret_range} 사이에 해당되는 왕복 항공편이 없습니다."
-            )
-            return [], warnings
-        # SerpAPI 한도 초과 시 Amadeus fallback 시도
+        # SerpAPI 한도 초과 시 Amadeus fallback 시도 (날짜 유연성 early return보다 먼저)
         has_quota_msg = any("한도" in w or "429" in w for w in warnings)
+        if has_quota_msg and not (amadeus_client_id and amadeus_client_secret):
+            warnings.append(
+                "Amadeus API(AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET)를 .env에 설정하면 한도 초과 시 실시간 검색이 가능합니다. FLIGHT_API_SETUP.md §1.1 참조."
+            )
         if has_quota_msg and amadeus_client_id and amadeus_client_secret:
             from mcp_servers.flight.amadeus_clients import search_amadeus
 
@@ -524,6 +522,12 @@ def multi_source_search_flights(
                 warnings.extend(amadeus_warnings)
             except Exception as e:
                 warnings.append(f"Amadeus fallback 실패: {e}")
+        # 0건 시: 날짜범위 메시지로 안내 (편도조합 방식 사용 시, Amadeus도 실패한 경우)
+        if not flights and ob_range and ret_range and flex >= 1 and not one_way:
+            warnings.append(
+                f"출발일 {ob_range}까지와 귀환일 {ret_range} 사이에 해당되는 왕복 항공편이 없습니다."
+            )
+            return [], warnings
         # 그 외: Mock 폴백
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
