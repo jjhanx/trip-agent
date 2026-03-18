@@ -87,12 +87,11 @@ def _recommend_sort_key(
     flight: dict,
     preferred_airlines: frozenset[str],
     use_miles: bool,
-) -> tuple[int, float, float, int]:
+) -> tuple[int, float, float]:
     """
-    추천순 정렬 키: 1) 직항 전체 2) 경유 전체
-    같은 카테고리 내: 비행시간 짧은 순 → 최저가 순 → 선호 항공사 우선
-    직항을 선호(경유는 실제 선택하기 어려울 수 있으므로)하고, 비행시간을 지표로 삼음.
-    Returns (direct_first, duration_hours, price, preferred_first).
+    추천순 정렬 키: 1) 선호 직항 2) 선호 경유(비행시간↑) 3) 나머지 직항 4) 나머지 경유(비행시간↑)
+    같은 카테고리 내: 비행시간 짧은 순 → 최저가 순
+    Returns (category, duration_hours, price).
     """
     if flight.get("round_trip"):
         ob = flight.get("outbound") or {}
@@ -109,9 +108,15 @@ def _recommend_sort_key(
         dur = flight.get("duration_hours") or 999.0
         price = (flight.get("miles_required") or flight.get("price_krw") or 999999999)
 
-    direct_first = 0 if is_direct else 1
-    preferred_first = 0 if is_pref else 1
-    return (direct_first, dur, price, preferred_first)
+    if is_pref and is_direct:
+        cat = 0
+    elif is_pref and not is_direct:
+        cat = 1
+    elif not is_pref and is_direct:
+        cat = 2
+    else:
+        cat = 3
+    return (cat, dur, price)
 
 
 async def _search_round_trip_flex_2phase(
@@ -619,11 +624,11 @@ def multi_source_search_flights_multi_dest(
             seen.add(key)
             unique.append(f)
 
-    # 정렬: 직항 우선 + 공항 우선순위(MXP 등) + 비행시간↑ 가격↑ + 선호 항공사
+    # 정렬: 추천순 4단계 + 공항 우선순위(MXP 등) + 비행시간↑ 가격↑
     def sort_key_multi(f: dict) -> tuple:
         base = _recommend_sort_key(f, preferred_airlines, use_miles)
         ap = f.get("airport_priority", 99)
-        return (base[0], ap, base[1], base[2], base[3])
+        return (base[0], ap, base[1], base[2])
 
     unique.sort(key=sort_key_multi)
     return unique, list(dict.fromkeys(all_warnings))  # 중복 경고 제거
