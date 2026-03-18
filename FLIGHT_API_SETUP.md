@@ -42,6 +42,13 @@ AMADEUS_CLIENT_SECRET=발급받은_API_Secret
 3. Flight Offers Search API 선택 후 App 생성
 4. API Key / API Secret 복사하여 `.env`에 설정
 
+### 테스트 vs 프로덕션 환경
+- **테스트(test.api.amadeus.com)**: 무료, **제한된 캐시 데이터**. 노선/항공사에 따라 대한항공 등이 누락될 수 있음.
+- **프로덕션(api.amadeus.com)**: 유료·실시간 전체 데이터. Production API Key 발급 후 사용.
+
+### 선호 항공사(Skypass·아시아나) 보강
+마일리지 프로그램(Skypass, Asiana 등)을 선택한 경우, Amadeus는 **일반 검색 + 선호 항공사 전용 검색**을 병합합니다. Amadeus가 가격순으로 반환하므로 대한항공이 상대적으로 비싸면 기본 결과에서 누락될 수 있어, `includedAirlineCodes=KE`(또는 OZ)로 추가 검색해 병합합니다. 결과는 선호 직항 → 선호 경유 → 그 외 순으로 정렬됩니다.
+
 ---
 
 ## 2. 키 발급 및 `.env` 설정

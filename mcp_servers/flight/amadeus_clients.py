@@ -116,6 +116,18 @@ async def _get_amadeus_token(client_id: str, client_secret: str) -> str | None:
         return None
 
 
+def _mileage_program_to_airline_codes(mileage_program: str | None) -> list[str]:
+    """마일리지 프로그램 → Amadeus includedAirlineCodes (IATA 2자)."""
+    if not mileage_program or not str(mileage_program).strip():
+        return []
+    key = str(mileage_program).lower().replace(" ", "").replace("_", "")
+    if "skypass" in key or "대한항공" in key:
+        return ["KE"]
+    if "asiana" in key or "아시아나" in key:
+        return ["OZ"]
+    return []
+
+
 async def search_amadeus(
     origin: str,
     destination: str,
@@ -126,6 +138,7 @@ async def search_amadeus(
     one_way: bool = False,
     seat_class: str = "economy",
     max_offers: int = 20,
+    included_airline_codes: list[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Amadeus Flight Offers Search API 호출.
@@ -150,6 +163,8 @@ async def search_amadeus(
     }
     if not one_way:
         params["returnDate"] = end_date
+    if included_airline_codes:
+        params["includedAirlineCodes"] = ",".join(c.upper()[:2] for c in included_airline_codes if c)
     if seat_class:
         sc = str(seat_class).upper()
         if sc in ("ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"):
@@ -261,7 +276,8 @@ async def search_amadeus_multi_pairs(
     client_secret: str,
     one_way: bool = False,
     seat_class: str = "economy",
-    max_offers_per_pair: int = 8,
+    max_offers_per_pair: int = 15,
+    included_airline_codes: list[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     날짜 유연성 적용: 여러 (출발일, 귀환일) 쌍에 대해 Amadeus 검색 후 병합.
@@ -275,12 +291,14 @@ async def search_amadeus_multi_pairs(
         return await search_amadeus(
             origin, destination, ob_d, ret_d, client_id, client_secret,
             one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
+            included_airline_codes=included_airline_codes,
         )
 
     tasks = [
         search_amadeus(
             origin, destination, ob_d, ret_d, client_id, client_secret,
             one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
+            included_airline_codes=included_airline_codes,
         )
         for ob_d, ret_d in date_pairs
     ]
@@ -312,3 +330,71 @@ async def search_amadeus_multi_pairs(
     if unique and "Amadeus" not in " ".join(all_warnings):
         all_warnings.append("SerpApi 한도 초과로 Amadeus API로 조회했습니다.")
     return unique, list(dict.fromkeys(all_warnings))
+
+
+async def search_amadeus_with_preferred(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    client_id: str,
+    client_secret: str,
+    mileage_program: str | None,
+    date_pairs: list[tuple[str, str]],
+    one_way: bool = False,
+    seat_class: str = "economy",
+) -> tuple[list[dict], list[str]]:
+    """
+    선호 항공사(대한항공/아시아나) 보강: 일반 검색 + 선호 항공사 전용 검색 병합.
+    Amadeus는 가격순으로 반환하므로 대한항공이 상대적으로 비싸면 누락될 수 있어,
+    마일리지 프로그램이 있으면 includedAirlineCodes로 전용 검색을 추가 병합.
+    date_pairs: 검색할 (출발일, 귀환일) 쌍 목록 (services에서 계산해 전달).
+    """
+    preferred_codes = _mileage_program_to_airline_codes(mileage_program)
+
+    if len(date_pairs) > 1:
+        main_flights, main_warnings = await search_amadeus_multi_pairs(
+            origin, destination, date_pairs[:8], client_id, client_secret,
+            one_way=one_way, seat_class=seat_class,
+            included_airline_codes=None,
+        )
+    else:
+        ob_d, ret_d = date_pairs[0] if date_pairs else (start_date, end_date)
+        main_flights, main_warnings = await search_amadeus(
+            origin, destination, ob_d, ret_d, client_id, client_secret,
+            one_way=one_way, seat_class=seat_class,
+            included_airline_codes=None,
+        )
+
+    if not preferred_codes:
+        return main_flights, main_warnings
+
+    supplement_pairs = date_pairs[:3] if date_pairs else [(start_date, end_date)]
+    if len(supplement_pairs) == 1:
+        ob_d, ret_d = supplement_pairs[0]
+        supp_flights, supp_warnings = await search_amadeus(
+            origin, destination, ob_d, ret_d, client_id, client_secret,
+            one_way=one_way, seat_class=seat_class,
+            included_airline_codes=preferred_codes, max_offers=15,
+        )
+    else:
+        supp_flights, supp_warnings = await search_amadeus_multi_pairs(
+            origin, destination, supplement_pairs, client_id, client_secret,
+            one_way=one_way, seat_class=seat_class, max_offers_per_pair=15,
+            included_airline_codes=preferred_codes,
+        )
+
+    seen: set = set()
+    merged: list[dict] = []
+    for f in main_flights + supp_flights:
+        if f.get("round_trip"):
+            ob, ret = f.get("outbound") or {}, f.get("return") or {}
+            key = (ob.get("departure"), ob.get("arrival"), ret.get("departure"), ret.get("arrival"))
+        else:
+            key = (f.get("departure"), f.get("arrival"), f.get("flight_number"))
+        if key not in seen:
+            seen.add(key)
+            merged.append(f)
+
+    combined_warnings = list(dict.fromkeys(main_warnings + supp_warnings))
+    return merged, combined_warnings
