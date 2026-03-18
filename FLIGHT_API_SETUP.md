@@ -42,6 +42,11 @@ AMADEUS_CLIENT_SECRET=발급받은_API_Secret
 3. Flight Offers Search API 선택 후 App 생성
 4. API Key / API Secret 복사하여 `.env`에 설정
 
+### 429(요청 한도) 대응
+- **Test 환경**: 10 TPS. 직항 보강·날짜 유연성 등으로 호출이 많으면 429 발생 가능.
+- 대응: 토큰 재사용, 호출 간 250ms 지연, 날짜쌍 8→5 축소 적용.
+- 429 시: 잠시 후 재검색하거나, Production API로 전환(40 TPS).
+
 ### 테스트 vs 프로덕션 환경
 - **테스트(test.api.amadeus.com)**: 무료, **제한된 캐시 데이터**. 노선/항공사에 따라 대한항공 등이 누락될 수 있음.
 - **프로덕션(api.amadeus.com)**: 유료·실시간 전체 데이터. Production API Key 발급 후 사용.

@@ -128,6 +128,9 @@ def _mileage_program_to_airline_codes(mileage_program: str | None) -> list[str]:
     return []
 
 
+AMADEUS_RATE_LIMIT_DELAY = 0.25  # 10 TPS 대응: 호출 간 최소 250ms
+
+
 async def search_amadeus(
     origin: str,
     destination: str,
@@ -140,6 +143,7 @@ async def search_amadeus(
     max_offers: int = 20,
     included_airline_codes: list[str] | None = None,
     non_stop: bool = False,
+    token: str | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Amadeus Flight Offers Search API 호출.
@@ -150,7 +154,8 @@ async def search_amadeus(
     o = origin.upper()[:3]
     d = destination.upper()[:3]
 
-    token = await _get_amadeus_token(client_id, client_secret)
+    if not token:
+        token = await _get_amadeus_token(client_id, client_secret)
     if not token:
         return [], ["Amadeus API 인증 실패. AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET 확인."]
 
@@ -186,6 +191,11 @@ async def search_amadeus(
     except Exception as e:
         return [], [f"Amadeus API 연결 실패: {e}"]
 
+    if resp.status_code == 429:
+        return [], [
+            "Amadeus API 요청 한도(10 TPS) 초과. 잠시 후 다시 시도해 주세요. "
+            "Test 환경: 10 TPS, Production: 40 TPS.",
+        ]
     if resp.status_code != 200:
         try:
             err = resp.json()
@@ -297,21 +307,29 @@ async def search_amadeus_multi_pairs(
             included_airline_codes=included_airline_codes,
         )
 
-    tasks = [
-        search_amadeus(
-            origin, destination, ob_d, ret_d, client_id, client_secret,
-            one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
-            included_airline_codes=included_airline_codes,
-        )
-        for ob_d, ret_d in date_pairs
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # 토큰 1회 발급 재사용, 호출 간 지연으로 429 방지 (Test: 10 TPS)
+    token = await _get_amadeus_token(client_id, client_secret)
+    if not token:
+        return [], ["Amadeus API 인증 실패."]
+
+    results: list = []
+    for ob_d, ret_d in date_pairs:
+        await asyncio.sleep(AMADEUS_RATE_LIMIT_DELAY)
+        try:
+            fl, wa = await search_amadeus(
+                origin, destination, ob_d, ret_d, client_id, client_secret,
+                one_way=one_way, seat_class=seat_class, max_offers=max_offers_per_pair,
+                included_airline_codes=included_airline_codes, token=token,
+            )
+            results.append((fl, wa))
+        except Exception as e:
+            results.append((e,))
 
     all_flights: list[dict] = []
     all_warnings: list[str] = []
-    for i, r in enumerate(results):
-        if isinstance(r, Exception):
-            all_warnings.append(f"Amadeus 날짜쌍 검색 오류: {r}")
+    for r in results:
+        if len(r) == 1 and isinstance(r[0], Exception):
+            all_warnings.append(f"Amadeus 날짜쌍 검색 오류: {r[0]}")
             continue
         fl, wa = r
         all_flights.extend(fl)
@@ -357,7 +375,7 @@ async def search_amadeus_with_preferred(
 
     if len(date_pairs) > 1:
         main_flights, main_warnings = await search_amadeus_multi_pairs(
-            origin, destination, date_pairs[:8], client_id, client_secret,
+            origin, destination, date_pairs[:5], client_id, client_secret,
             one_way=one_way, seat_class=seat_class,
             included_airline_codes=None,
         )
@@ -372,7 +390,8 @@ async def search_amadeus_with_preferred(
     if not preferred_codes:
         return main_flights, main_warnings
 
-    supplement_pairs = date_pairs[:3] if date_pairs else [(start_date, end_date)]
+    await asyncio.sleep(AMADEUS_RATE_LIMIT_DELAY)
+    supplement_pairs = date_pairs[:2] if date_pairs else [(start_date, end_date)]
     if len(supplement_pairs) == 1:
         ob_d, ret_d = supplement_pairs[0]
         supp_flights, supp_warnings = await search_amadeus(

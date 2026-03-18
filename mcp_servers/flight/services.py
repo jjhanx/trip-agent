@@ -52,9 +52,10 @@ async def _enrich_direct_first_and_cheapest(
         except Exception as e:
             extra_warnings.append(f"직항 검색 보조 실패: {e}")
     elif source == "amadeus" and config.get("amadeus_client_id") and config.get("amadeus_client_secret"):
-        from mcp_servers.flight.amadeus_clients import search_amadeus
+        from mcp_servers.flight.amadeus_clients import search_amadeus, AMADEUS_RATE_LIMIT_DELAY
 
         try:
+            await asyncio.sleep(AMADEUS_RATE_LIMIT_DELAY)
             direct_flights, dw = await search_amadeus(
                 origin, destination, start_date, end_date,
                 config["amadeus_client_id"], config["amadeus_client_secret"],
