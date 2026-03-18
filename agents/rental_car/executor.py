@@ -61,6 +61,8 @@ class RentalCarExecutor(BaseAgentExecutor):
             kwargs = {"pickup": pickup, "dropoff": dropoff, "car_type": car_type, "days": days}
             if passengers is not None:
                 kwargs["passengers"] = passengers
+            kwargs["start_date"] = start_date
+            kwargs["end_date"] = end_date
             rentals = mock_search_rentals(**kwargs)
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(rentals, ensure_ascii=False))

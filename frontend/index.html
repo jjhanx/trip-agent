@@ -254,9 +254,10 @@
 
       <section id="step-rental" class="card hidden">
         <h2>3. 렌트카/대중교통</h2>
-        <p class="muted">선택한 현지 이동 수단의 옵션입니다.</p>
+        <p class="muted">선택한 현지 이동 수단의 옵션입니다. 선택 후 예약 사이트에서 바로 예약할 수 있습니다.</p>
         <div id="rental-list" class="options-grid"></div>
-        <div style="margin-top: 1.5rem;">
+        <div id="rental-actions" class="rental-actions" style="margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+          <a id="btn-booking-rental" href="#" target="_blank" rel="noopener" class="btn-primary" style="display: none;">선택한 차량 예약하기</a>
           <button id="btn-next-rental">다음</button>
           <button id="btn-back-rental" class="secondary">뒤로</button>
         </div>

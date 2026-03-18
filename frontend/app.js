@@ -1325,6 +1325,31 @@ function renderRentalOptions(items) {
   if (!list) return;
   const isRental = state.travelInput?.local_transport === 'rental_car';
   list.innerHTML = (items || []).map((opt, i) => {
+    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url)) {
+      const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
+      const title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
+      const features = Array.isArray(opt.features) ? opt.features.join(' · ') : opt.features || '';
+      const imgHtml = opt.image_url ? `<img src="${opt.image_url}" alt="${opt.vehicle_name || opt.car_type}" class="rental-card-img" loading="lazy">` : '';
+      const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
+      const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
+      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">예약 사이트 연결</a>` : '';
+      return `
+        <div class="option-item rental-card" data-idx="${i}">
+          <div class="rental-card-media">${imgHtml}</div>
+          <div class="rental-card-body">
+            <h3>${title}</h3>
+            ${detailHtml}
+            ${features ? `<p class="rental-features">${features}</p>` : ''}
+            ${luggageHtml}
+            <p class="rental-location">${[opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ')}</p>
+            <div class="rental-footer">
+              <span class="price">${opt.price_total_krw ? opt.price_total_krw.toLocaleString() + '원' : ''}</span>
+              ${bookingBtn}
+            </div>
+          </div>
+        </div>
+      `;
+    }
     let title = '', desc = '';
     if (isRental) {
       const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
@@ -1344,15 +1369,30 @@ function renderRentalOptions(items) {
     `;
   }).join('');
   list.querySelectorAll('.option-item').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      if (e.target?.closest('.btn-booking')) return;
       list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
       state.selectedLocalTransport = items[parseInt(el.dataset.idx)];
+      updateRentalBookingButton();
     });
   });
   if (items && items.length > 0 && !state.selectedLocalTransport) {
     state.selectedLocalTransport = items[0];
     list.querySelector('.option-item')?.classList.add('selected');
+  }
+  updateRentalBookingButton();
+}
+
+function updateRentalBookingButton() {
+  const btn = $('#btn-booking-rental');
+  if (!btn) return;
+  const sel = state.selectedLocalTransport;
+  if (sel?.booking_url) {
+    btn.href = sel.booking_url;
+    btn.style.display = 'inline-flex';
+  } else {
+    btn.style.display = 'none';
   }
 }
 

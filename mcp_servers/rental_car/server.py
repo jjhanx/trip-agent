@@ -18,7 +18,7 @@ def search_rentals(
     car_type: str = "compact",
     passengers: int | None = None,
 ) -> str:
-    """Search for rental cars. passengers가 있으면 일행이 탈 수 있는 차량만 반환.
+    """Search for rental cars. passengers x 1.5 좌석(여행가방 고려) 이상 차량만 반환.
 
     Args:
         pickup: Pickup location (airport/city)
@@ -26,17 +26,22 @@ def search_rentals(
         start_date: Rental start (YYYY-MM-DD)
         end_date: Rental end (YYYY-MM-DD)
         car_type: compact, sedan, suv, etc.
-        passengers: 일행 수 (이 인원이 탈 수 있는 차량만 검색)
+        passengers: 일행 수 (일행 x 1.5 좌석 이상 차량만 검색, 여행가방 고려)
 
     Returns:
-        JSON array of rental options (seats 필드 포함)
+        JSON array of rental options (seats, vehicle_name, image_url, booking_url 등 포함)
     """
     from datetime import datetime
 
     d1 = datetime.strptime(start_date, "%Y-%m-%d")
     d2 = datetime.strptime(end_date, "%Y-%m-%d")
     days = max(1, (d2 - d1).days)
-    rentals = mock_search_rentals(pickup, dropoff, car_type, days, passengers=passengers)
+    rentals = mock_search_rentals(
+        pickup, dropoff, car_type, days,
+        passengers=passengers,
+        start_date=start_date,
+        end_date=end_date,
+    )
     return json.dumps(rentals, ensure_ascii=False)
 
 

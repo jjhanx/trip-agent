@@ -207,6 +207,8 @@ class SessionExecutor(BaseAgentExecutor):
                             "compact",
                             days,
                             passengers=lt_payload["passengers"],
+                            start_date=lt_payload["start_date"],
+                            end_date=lt_payload["end_date"],
                         )
                     )
             else:
@@ -282,6 +284,8 @@ class SessionExecutor(BaseAgentExecutor):
                             "compact",
                             days,
                             passengers=lt_payload["passengers"],
+                            start_date=lt_payload["start_date"],
+                            end_date=lt_payload["end_date"],
                         )
                     )
             else:

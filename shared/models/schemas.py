@@ -169,6 +169,12 @@ class RentalCarOption(BaseModel):
     dropoff_location: str
     price_total_krw: int | None = None
     seats: int | None = Field(None, description="최대 탑승 인원")
+    vehicle_name: str | None = Field(None, description="예시 차량 모델명")
+    description: str | None = Field(None, description="차량 설명")
+    features: list[str] | None = Field(None, description="편의 기능 목록")
+    luggage_capacity: str | None = Field(None, description="수하물 적재량")
+    image_url: str | None = Field(None, description="차량 이미지 URL")
+    booking_url: str | None = Field(None, description="예약 사이트 연결 URL")
 
 
 class TransitOption(BaseModel):
