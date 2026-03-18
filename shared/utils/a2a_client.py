@@ -39,8 +39,14 @@ class A2AClient:
             if "error" in data:
                 raise RuntimeError(f"A2A error: {data['error']}")
             result = data.get("result", {})
+            # result.message.parts (중첩) 또는 result.parts (result가 메시지 자체인 경우)
+            parts = None
             if "message" in result and "parts" in result["message"]:
-                for part in result["message"]["parts"]:
+                parts = result["message"]["parts"]
+            elif "parts" in result:
+                parts = result["parts"]
+            if parts:
+                for part in parts:
                     if "text" in part:
                         return part["text"]
             return json.dumps(result)
