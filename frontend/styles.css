@@ -588,6 +588,7 @@ button.secondary:hover {
   margin-bottom: 0.75rem;
 }
 .rental-result-count { font-size: 0.9rem; margin-bottom: 0.5rem; }
+.rental-no-price { font-size: 0.85rem; color: var(--muted); }
 a.btn-primary {
   display: inline-flex;
   align-items: center;

@@ -73,9 +73,17 @@ state.localTransport = Array.isArray(data?.local_transport) ? data.local_transpo
 
 ### 4.2 MCP Server (mcp_servers/rental_car/server.py)
 - `search_rentals` 도구: pickup, dropoff, start_date, end_date, car_type, passengers
-- `mock_search_rentals` (mcp_servers/rental_car/services.py): Mock 데이터 반환
+- `mock_search_rentals` (mcp_servers/rental_car/services.py): 차급별 참고 카드 + EconomyBookings 검색 포함
 
-### 4.3 Session → Rental Car payload (agents/session/executor.py 259행)
+### 4.3 가격 및 예약 사이트
+- **가격**: 근거 없는 추정 가격은 표시하지 않음. 실시간 가격은 예약 사이트에서 확인.
+- **EconomyBookings.com**: 사용자 선호 사이트. 검색 결과 상단에 "600+ 업체 비교" 카드로 포함. 모든 예약 링크가 EconomyBookings로 연결됨 (픽업지·날짜 파라미터 반영).
+
+**실시간 가격 API (향후 연동 후보)**:
+- Amadeus Cars API: `AMADEUS_CLIENT_ID`/`SECRET`로 항공과 동일 계정 사용 가능
+- Booking.com Demand API: Affiliate 파트너십 필요
+
+### 4.4 Session → Rental Car payload (agents/session/executor.py 259행)
 ```python
 lt_payload = {
     "pickup": travel.destination,

@@ -1334,7 +1334,7 @@ function renderRentalOptions(items) {
       const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
       const priceBasis = opt.price_basis || '';
-      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">날짜·조건 반영 예약 사이트</a>` : '';
+      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${opt.provider === 'EconomyBookings' ? 'EconomyBookings에서 검색' : '예약 사이트'}</a>` : '';
       return `
         <div class="option-item rental-card" data-idx="${i}">
           <div class="rental-card-media">${imgHtml}</div>
@@ -1345,7 +1345,7 @@ function renderRentalOptions(items) {
             ${luggageHtml}
             <p class="rental-location">${[opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ')}</p>
             <div class="rental-footer">
-              <span class="price">${opt.price_total_krw ? opt.price_total_krw.toLocaleString() + '원' : ''}</span>
+              ${opt.price_total_krw ? `<span class="price">${opt.price_total_krw.toLocaleString()}원</span>` : '<span class="rental-no-price">가격: 예약 사이트에서 확인</span>'}
               ${bookingBtn}
             </div>
             ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}
@@ -1384,13 +1384,11 @@ function renderRentalOptions(items) {
     state.selectedLocalTransport = items[0];
     list.querySelector('.option-item')?.classList.add('selected');
   }
-  // 결과 수 및 가격 면책 표시
+  // 결과 수 및 면책 표시
   const countEl = $('#rental-result-count');
-  if (countEl) countEl.textContent = isRental && items?.length ? `총 ${items.length}건의 후보` : '';
+  if (countEl) countEl.textContent = isRental && items?.length ? `총 ${items.length}건` : '';
   const discEl = $('#rental-price-disclaimer');
-  if (discEl) {
-    discEl.classList.toggle('hidden', !isRental || !items?.length || !items.some(o => o.price_total_krw));
-  }
+  if (discEl) discEl.classList.toggle('hidden', !isRental || !items?.length);
   updateRentalBookingButton();
 }
 

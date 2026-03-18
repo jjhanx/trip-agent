@@ -8,21 +8,39 @@ _CAR_SEATS = {"compact": 4, "sedan": 5, "suv": 7, "van": 8, "minivan": 8}
 # 여행 가방 고려: 일행 x 1.5 좌석 → "추천" 배지. 최소 seats >= passengers 인 차량은 모두 표시
 _CAPACITY_MULTIPLIER = 1.5
 
-# Mock 가격: 일당 8만원 기준 예상 (실제 예약 시 사이트별 상이)
-_PRICE_PER_DAY_KRW = 80000
-
-# 공항코드 → Rentalcars 경로 (나라/공항코드)
-_AIRPORT_TO_RENTALCARS = {
-    "MXP": ("it", "mxp"), "FCO": ("it", "fco"), "NAP": ("it", "nap"),
-    "ICN": ("kr", "icn"), "GMP": ("kr", "gmp"),
-    "NRT": ("jp", "nrt"), "HND": ("jp", "hnd"), "KIX": ("jp", "kix"),
-    "LHR": ("gb", "lhr"), "LGW": ("gb", "lgw"),
-    "CDG": ("fr", "cdg"), "ORY": ("fr", "ory"),
-    "FRA": ("de", "fra"), "MUC": ("de", "muc"),
-    "BCN": ("es", "bcn"), "MAD": ("es", "mad"), "AGP": ("es", "agp"),
-    "AMS": ("nl", "ams"), "SIN": ("sg", "sin"), "BKK": ("th", "bkk"),
+# 공항코드 → economybookings.com 경로 (region, country, city, airport_slug)
+# 사용자 선호: economybookings.com. 실시간 가격은 해당 사이트에서 확인.
+_AIRPORT_TO_ECONOMYBOOKINGS = {
+    "MXP": ("europe", "italy", "milan", "mxp"),
+    "FCO": ("europe", "italy", "rome", "fco"),
+    "NAP": ("europe", "italy", "naples", "nap"),
+    "ICN": ("asia", "south-korea", "seoul", "icn"),
+    "GMP": ("asia", "south-korea", "seoul", "gmp"),
+    "NRT": ("asia", "japan", "tokyo", "nrt"),
+    "HND": ("asia", "japan", "tokyo", "hnd"),
+    "KIX": ("asia", "japan", "osaka", "kix"),
+    "LHR": ("europe", "united-kingdom", "london", "lhr"),
+    "LGW": ("europe", "united-kingdom", "london", "lgw"),
+    "CDG": ("europe", "france", "paris", "cdg"),
+    "ORY": ("europe", "france", "paris", "ory"),
+    "FRA": ("europe", "germany", "frankfurt", "fra"),
+    "MUC": ("europe", "germany", "munich", "muc"),
+    "BCN": ("europe", "spain-mainland", "barcelona", "bcn"),
+    "MAD": ("europe", "spain-mainland", "madrid", "mad"),
+    "AGP": ("europe", "spain-mainland", "malaga", "agp"),
+    "AMS": ("europe", "netherlands", "amsterdam", "ams"),
+    "SIN": ("asia", "singapore", "singapore", "sin"),
+    "BKK": ("asia", "thailand", "bangkok", "bkk"),
+    "DUB": ("europe", "ireland", "dublin", "dub"),
+    "DXB": ("asia", "united-arab-emirates", "dubai", "dxb"),
+    "MCO": ("north-america", "usa-florida", "orlando", "mco"),
+    "MIA": ("north-america", "usa-florida", "miami", "mia"),
+    "LAX": ("north-america", "usa-california", "los-angeles", "lax"),
+    "JFK": ("north-america", "usa-new-york", "new-york-city", "jfk"),
+    "MEL": ("oceania", "australia", "melbourne", "mel"),
+    "SYD": ("oceania", "australia", "sydney", "syd"),
+    "LIS": ("europe", "portugal", "lisbon", "lis"),
 }
-DEFAULT_COUNTRY = "us"  # Rentalcars 기본
 
 
 def _min_car_type_for_passengers(required_seats: int) -> str:
@@ -36,31 +54,31 @@ def _min_car_type_for_passengers(required_seats: int) -> str:
     return "van"
 
 
-def _build_booking_url(
+def _build_economybookings_url(
     pickup: str,
     dropoff: str,
     start_date: str,
     end_date: str,
-    travelers: int = 1,
 ) -> str:
-    """검색 조건(픽업·반납·날짜·인원)이 반영된 예약 사이트 URL.
-    Rentalcars.com 공항 페이지 + 날짜 파라미터 시도.
+    """economybookings.com 예약 검색 URL (사용자 선호 사이트).
+    검색 조건(픽업·반납·날짜) 반영. 실시간 가격은 사이트에서 확인.
     """
     pickup_upper = (pickup or "").strip().upper()[:3]
-    country, code = _AIRPORT_TO_RENTALCARS.get(
-        pickup_upper, (DEFAULT_COUNTRY, pickup_upper.lower() if pickup_upper else "search")
-    )
-    rc_base = f"https://www.rentalcars.com/us/airport/{country}/{code}/"
-    # 날짜가 있으면 쿼리 파라미터 추가 (사이트 지원 시 검색 폼 자동 채움)
+    path = _AIRPORT_TO_ECONOMYBOOKINGS.get(pickup_upper)
+    if path:
+        region, country, city, airport = path
+        base = f"https://www.economybookings.com/car-rental/{region}/{country}/{city}/{airport}"
+    else:
+        base = "https://www.economybookings.com/car-rental/all"
+    # economybookings 날짜 파라미터 (지원 시 폼 자동 채움)
     if start_date and len(start_date) >= 10 and end_date and len(end_date) >= 10:
         from urllib.parse import urlencode
         q = urlencode({
-            "pickupDate": start_date[:10],
-            "dropoffDate": end_date[:10],
-            "driverAge": 30,
+            "pickup_date": start_date[:10],
+            "dropoff_date": end_date[:10],
         })
-        return f"{rc_base}?{q}"
-    return rc_base
+        return f"{base}?{q}"
+    return base
 
 
 def mock_search_rentals(
@@ -72,20 +90,38 @@ def mock_search_rentals(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict]:
-    """Generate mock rental car results.
-    - 일행이 탑승 가능한(seats >= passengers) 차량은 모두 표시
+    """Generate rental car options (차급별 참고 카드).
+    - 일행이 탑승 가능한(seats >= passengers) 차량 모두 표시
     - 일행 x 1.5 좌석 이상은 recommended 표시 (여행가방 여유)
-    - 가격: 일당 8만원 기준 예상 (실제 예약 시 사이트별 상이)
+    - 가격: 근거 없는 추정 가격은 표시하지 않음. 실시간 가격은 예약 사이트(EconomyBookings 등)에서 확인.
     """
-    base = _PRICE_PER_DAY_KRW * days
     raw_seats = passengers or 1
-    min_seats = raw_seats  # 최소: 일행이 탈 수 있어야 함
+    min_seats = raw_seats
     recommended_seats = max(min_seats, math.ceil(raw_seats * _CAPACITY_MULTIPLIER))
-
     start_d = start_date or ""
     end_d = end_date or start_d
+    eb_url = _build_economybookings_url(pickup, dropoff, start_d, end_d)
 
-    # 차량별 상세 정보 (모델명, 설명, 특징, 수하물, 사진)
+    # EconomyBookings 선호: 600+ 업체 비교, 실시간 가격. 상단에 포함.
+    economy_card = {
+        "rental_id": "EB-COMPARE",
+        "provider": "EconomyBookings",
+        "car_type": "다양",
+        "seats": 9,
+        "vehicle_name": "600+ 렌트카 업체 비교",
+        "description": "실시간 가격·가용성 확인. Hertz, Avis, Sixt, Europcar 등.",
+        "features": ["실시간 가격", "600+ 업체", "가격 비교"],
+        "luggage_capacity": "차종별 상이",
+        "image_url": "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=400&h=260&fit=crop",
+        "pickup_location": pickup,
+        "dropoff_location": dropoff,
+        "price_total_krw": None,
+        "price_basis": "실시간 가격은 아래 '예약 사이트'에서 확인",
+        "recommended": True,
+        "booking_url": eb_url,
+    }
+
+    # 차량별 참고 카드 (가격 없음 - 근거 없는 추정 제거)
     candidates = [
         {
             "rental_id": "RC001", "provider": "Hertz", "car_type": "compact", "seats": 4,
@@ -120,10 +156,9 @@ def mock_search_rentals(
             "image_url": "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=400&h=260&fit=crop",
         },
     ]
-    results = []
+    results = [economy_card]
     for i, c in enumerate(candidates):
         if c["seats"] >= min_seats:
-            price = base + (i * 15000) - (5000 if c["car_type"] == "compact" else 0)
             recommended = c["seats"] >= recommended_seats
             results.append({
                 "rental_id": c["rental_id"],
@@ -137,15 +172,15 @@ def mock_search_rentals(
                 "image_url": c["image_url"],
                 "pickup_location": pickup,
                 "dropoff_location": dropoff,
-                "price_total_krw": price,
-                "price_basis": f"일당 약 {_PRICE_PER_DAY_KRW:,}원 기준 예상 (실제 가격과 다를 수 있음)",
+                "price_total_krw": None,
+                "price_basis": "실시간 가격은 예약 사이트에서 확인",
                 "recommended": recommended,
-                "booking_url": _build_booking_url(pickup, dropoff, start_d, end_d, travelers=raw_seats),
+                "booking_url": eb_url,
             })
-    if not results:
-        # fallback: 최소 한 건 (가장 큰 차량)
+    if len(results) <= 1:
+        # fallback: economy 카드만 있으면 차급 카드 추가
         fallback = candidates[-1]
-        results = [{
+        results.append({
             "rental_id": fallback["rental_id"],
             "provider": fallback["provider"],
             "car_type": fallback["car_type"],
@@ -157,9 +192,9 @@ def mock_search_rentals(
             "image_url": fallback["image_url"],
             "pickup_location": pickup,
             "dropoff_location": dropoff,
-            "price_total_krw": base + 20000,
-            "price_basis": f"일당 약 {_PRICE_PER_DAY_KRW:,}원 기준 예상 (실제 가격과 다를 수 있음)",
+            "price_total_krw": None,
+            "price_basis": "실시간 가격은 예약 사이트에서 확인",
             "recommended": True,
-            "booking_url": _build_booking_url(pickup, dropoff, start_d, end_d, travelers=raw_seats),
-        }]
+            "booking_url": eb_url,
+        })
     return results
