@@ -7,6 +7,93 @@ from datetime import datetime, timedelta
 from mcp_servers.flight.api_clients import search_serpapi
 
 
+def _flight_key(f: dict) -> tuple:
+    """중복 제거용 flight 키."""
+    if f.get("round_trip"):
+        ob, ret = f.get("outbound") or {}, f.get("return") or {}
+        return ("rt", ob.get("departure"), ob.get("arrival"), ret.get("departure"), ret.get("arrival"))
+    return ("ow", f.get("departure"), f.get("arrival"), f.get("flight_number"))
+
+
+async def _enrich_direct_first_and_cheapest(
+    flights: list[dict],
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    config: dict,
+    one_way: bool,
+    seat_class: str,
+    use_miles: bool,
+    mileage_program: str | None,
+    preferred_airlines: frozenset,
+    source: str,
+) -> tuple[list[dict], list[str]]:
+    """
+    직항 우선 검색 + 최저가 5건 병합.
+    source: "serpapi" | "amadeus"
+    Returns (merged_flights, extra_warnings)
+    """
+    extra_warnings: list[str] = []
+    if not flights:
+        return [], []
+
+    # 1) 직항 전용 검색
+    direct_flights: list[dict] = []
+    if source == "serpapi" and config.get("serpapi_api_key"):
+        try:
+            direct_flights, dw = await search_serpapi(
+                origin, destination, start_date, end_date,
+                config["serpapi_api_key"], seat_class, one_way=one_way,
+                deep_search=False, non_stop=True,
+            )
+            if direct_flights:
+                extra_warnings.append("직항 우선 검색 결과를 상단에 표시했습니다.")
+        except Exception as e:
+            extra_warnings.append(f"직항 검색 보조 실패: {e}")
+    elif source == "amadeus" and config.get("amadeus_client_id") and config.get("amadeus_client_secret"):
+        from mcp_servers.flight.amadeus_clients import search_amadeus
+
+        try:
+            direct_flights, dw = await search_amadeus(
+                origin, destination, start_date, end_date,
+                config["amadeus_client_id"], config["amadeus_client_secret"],
+                one_way=one_way, seat_class=seat_class, max_offers=15,
+                non_stop=True,
+            )
+            if direct_flights:
+                extra_warnings.append("직항 우선 검색 결과를 상단에 표시했습니다.")
+        except Exception as e:
+            extra_warnings.append(f"직항 검색 보조 실패: {e}")
+
+    # 2) 메인 결과에서 최저가 5건
+    by_price = sorted(
+        flights,
+        key=lambda x: (x.get("miles_required") or x.get("price_krw") or 999999999),
+    )
+    cheapest_5 = by_price[:5]
+
+    # 3) 직항 mileage_eligible + 정렬
+    for f in direct_flights:
+        ob = f.get("outbound") if f.get("round_trip") else f
+        ret = f.get("return") if f.get("round_trip") else None
+        f["mileage_eligible"] = bool(preferred_airlines) and (
+            _is_preferred_airline(ob or {}, preferred_airlines)
+            or (ret and _is_preferred_airline(ret, preferred_airlines))
+        )
+    direct_flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
+
+    direct_set = {_flight_key(f) for f in direct_flights}
+    cheapest_not_in_direct = [c for c in cheapest_5 if _flight_key(c) not in direct_set]
+    for c in cheapest_not_in_direct:
+        c["cheapest_reference"] = True  # 최저가 참고용
+
+    merged = direct_flights + cheapest_not_in_direct
+    if cheapest_not_in_direct:
+        extra_warnings.append("최저가 5건을 참고용으로 하단에 추가했습니다.")
+    return merged, extra_warnings
+
+
 def _outbound_return_dates_with_flex(
     start_date: str,
     end_date: str,
@@ -422,12 +509,20 @@ def multi_source_search_flights(
     flex = date_flexibility_days or 0
 
     async def _run():
+        preferred = _get_preferred_airlines(mileage_program)
         # 왕복 + 날짜 유연성: 2단계 (편도로 조합 추출 → 왕복 deep_search로 정확한 가격)
         if not one_way and flex >= 1:
             flights, warnings, api_ok, ob_range, ret_range = await _search_round_trip_flex_2phase(
                 origin, destination, start_date, end_date,
                 seat_class, use_miles, mileage_program, config, flex,
             )
+            if flights and api_ok:
+                flights, ew = await _enrich_direct_first_and_cheapest(
+                    flights, origin, destination, start_date, end_date,
+                    config, one_way, seat_class, use_miles, mileage_program,
+                    preferred, "serpapi",
+                )
+                warnings.extend(ew)
             return flights, warnings, api_ok, ob_range, ret_range
         # 단일 날짜 또는 편도
         date_pairs = _date_pairs_with_flexibility(start_date, end_date, flex)
@@ -436,6 +531,13 @@ def multi_source_search_flights(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
                 seat_class, use_miles, mileage_program, config, one_way=one_way,
             )
+            if fl and ok:
+                fl, ew = await _enrich_direct_first_and_cheapest(
+                    fl, origin, destination, start_date, end_date,
+                    config, one_way, seat_class, use_miles, mileage_program,
+                    preferred, "serpapi",
+                )
+                wa.extend(ew)
             return fl, wa, ok, "", ""
         tasks = [
             _search_serpapi_only(
@@ -467,7 +569,6 @@ def multi_source_search_flights(
             if key not in seen:
                 seen.add(key)
                 unique.append(f)
-        preferred = _get_preferred_airlines(mileage_program)
         for f in unique:
             ob = f.get("outbound") if f.get("round_trip") else f
             ret = f.get("return") if f.get("round_trip") else None
@@ -476,6 +577,13 @@ def multi_source_search_flights(
                 or (ret and _is_preferred_airline(ret, preferred))
             )
         unique.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
+        if unique and api_responded_ok:
+            unique, ew = await _enrich_direct_first_and_cheapest(
+                unique, origin, destination, start_date, end_date,
+                config, one_way, seat_class, use_miles, mileage_program,
+                preferred, "serpapi",
+            )
+            all_warnings.extend(ew)
         return unique, list(dict.fromkeys(all_warnings)), api_responded_ok, "", ""
 
     try:
@@ -500,13 +608,13 @@ def multi_source_search_flights(
             from mcp_servers.flight.amadeus_clients import search_amadeus_with_preferred
 
             def _run_amadeus():
-                date_pairs = (
-                    _date_pairs_with_flexibility(start_date, end_date, flex)
-                    if flex >= 1 and not one_way
-                    else [(start_date, end_date)]
-                )
-                return asyncio.run(
-                    search_amadeus_with_preferred(
+                async def _do():
+                    date_pairs = (
+                        _date_pairs_with_flexibility(start_date, end_date, flex)
+                        if flex >= 1 and not one_way
+                        else [(start_date, end_date)]
+                    )
+                    amadeus_flights, amadeus_warnings = await search_amadeus_with_preferred(
                         origin,
                         destination,
                         start_date,
@@ -518,7 +626,17 @@ def multi_source_search_flights(
                         one_way=one_way,
                         seat_class=seat_class,
                     )
-                )
+                    if amadeus_flights:
+                        preferred_airlines = _get_preferred_airlines(mileage_program)
+                        amadeus_flights, ew = await _enrich_direct_first_and_cheapest(
+                            amadeus_flights, origin, destination, start_date, end_date,
+                            config, one_way, seat_class, use_miles, mileage_program,
+                            preferred_airlines, "amadeus",
+                        )
+                        amadeus_warnings.extend(ew)
+                    return amadeus_flights, amadeus_warnings
+
+                return asyncio.run(_do())
 
             try:
                 with ThreadPoolExecutor(max_workers=1) as pool:

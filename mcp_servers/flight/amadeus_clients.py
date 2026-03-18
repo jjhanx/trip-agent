@@ -139,6 +139,7 @@ async def search_amadeus(
     seat_class: str = "economy",
     max_offers: int = 20,
     included_airline_codes: list[str] | None = None,
+    non_stop: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
     Amadeus Flight Offers Search API 호출.
@@ -165,6 +166,8 @@ async def search_amadeus(
         params["returnDate"] = end_date
     if included_airline_codes:
         params["includedAirlineCodes"] = ",".join(c.upper()[:2] for c in included_airline_codes if c)
+    if non_stop:
+        params["nonStop"] = "true"
     if seat_class:
         sc = str(seat_class).upper()
         if sc in ("ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"):
