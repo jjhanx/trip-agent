@@ -49,6 +49,8 @@ async def _enrich_direct_first_and_cheapest(
             )
             if direct_flights:
                 extra_warnings.append("직항 우선 검색 결과를 상단에 표시했습니다.")
+            elif dw:
+                extra_warnings.extend(dw[:1])
         except Exception as e:
             extra_warnings.append(f"직항 검색 보조 실패: {e}")
     elif source == "amadeus" and config.get("amadeus_client_id") and config.get("amadeus_client_secret"):
@@ -64,6 +66,8 @@ async def _enrich_direct_first_and_cheapest(
             )
             if direct_flights:
                 extra_warnings.append("직항 우선 검색 결과를 상단에 표시했습니다.")
+            elif dw:
+                extra_warnings.extend(dw[:1])
         except Exception as e:
             extra_warnings.append(f"직항 검색 보조 실패: {e}")
 
@@ -89,9 +93,15 @@ async def _enrich_direct_first_and_cheapest(
     for c in cheapest_not_in_direct:
         c["cheapest_reference"] = True  # 최저가 참고용
 
-    merged = direct_flights + cheapest_not_in_direct
-    if cheapest_not_in_direct:
-        extra_warnings.append("최저가 5건을 참고용으로 하단에 추가했습니다.")
+    if direct_flights:
+        merged = direct_flights + cheapest_not_in_direct
+        if cheapest_not_in_direct:
+            extra_warnings.append("최저가 5건을 참고용으로 하단에 추가했습니다.")
+    else:
+        # 직항 전용 검색 0건 시: 메인 결과 유지(직항 포함 가능). 최저가 5건만 표시하지 않음.
+        merged = flights
+        if extra_warnings:
+            extra_warnings.append("직항 전용 검색 결과 없음. 메인 검색 결과를 표시합니다.")
     return merged, extra_warnings
 
 

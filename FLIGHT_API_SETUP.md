@@ -48,7 +48,7 @@ AMADEUS_CLIENT_SECRET=발급받은_API_Secret
 - 429 시: 잠시 후 재검색하거나, Production API로 전환(40 TPS).
 
 ### 테스트 vs 프로덕션 환경
-- **테스트(test.api.amadeus.com)**: 무료, **제한된 캐시 데이터**. 노선/항공사에 따라 대한항공 등이 누락될 수 있음.
+- **테스트(test.api.amadeus.com)**: 무료, **제한된 캐시 데이터**. 노선/항공사에 따라 대한항공·직항 노선이 누락될 수 있음. 직항 전용(nonStop) 검색이 0건이면 메인 검색 결과(직항 포함 가능)를 표시.
 - **프로덕션(api.amadeus.com)**: 유료·실시간 전체 데이터. Production API Key 발급 후 사용.
 
 ### 선호 항공사(Skypass·아시아나) 보강
