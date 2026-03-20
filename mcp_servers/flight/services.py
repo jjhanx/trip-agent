@@ -770,7 +770,7 @@ def multi_source_search_flights(
             pass
         elif api_responded_ok and not has_api_error:
             warnings.append(
-                "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, SerpApi 일시적 오류 등) "
+                "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, Travelpayouts/SerpApi 일시적 오류 등) "
                 "예시(Mock) 데이터로 보여드립니다."
             )
         else:
