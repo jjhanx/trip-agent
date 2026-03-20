@@ -245,6 +245,7 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=
 | 항목 | 내용 |
 |------|------|
 | **응답 형태** | `data`는 `{ 목적지: { "0": 티켓, … } }` 외에 `{ 목적지: 티켓 }`(인덱스 없음), `data: [ … ]`(배열), `price` 대신 `value`, `departure_at` 대신 `depart_date` 등 변형이 있습니다. 클라이언트(`travelpayouts_clients._collect_fare_rows`)에서 모두 수집합니다. |
+| **진단 메시지** | 검색 시 `[Travelpayouts 진단]` 접두가 붙은 경고로 연결 성공(HTTP 200)·401/403·429·JSON 실패·캐시 0건 등을 구분합니다. SerpApi로 이어질 때도 동일 경고가 유지됩니다. |
 | **Rate limit** | IP당 시간당 약 200 요청 (Data API) |
 | **가격 통화** | 기본 RUB. `currency` 파라미터로 usd, eur 등 지정. KRW 지원 여부 확인 필요 |
 | **캐시 데이터** | Flight Data API는 캐시 기반. 실시간 검색은 별도 지원 요청 필요 |

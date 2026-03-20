@@ -79,6 +79,21 @@ def _collect_fare_rows(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _describe_raw_data(raw: Any) -> str:
+    """진단용: data 필드 모양만 요약 (토큰·대용량 본문 노출 없음)."""
+    if raw is None:
+        return "data=null (필드 없음)"
+    if isinstance(raw, dict):
+        if not raw:
+            return "data={} 빈 객체"
+        keys = list(raw.keys())[:6]
+        more = " …" if len(raw) > 6 else ""
+        return f"data=객체, 키 {len(raw)}개 (예: {keys}{more})"
+    if isinstance(raw, list):
+        return f"data=배열, 길이 {len(raw)}"
+    return f"data=예상 외 타입({type(raw).__name__})"
+
+
 def _ticket_amount(row: dict[str, Any]) -> float | None:
     p = row.get("price")
     if p is not None:
@@ -246,30 +261,57 @@ async def search_travelpayouts_flights(
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(f"{BASE_URL}{path}", headers=headers, params=params)
     except httpx.RequestError as e:
-        return [], [f"Travelpayouts 네트워크 오류: {e}"]
+        return [], [
+            "[Travelpayouts 진단] 네트워크 단계 실패 — api.travelpayouts.com 에 연결되지 못했습니다 "
+            f"(DNS·방화벽·프록시·타임아웃 등). 상세: {e}"
+        ]
 
     if resp.status_code == 429:
-        return [], ["Travelpayouts API 요청 한도 초과(429). 잠시 후 재시도하세요."]
+        return [], [
+            "[Travelpayouts 진단] 서버에는 도달했으나 HTTP 429(요청 한도 초과). "
+            "잠시 후 재시도하거나 호출 빈도를 줄이세요."
+        ]
+    if resp.status_code == 401:
+        return [], [
+            "[Travelpayouts 진단] HTTP 401 Unauthorized — API 토큰이 거부되었습니다. "
+            "TRAVELPAYOUTS_API_TOKEN 을 Travelpayouts 프로그램 도구 페이지에서 다시 확인하세요."
+        ]
+    if resp.status_code == 403:
+        return [], [
+            "[Travelpayouts 진단] HTTP 403 Forbidden — 접근이 거부되었습니다. "
+            "토큰 권한·IP 제한·계정 상태를 확인하세요."
+        ]
     if resp.status_code != 200:
-        return [], [f"Travelpayouts API 오류: HTTP {resp.status_code}"]
+        snip = (resp.text or "").strip().replace("\n", " ")[:200]
+        tail = f" 응답 본문 일부: {snip!r}" if snip else " 응답 본문이 비어 있습니다."
+        return [], [
+            f"[Travelpayouts 진단] 서버에는 TCP 연결됐으나 HTTP {resp.status_code} 오류.{tail}"
+        ]
 
     try:
         body = resp.json()
-    except Exception:
-        return [], ["Travelpayouts 응답 JSON 파싱 실패"]
+    except Exception as e:
+        return [], [
+            "[Travelpayouts 진단] HTTP 200 이지만 JSON으로 파싱할 수 없습니다. "
+            f"프록시/HTML 오류 페이지일 수 있습니다. ({e})"
+        ]
 
     err_top = body.get("error")
     if err_top:
-        return [], [f"Travelpayouts API: {err_top}"]
+        return [], [f"[Travelpayouts 진단] API 오류 필드: {err_top}"]
 
     if body.get("success") is False:
         msg = body.get("message") or body.get("description") or "success=false"
-        return [], [f"Travelpayouts API: {msg}"]
+        return [], [
+            f"[Travelpayouts 진단] 응답 수신했으나 success=false — {msg}"
+        ]
 
     resp_currency = str(body.get("currency") or currency or "krw").lower()
     raw_data = body.get("data")
     items = _collect_fare_rows(raw_data) if raw_data is not None else []
+    month_retried = False
     if not items and len(depart) == 10:
+        month_retried = True
         params_month = {**params, "depart_date": depart[:7]}
         if "return_date" in params and len(params["return_date"]) == 10:
             params_month["return_date"] = params["return_date"][:7]
@@ -279,7 +321,9 @@ async def search_travelpayouts_flights(
             if resp2.status_code == 200:
                 body2 = resp2.json()
                 if body2.get("error"):
-                    pass
+                    warnings.append(
+                        f"[Travelpayouts 진단] 월 단위 재요청(yyyy-mm) 응답에 error={body2.get('error')!r}"
+                    )
                 elif body2.get("success") is not False:
                     items = _collect_fare_rows(body2.get("data"))
                     resp_currency = str(body2.get("currency") or resp_currency).lower()
@@ -287,11 +331,29 @@ async def search_travelpayouts_flights(
                         warnings.append(
                             "Travelpayouts: 일별 데이터가 없어 해당 월(yyyy-mm) 기준 캐시 가격을 표시합니다."
                         )
-        except Exception:
-            pass
+                    elif month_retried:
+                        warnings.append(
+                            "[Travelpayouts 진단] 월 단위(yyyy-mm)로 재요청했으나 요금 행은 여전히 0건입니다."
+                        )
+            else:
+                warnings.append(
+                    f"[Travelpayouts 진단] 월 단위 재요청 실패: HTTP {resp2.status_code}"
+                )
+        except Exception as e:
+            warnings.append(f"[Travelpayouts 진단] 월 단위 재요청 중 예외: {e}")
 
     if not items:
-        return [], []
+        req_ret = params.get("return_date", "")
+        diag = [
+            "[Travelpayouts 진단] 서버 연결·HTTP 200·JSON 파싱까지 정상입니다.",
+            f"호출: GET {BASE_URL}{path} (origin={o}, destination={d}, "
+            f"depart_date={params['depart_date']!r}, return_date={req_ret!r}, currency={params['currency']!r}).",
+            f"응답 요약: success={body.get('success')!s}, currency={resp_currency!r}, {_describe_raw_data(raw_data)}.",
+            "파서가 인식한 요금 행=0건 → 이 노선·날짜 조합은 Travelpayouts 캐시에 없거나, "
+            "응답 구조가 달라 추출에 실패했을 수 있습니다.",
+            "아래 SerpApi(또는 Amadeus) 검색은 Travelpayouts와 별도로 진행됩니다.",
+        ]
+        return [], warnings + diag
 
     mk = (marker or "").strip()
     flights: list[dict[str, Any]] = []
@@ -369,6 +431,10 @@ async def search_travelpayouts_flights(
             )
 
     if flights and not quiet:
+        warnings.insert(
+            0,
+            f"[Travelpayouts 진단] 연결·HTTP 200 정상. `{path}` 응답에서 요금 행 {len(flights)}건을 검색 결과에 반영했습니다.",
+        )
         warnings.append(
             "항공료는 Travelpayouts(캐시) 기준 참고가이며, 실시간·최종 가격은 예약 링크(Aviasales)에서 확인하세요."
         )

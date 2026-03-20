@@ -555,6 +555,7 @@ def multi_source_search_flights(
 
     async def _run():
         preferred = _get_preferred_airlines(mileage_program)
+        tp_carry: list[str] = []
         tp_token = (config.get("travelpayouts_api_token") or "").strip()
         if tp_token:
             tp_flights, tp_w = await search_travelpayouts_flights(
@@ -567,6 +568,7 @@ def multi_source_search_flights(
                 seat_class=seat_class,
                 marker=(config.get("travelpayouts_marker") or "").strip(),
             )
+            tp_carry = list(tp_w)
             if tp_flights:
                 seen_tp: set = set()
                 unique_tp: list = []
@@ -615,6 +617,7 @@ def multi_source_search_flights(
                 origin, destination, start_date, end_date,
                 seat_class, use_miles, mileage_program, config, flex,
             )
+            warnings = tp_carry + warnings
             if flights and api_ok:
                 flights, ew = await _enrich_direct_first_and_cheapest(
                     flights, origin, destination, start_date, end_date,
@@ -631,6 +634,7 @@ def multi_source_search_flights(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
                 seat_class, use_miles, mileage_program, config, one_way=one_way,
             )
+            wa = tp_carry + wa
             if fl and ok:
                 fl, ew = await _enrich_direct_first_and_cheapest(
                     fl, origin, destination, start_date, end_date,
@@ -648,7 +652,7 @@ def multi_source_search_flights(
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_flights: list[dict] = []
-        all_warnings: list[str] = []
+        all_warnings: list[str] = list(tp_carry)
         api_responded_ok = False
         for r in results:
             if isinstance(r, Exception):
