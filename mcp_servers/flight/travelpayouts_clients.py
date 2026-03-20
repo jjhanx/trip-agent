@@ -31,21 +31,90 @@ def _iso_from_tp_at(s: str | None) -> str:
         return s
 
 
-def _flatten_cheap_data(raw: Any) -> list[dict[str, Any]]:
-    """data 필드: { DEST: { \"0\": ticket, \"1\": ... } } 형태."""
+def _row_has_travelpayouts_fare(d: dict) -> bool:
+    """티켓/요금 행인지 (중첩 메타데이터·스칼라만 있는 dict 제외)."""
+    if not isinstance(d, dict):
+        return False
+    amount = d.get("price")
+    if amount is None:
+        amount = d.get("value")
+    if amount is None:
+        return False
+    if d.get("departure_at") or d.get("depart_date"):
+        return True
+    if d.get("airline") or d.get("flight_number") is not None:
+        return True
+    if d.get("origin") and d.get("destination"):
+        return True
+    return False
+
+
+def _collect_fare_rows(raw: Any) -> list[dict[str, Any]]:
+    """
+    Travelpayouts `data` 필드의 모든 관례적 형태에서 요금 행만 수집.
+
+    - 문서 예: { \"HKT\": { \"0\": { ticket }, \"1\": ... } }
+    - 단일 건: { \"HKT\": { ticket } }  (인덱스 없음 — 기존 파서는 여기서 0건이 됨)
+    - 배열: { \"data\": [ { value, depart_date, ... }, ... ] }
+    - 혼합 중첩: 재귀적으로 dict 값·list 원소만 순회
+    """
     out: list[dict[str, Any]] = []
-    if not isinstance(raw, dict):
-        return out
-    for _dest_key, inner in raw.items():
-        if isinstance(inner, dict):
-            for _idx, item in inner.items():
-                if isinstance(item, dict) and ("price" in item or "departure_at" in item):
-                    out.append(item)
-        elif isinstance(inner, list):
-            for item in inner:
-                if isinstance(item, dict):
-                    out.append(item)
+    seen: set[int] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if _row_has_travelpayouts_fare(node):
+                i = id(node)
+                if i not in seen:
+                    seen.add(i)
+                    out.append(node)
+                return
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(raw)
     return out
+
+
+def _ticket_amount(row: dict[str, Any]) -> float | None:
+    p = row.get("price")
+    if p is not None:
+        try:
+            return float(p)
+        except (TypeError, ValueError):
+            pass
+    v = row.get("value")
+    if v is not None:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _departure_iso_from_row(row: dict[str, Any]) -> str:
+    if row.get("departure_at"):
+        return _iso_from_tp_at(row.get("departure_at"))
+    dd = row.get("depart_date")
+    if dd:
+        ds = str(dd).strip()[:10]
+        if len(ds) == 10:
+            return f"{ds}T12:00:00"
+    return ""
+
+
+def _return_iso_from_row(row: dict[str, Any]) -> str:
+    if row.get("return_at"):
+        return _iso_from_tp_at(row.get("return_at"))
+    rd = row.get("return_date")
+    if rd is not None and str(rd).strip() and str(rd).strip().lower() not in ("null", "none"):
+        ds = str(rd).strip()[:10]
+        if len(ds) == 10:
+            return f"{ds}T12:00:00"
+    return ""
 
 
 def _price_to_krw(amount: float | int | None, currency: str) -> int | None:
@@ -163,6 +232,7 @@ async def search_travelpayouts_flights(
         "destination": d,
         "currency": currency.lower(),
         "depart_date": depart if len(depart) == 10 else (start_date or "")[:7],
+        "token": token.strip(),
     }
     if ret_part and len(ret_part) == 10:
         params["return_date"] = ret_part
@@ -188,12 +258,17 @@ async def search_travelpayouts_flights(
     except Exception:
         return [], ["Travelpayouts 응답 JSON 파싱 실패"]
 
-    if not body.get("success"):
-        return [], ["Travelpayouts 검색 실패(success=false)."]
+    err_top = body.get("error")
+    if err_top:
+        return [], [f"Travelpayouts API: {err_top}"]
+
+    if body.get("success") is False:
+        msg = body.get("message") or body.get("description") or "success=false"
+        return [], [f"Travelpayouts API: {msg}"]
 
     resp_currency = str(body.get("currency") or currency or "krw").lower()
     raw_data = body.get("data")
-    items = _flatten_cheap_data(raw_data)
+    items = _collect_fare_rows(raw_data) if raw_data is not None else []
     if not items and len(depart) == 10:
         params_month = {**params, "depart_date": depart[:7]}
         if "return_date" in params and len(params["return_date"]) == 10:
@@ -203,8 +278,10 @@ async def search_travelpayouts_flights(
                 resp2 = await client.get(f"{BASE_URL}{path}", headers=headers, params=params_month)
             if resp2.status_code == 200:
                 body2 = resp2.json()
-                if body2.get("success"):
-                    items = _flatten_cheap_data(body2.get("data"))
+                if body2.get("error"):
+                    pass
+                elif body2.get("success") is not False:
+                    items = _collect_fare_rows(body2.get("data"))
                     resp_currency = str(body2.get("currency") or resp_currency).lower()
                     if items:
                         warnings.append(
@@ -219,12 +296,18 @@ async def search_travelpayouts_flights(
     mk = (marker or "").strip()
     flights: list[dict[str, Any]] = []
 
-    for idx, it in enumerate(sorted(items, key=lambda x: float(x.get("price") or 1e18))[:40]):
-        price_raw = it.get("price")
-        airline = str(it.get("airline") or "").strip() or "Unknown"
+    def _sort_key(row: dict[str, Any]) -> float:
+        a = _ticket_amount(row)
+        return a if a is not None else 1e18
+
+    for idx, it in enumerate(sorted(items, key=_sort_key)[:40]):
+        price_raw = _ticket_amount(it)
+        airline = str(it.get("airline") or "").strip() or "요금참고"
         fn = it.get("flight_number", "")
-        dep_at = _iso_from_tp_at(it.get("departure_at"))
-        ret_at = _iso_from_tp_at(it.get("return_at")) if it.get("return_at") else ""
+        dep_at = _departure_iso_from_row(it)
+        if not dep_at and len(depart) == 10:
+            dep_at = f"{depart}T12:00:00"
+        ret_at = _return_iso_from_row(it)
         transfers = it.get("number_of_changes", it.get("transfers"))
         if transfers is None:
             is_direct = direct_only
@@ -240,7 +323,7 @@ async def search_travelpayouts_flights(
         except (TypeError, ValueError):
             dur_h_total = None
 
-        price_krw = _price_to_krw(price_raw, resp_currency)
+        price_krw = _price_to_krw(price_raw, resp_currency) if price_raw is not None else None
         booking_url = (
             build_aviasales_search_url(o, d, depart, ret_part, mk, one_way=one_way)
             if mk
