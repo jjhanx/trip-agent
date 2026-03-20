@@ -89,6 +89,7 @@ def mock_search_rentals(
     passengers: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    travelpayouts_rental_booking_url: str | None = None,
 ) -> list[dict]:
     """Generate rental car options (차급별 참고 카드).
     - 일행이 탑승 가능한(seats >= passengers) 차량 모두 표시
@@ -101,6 +102,25 @@ def mock_search_rentals(
     start_d = start_date or ""
     end_d = end_date or start_d
     eb_url = _build_economybookings_url(pickup, dropoff, start_d, end_d)
+
+    tp_rental = (travelpayouts_rental_booking_url or "").strip()
+    tp_card = {
+        "rental_id": "TP-AFFILIATE",
+        "provider": "Travelpayouts 제휴 렌트카",
+        "car_type": "다양",
+        "seats": 9,
+        "vehicle_name": "제휴 파트너 검색 (픽업·날짜는 링크에서 확인)",
+        "description": "Travelpayouts 대시보드에서 생성한 렌트카 제휴 링크입니다. 실시간 가격·차종은 해당 사이트에서 확인하세요.",
+        "features": ["제휴 링크", "실시간 가격"],
+        "luggage_capacity": "차종별 상이",
+        "image_url": "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=400&h=260&fit=crop",
+        "pickup_location": pickup,
+        "dropoff_location": dropoff,
+        "price_total_krw": None,
+        "price_basis": "실시간 가격은 제휴 사이트에서 확인",
+        "recommended": True,
+        "booking_url": tp_rental,
+    }
 
     # EconomyBookings 선호: 600+ 업체 비교, 실시간 가격. 상단에 포함.
     economy_card = {
@@ -156,7 +176,10 @@ def mock_search_rentals(
             "image_url": "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=400&h=260&fit=crop",
         },
     ]
-    results = [economy_card]
+    results = []
+    if tp_rental:
+        results.append(tp_card)
+    results.append(economy_card)
     for i, c in enumerate(candidates):
         if c["seats"] >= min_seats:
             recommended = c["seats"] >= recommended_seats

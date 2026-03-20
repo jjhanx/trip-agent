@@ -21,6 +21,10 @@
     - renderRentalOptions(state.localTransport)
 ```
 
+### 1.1 Travelpayouts 제휴 링크 (선택)
+
+렌트카는 Travelpayouts **공개 Data API가 없습니다.** `.env`에 `TRAVELPAYOUTS_RENTAL_BOOKING_URL`을 넣으면(대시보드 Link Generator 등에서 생성) `mcp_servers/rental_car/services.mock_search_rentals`가 **목록 최상단**에 제휴 카드를 붙입니다. 이어서 EconomyBookings 비교 카드·참고 차종이 옵니다. 배포·변수 설명은 [DEPLOYMENT.md](../DEPLOYMENT.md) §3.2, [docs/TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) §6 참고.
+
 ## 2. 렌트카 단계가 나타나는 조건
 
 | 조건 | 설명 |

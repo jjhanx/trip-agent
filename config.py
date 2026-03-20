@@ -23,7 +23,13 @@ class Settings(BaseSettings):
     rental_car_mcp_url: str = "http://localhost:8003/mcp"
     transit_mcp_url: str = "http://localhost:8004/mcp"
 
-    # Flight API - SerpApi (Google Flights, 대한항공·아시아나 포함, 월 250회 무료)
+    # Flight API - Travelpayouts Data API (캐시 최저가, 1순위). Aviasales 제휴 예약 링크용 marker
+    travelpayouts_api_token: str = ""
+    travelpayouts_marker: str = ""
+    # 렌트카: Travelpayouts 대시보드 Link Generator로 만든 제휴 URL (선택, 설정 시 검색 결과 최상단)
+    travelpayouts_rental_booking_url: str = ""
+
+    # Flight API - SerpApi (Google Flights, Travelpayouts 결과 없을 때)
     serpapi_api_key: str = ""
     # Flight API - Amadeus (SerpApi 한도 초과 시 fallback)
     amadeus_client_id: str = ""

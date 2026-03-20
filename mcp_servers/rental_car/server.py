@@ -1,6 +1,7 @@
 """Rental Car MCP Server - 렌트카 검색 Tools."""
 
 import json
+import os
 
 from mcp.server.fastmcp import FastMCP
 
@@ -41,6 +42,7 @@ def search_rentals(
         passengers=passengers,
         start_date=start_date,
         end_date=end_date,
+        travelpayouts_rental_booking_url=os.environ.get("TRAVELPAYOUTS_RENTAL_BOOKING_URL", "").strip() or None,
     )
     return json.dumps(rentals, ensure_ascii=False)
 

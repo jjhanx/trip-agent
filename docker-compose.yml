@@ -4,6 +4,8 @@ services:
     command: ["python", "main.py"]
     ports:
       - "9000:9000"
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
     environment:
@@ -19,33 +21,45 @@ services:
     command: ["python", "-m", "agents.flight.server"]
     ports:
       - "9001:9001"
+    env_file:
+      - .env
 
   itinerary:
     build: .
     command: ["python", "-m", "agents.itinerary.server"]
     ports:
       - "9002:9002"
+    env_file:
+      - .env
 
   accommodation:
     build: .
     command: ["python", "-m", "agents.accommodation.server"]
     ports:
       - "9003:9003"
+    env_file:
+      - .env
 
   rental_car:
     build: .
     command: ["python", "-m", "agents.rental_car.server"]
     ports:
       - "9004:9004"
+    env_file:
+      - .env
 
   transit:
     build: .
     command: ["python", "-m", "agents.public_transit.server"]
     ports:
       - "9005:9005"
+    env_file:
+      - .env
 
   booking:
     build: .
     command: ["python", "-m", "agents.booking.server"]
     ports:
       - "9006:9006"
+    env_file:
+      - .env

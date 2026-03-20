@@ -195,13 +195,34 @@ LLM_MODEL=google/gemini-3.1-pro-preview
 
 다른 모델(`google/gemini-2.5-pro`, `google/gemini-2.0-flash` 등)은 [OpenRouter 모델 목록](https://openrouter.ai/docs/features/models) 참고.
 
-**항공편 실제 데이터** 사용 시 [SerpApi](https://serpapi.com) API 키 설정:
+### Travelpayouts (항공 1순위·렌트카 제휴 링크)
+
+항공편은 **`TRAVELPAYOUTS_API_TOKEN`**이 있으면 [Travelpayouts Data API](https://api.travelpayouts.com/documentation)를 **먼저** 사용합니다. SerpApi·Amadeus는 Travelpayouts에 결과가 없을 때만 사용됩니다.
+
+```env
+# 필수(항공 1순위). https://www.travelpayouts.com/programs/100/tools/api
+TRAVELPAYOUTS_API_TOKEN=발급받은_토큰
+# Aviasales 예약 딥링크·제휴 마커 (권장)
+TRAVELPAYOUTS_MARKER=제휴_마커
+```
+
+렌트카는 공개 Data API가 없습니다. 대시보드 **Tools → Link Generator** 등에서 렌트카 프로그램용 URL을 만든 뒤 아래에 넣으면 검색 결과 **맨 위**에 제휴 카드가 붙습니다.
+
+```env
+TRAVELPAYOUTS_RENTAL_BOOKING_URL=https://...
+```
+
+상세는 [docs/TRAVELPAYOUTS_API_GUIDE.md](docs/TRAVELPAYOUTS_API_GUIDE.md), 항공 흐름은 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고.
+
+### SerpApi (항공 2순위, 실시간 Google Flights)
+
+Travelpayouts만으로 결과가 나오지 않을 때 사용합니다.
 
 ```env
 SERPAPI_API_KEY=발급받은_api_key
 ```
 
-자세한 절차는 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고. 미설정 시 Mock(예시) 데이터로 동작합니다.
+SerpApi·Travelpayouts·Amadeus를 모두 쓰지 않으면 항공은 Mock(예시) 데이터로 동작합니다.
 
 ### 3.3 Docker Compose로 실행
 
@@ -213,6 +234,7 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+- 프로젝트 루트에 `.env`가 있으면 각 서비스가 `env_file: .env`로 변수를 읽습니다. `cp .env.example .env` 후 토큰·키를 채우세요.
 - 웹 UI: `http://서버IP:9000`
 - 내부 포트: 9000(Session+UI), 9001~9006(각 Agent)
 
@@ -626,7 +648,7 @@ docker compose logs itinerary
 
 | 에러 | 원인 | 해결 |
 |------|------|------|
-| `extra_forbidden: amadeus_client_id` | .env에 제거된 변수 남음 | .env에서 AMADEUS_*, DUFFEL_*, KIWI_* 등 과거 변수 삭제. SERPAPI_API_KEY 사용 |
+| `extra_forbidden: amadeus_client_id` | .env에 제거된 변수 남음 | .env에서 AMADEUS_*, DUFFEL_*, KIWI_* 등 과거 변수 삭제. 항공은 `TRAVELPAYOUTS_*`, `SERPAPI_*` 사용 |
 | `ModuleNotFoundError: a2a.server.events.event_factory` | a2a-sdk 0.3.x에서 모듈 제거 | `git pull` 후 `docker compose up -d --build` |
 | `ImportError: MessagePart from a2a.types` | API 변경 (MessagePart→Part/TextPart) | 위와 동일 |
 | `ValidationError: AgentSkill... description Field required` | AgentSkill에 `description` 필수 | 위와 동일 |

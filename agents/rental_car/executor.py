@@ -63,6 +63,9 @@ class RentalCarExecutor(BaseAgentExecutor):
                 kwargs["passengers"] = passengers
             kwargs["start_date"] = start_date
             kwargs["end_date"] = end_date
+            kwargs["travelpayouts_rental_booking_url"] = (
+                (self.settings.travelpayouts_rental_booking_url or "").strip() or None
+            )
             rentals = mock_search_rentals(**kwargs)
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(rentals, ensure_ascii=False))

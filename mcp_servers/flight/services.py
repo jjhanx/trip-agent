@@ -1,10 +1,11 @@
-"""Flight search logic - SerpApi (Google Flights) + mock fallback."""
+"""Flight search logic — Travelpayouts(1순위) → SerpApi → Amadeus → Mock."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from mcp_servers.flight.api_clients import search_serpapi
+from mcp_servers.flight.travelpayouts_clients import search_travelpayouts_flights
 
 
 def _flight_key(f: dict) -> tuple:
@@ -31,7 +32,7 @@ async def _enrich_direct_first_and_cheapest(
 ) -> tuple[list[dict], list[str]]:
     """
     직항 우선 검색 + 최저가 5건 병합.
-    source: "serpapi" | "amadeus"
+    source: "serpapi" | "amadeus" | "travelpayouts"
     Returns (merged_flights, extra_warnings)
     """
     extra_warnings: list[str] = []
@@ -40,7 +41,27 @@ async def _enrich_direct_first_and_cheapest(
 
     # 1) 직항 전용 검색
     direct_flights: list[dict] = []
-    if source == "serpapi" and config.get("serpapi_api_key"):
+    if source == "travelpayouts" and (config.get("travelpayouts_api_token") or "").strip():
+        try:
+            direct_flights, dw = await search_travelpayouts_flights(
+                origin,
+                destination,
+                start_date,
+                end_date,
+                config["travelpayouts_api_token"].strip(),
+                one_way=one_way,
+                seat_class=seat_class,
+                marker=(config.get("travelpayouts_marker") or "").strip(),
+                direct_only=True,
+                quiet=True,
+            )
+            if direct_flights:
+                extra_warnings.append("직항 우선 검색 결과를 상단에 표시했습니다.")
+            elif dw:
+                extra_warnings.extend(dw[:1])
+        except Exception as e:
+            extra_warnings.append(f"직항 검색 보조 실패: {e}")
+    elif source == "serpapi" and config.get("serpapi_api_key"):
         try:
             direct_flights, dw = await search_serpapi(
                 origin, destination, start_date, end_date,
@@ -500,6 +521,8 @@ def multi_source_search_flights(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
+    travelpayouts_api_token: str = "",
+    travelpayouts_marker: str = "",
     serpapi_api_key: str = "",
     amadeus_client_id: str = "",
     amadeus_client_secret: str = "",
@@ -507,12 +530,14 @@ def multi_source_search_flights(
     one_way: bool = False,
 ) -> tuple[list[dict], list[str]]:
     """
-    SerpApi Google Flights 검색 (대한항공·아시아나 포함).
+    Travelpayouts(캐시 최저가) 우선 → SerpApi Google Flights → Amadeus → Mock.
     왕복 + date_flexibility_days>=2: 출발일±N·귀환일±N 각각 편도 검색 후 조합, 가격 싼 순.
     그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
     Returns (flights, warnings)
     """
     config = {
+        "travelpayouts_api_token": travelpayouts_api_token,
+        "travelpayouts_marker": travelpayouts_marker,
         "serpapi_api_key": serpapi_api_key,
         "amadeus_client_id": amadeus_client_id,
         "amadeus_client_secret": amadeus_client_secret,
@@ -521,6 +546,60 @@ def multi_source_search_flights(
 
     async def _run():
         preferred = _get_preferred_airlines(mileage_program)
+        tp_token = (config.get("travelpayouts_api_token") or "").strip()
+        if tp_token:
+            tp_flights, tp_w = await search_travelpayouts_flights(
+                origin,
+                destination,
+                start_date,
+                end_date,
+                tp_token,
+                one_way=one_way,
+                seat_class=seat_class,
+                marker=(config.get("travelpayouts_marker") or "").strip(),
+            )
+            if tp_flights:
+                seen_tp: set = set()
+                unique_tp: list = []
+                for f in tp_flights:
+                    if f.get("round_trip"):
+                        key = (
+                            "rt",
+                            f.get("flight_id"),
+                            (f.get("outbound") or {}).get("departure"),
+                            (f.get("return") or {}).get("departure"),
+                        )
+                    else:
+                        key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+                    if key not in seen_tp:
+                        seen_tp.add(key)
+                        unique_tp.append(f)
+                preferred_airlines = preferred
+                for f in unique_tp:
+                    ob = f.get("outbound") if f.get("round_trip") else f
+                    ret = f.get("return") if f.get("round_trip") else None
+                    f["mileage_eligible"] = bool(preferred_airlines) and (
+                        _is_preferred_airline(ob or {}, preferred_airlines)
+                        or (ret and _is_preferred_airline(ret, preferred_airlines))
+                    )
+                sort_fn_tp = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
+                unique_tp.sort(key=sort_fn_tp)
+                unique_tp, ew = await _enrich_direct_first_and_cheapest(
+                    unique_tp,
+                    origin,
+                    destination,
+                    start_date,
+                    end_date,
+                    config,
+                    one_way,
+                    seat_class,
+                    use_miles,
+                    mileage_program,
+                    preferred_airlines,
+                    "travelpayouts",
+                )
+                return unique_tp, list(dict.fromkeys(tp_w + ew)), True, "", ""
+
         # 왕복 + 날짜 유연성: 2단계 (편도로 조합 추출 → 왕복 deep_search로 정확한 가격)
         if not one_way and flex >= 1:
             flights, warnings, api_ok, ob_range, ret_range = await _search_round_trip_flex_2phase(
@@ -707,6 +786,8 @@ def multi_source_search_flights_multi_dest(
     seat_class: str = "economy",
     use_miles: bool = False,
     mileage_program: str | None = None,
+    travelpayouts_api_token: str = "",
+    travelpayouts_marker: str = "",
     serpapi_api_key: str = "",
     amadeus_client_id: str = "",
     amadeus_client_secret: str = "",
@@ -726,6 +807,8 @@ def multi_source_search_flights_multi_dest(
         flights, warnings = multi_source_search_flights(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
+            travelpayouts_api_token=travelpayouts_api_token,
+            travelpayouts_marker=travelpayouts_marker,
             serpapi_api_key=serpapi_api_key,
             amadeus_client_id=amadeus_client_id,
             amadeus_client_secret=amadeus_client_secret,

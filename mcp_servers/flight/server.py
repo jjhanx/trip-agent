@@ -1,4 +1,4 @@
-"""Flight MCP Server - 항공편 검색 Tools (SerpApi Google Flights, 대한항공·아시아나 포함)."""
+"""Flight MCP Server — Travelpayouts 우선, 이어서 SerpApi Google Flights."""
 
 import json
 import os
@@ -15,6 +15,8 @@ mcp = FastMCP("flight-search", port=8001)
 
 def _get_config():
     return {
+        "travelpayouts_api_token": os.environ.get("TRAVELPAYOUTS_API_TOKEN", ""),
+        "travelpayouts_marker": os.environ.get("TRAVELPAYOUTS_MARKER", ""),
         "serpapi_api_key": os.environ.get("SERPAPI_API_KEY", ""),
         "amadeus_client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
         "amadeus_client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
@@ -35,7 +37,8 @@ def search_flights(
     one_way: bool = False,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    SerpApi Google Flights 사용 (대한항공·아시아나 포함). mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
+    Travelpayouts(캐시 최저가)가 설정되어 있으면 우선 사용, 없거나 결과가 없으면 SerpApi Google Flights.
+    mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
     date_flexibility_days > 0 시 ±일 범위 내 여러 날짜 병렬 검색.
     one_way=True 시 편도만 검색 (왕복의 가는 편/오는 편 별도 검색용).
 
@@ -65,6 +68,8 @@ def search_flights(
             seat_class,
             use_miles,
             mileage_program=mileage_program or None,
+            travelpayouts_api_token=cfg["travelpayouts_api_token"],
+            travelpayouts_marker=cfg["travelpayouts_marker"],
             serpapi_api_key=cfg["serpapi_api_key"],
             amadeus_client_id=cfg["amadeus_client_id"],
             amadeus_client_secret=cfg["amadeus_client_secret"],
@@ -74,6 +79,8 @@ def search_flights(
         flights, warnings = multi_source_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
+            travelpayouts_api_token=cfg["travelpayouts_api_token"],
+            travelpayouts_marker=cfg["travelpayouts_marker"],
             serpapi_api_key=cfg["serpapi_api_key"],
             amadeus_client_id=cfg["amadeus_client_id"],
             amadeus_client_secret=cfg["amadeus_client_secret"],
