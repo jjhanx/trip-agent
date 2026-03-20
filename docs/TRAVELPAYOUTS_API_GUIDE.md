@@ -51,8 +51,8 @@ GET /v1/prices/cheap
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
-| origin | O | 출발지 IATA 코드 (예: ICN, MOW) |
-| destination | O | 도착지 IATA 코드 |
+| origin | O | 출발지 IATA (문서·캐시는 **도시 코드** 조합에 데이터가 더 자주 있음; 공항만 넣으면 `success: true`인데 `data: {}` 인 경우가 많음) |
+| destination | O | 도착지 IATA |
 | depart_date | - | 출발일 (yyyy-mm 또는 yyyy-mm-dd) |
 | return_date | - | 귀환일 (편도 시 생략) |
 | currency | RUB | 통화 (usd, eur, krw 등) |
@@ -95,7 +95,9 @@ GET /v1/prices/calendar
 | `/v1/airline-directions` | 항공사별 인기 노선 |
 | `/v2/prices/latest` | 최신 가격 (페이지네이션) |
 | `/v2/prices/month-matrix` | 월별 가격 매트릭스 |
-| `/v2/prices/week-matrix` | 주별 가격 매트릭스 |
+| `/v2/prices/week-matrix` | 주별 가격 매트릭스 (`show_to_affiliates=false` 등으로 캐시 범위가 달라질 수 있음) |
+
+**이 저장소(Trip Agent)**: `/v1/prices/cheap`이 비어 있으면 도시 코드 재시도 → 필요 시 출발·귀환을 `yyyy-mm`으로 같은 엔드포인트 재요청 → 그다음 `/v2/prices/week-matrix` 보조 조회를 합니다. 제휴 검색 URL(Aviasales)은 사용자가 입력한 공항 코드를 유지합니다.
 
 ---
 
