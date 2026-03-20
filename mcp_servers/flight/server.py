@@ -55,12 +55,12 @@ def search_flights(
         one_way: 편도 검색 (왕복 시 가는 편/오는 편 각각 검색 시 True)
 
     Returns:
-        JSON object with "flights" array and "warnings" array
+        JSON object with "flights", "warnings", "flight_search_api" (이번 검색에 쓰인 API 설명)
     """
     cfg = _get_config()
     flex = date_flexibility_days if date_flexibility_days is not None and date_flexibility_days > 0 else None
     if destination_airports and len(destination_airports) > 0:
-        flights, warnings = multi_source_search_flights_multi_dest(
+        flights, warnings, flight_search_api = multi_source_search_flights_multi_dest(
             origin,
             destination_airports[:4],
             start_date,
@@ -76,7 +76,7 @@ def search_flights(
             date_flexibility_days=flex,
         )
     else:
-        flights, warnings = multi_source_search_flights(
+        flights, warnings, flight_search_api = multi_source_search_flights(
             origin, destination, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program or None,
             travelpayouts_api_token=cfg["travelpayouts_api_token"],
@@ -87,7 +87,10 @@ def search_flights(
             date_flexibility_days=flex,
             one_way=one_way,
         )
-    return json.dumps({"flights": flights, "warnings": warnings}, ensure_ascii=False)
+    return json.dumps(
+        {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api},
+        ensure_ascii=False,
+    )
 
 
 @mcp.tool()

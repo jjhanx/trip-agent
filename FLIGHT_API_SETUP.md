@@ -95,7 +95,7 @@ SERPAPI_API_KEY=발급받은_api_key_입력
 
 Trip Agent의 항공편 검색 모듈은 다음 순서로 동작합니다.
 
-1. **Travelpayouts**: `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(및 직항 보강용 `/v1/prices/direct`)로 캐시 최저가를 조회합니다. 결과가 있으면 **이후 단계를 건너뜁니다** (날짜 유연성·SerpApi 심층 왕복 검색은 사용하지 않음).
+1. **Travelpayouts**: `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(및 직항 보강용 `/v1/prices/direct`)로 캐시 최저가를 조회합니다. 결과가 있으면 **이후 단계를 건너뜁니다** (날짜 유연성·SerpApi 심층 왕복 검색은 사용하지 않음). 검색 직후 UI·JSON 응답에 **이번에 실제로 쓰인 API**가 `flight_search_api` / 화면 상단 배너로 표시됩니다.
 2. **SerpApi 호출**: Travelpayouts에서 결과가 없을 때 `SERPAPI_API_KEY`로 구글 플라이트 결과를 조회합니다.
    - **왕복(Round-trip)**: `type=1` (UI상에서는 '가는 편', '오는 편'이 자동으로 분리되어 아코디언 패널에 표시됩니다.)
    - **편도(One-way)**: `type=2` (귀환일 검색 제외)

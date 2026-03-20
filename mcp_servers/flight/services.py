@@ -7,6 +7,15 @@ from datetime import datetime, timedelta
 from mcp_servers.flight.api_clients import search_serpapi
 from mcp_servers.flight.travelpayouts_clients import search_travelpayouts_flights
 
+# 실제로 결과를 만든 항공 검색 API (JSON·UI에 노출)
+FLIGHT_SEARCH_API_TRAVELPAYOUTS = (
+    "Travelpayouts Data API — GET https://api.travelpayouts.com/v1/prices/cheap "
+    "(직항 보강: /v1/prices/direct)"
+)
+FLIGHT_SEARCH_API_SERPAPI = "SerpApi — GET https://serpapi.com/search.json (Google Flights)"
+FLIGHT_SEARCH_API_AMADEUS = "Amadeus — Flight Offers Search API (test/production)"
+FLIGHT_SEARCH_API_MOCK = "내부 Mock (예시 항공편 데이터)"
+
 
 def _flight_key(f: dict) -> tuple:
     """중복 제거용 flight 키."""
@@ -528,12 +537,12 @@ def multi_source_search_flights(
     amadeus_client_secret: str = "",
     date_flexibility_days: int | None = None,
     one_way: bool = False,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], str]:
     """
     Travelpayouts(캐시 최저가) 우선 → SerpApi Google Flights → Amadeus → Mock.
     왕복 + date_flexibility_days>=2: 출발일±N·귀환일±N 각각 편도 검색 후 조합, 가격 싼 순.
     그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
-    Returns (flights, warnings)
+    Returns (flights, warnings, flight_search_api) — 세 번째 값은 실제로 표시 데이터를 만든 API 설명 문자열.
     """
     config = {
         "travelpayouts_api_token": travelpayouts_api_token,
@@ -598,7 +607,7 @@ def multi_source_search_flights(
                     preferred_airlines,
                     "travelpayouts",
                 )
-                return unique_tp, list(dict.fromkeys(tp_w + ew)), True, "", ""
+                return unique_tp, list(dict.fromkeys(tp_w + ew)), True, "", "", FLIGHT_SEARCH_API_TRAVELPAYOUTS
 
         # 왕복 + 날짜 유연성: 2단계 (편도로 조합 추출 → 왕복 deep_search로 정확한 가격)
         if not one_way and flex >= 1:
@@ -613,7 +622,8 @@ def multi_source_search_flights(
                     preferred, "serpapi",
                 )
                 warnings.extend(ew)
-            return flights, warnings, api_ok, ob_range, ret_range
+            api_lbl = FLIGHT_SEARCH_API_SERPAPI if flights else ""
+            return flights, warnings, api_ok, ob_range, ret_range, api_lbl
         # 단일 날짜 또는 편도
         date_pairs = _date_pairs_with_flexibility(start_date, end_date, flex)
         if len(date_pairs) == 1:
@@ -628,7 +638,7 @@ def multi_source_search_flights(
                     preferred, "serpapi",
                 )
                 wa.extend(ew)
-            return fl, wa, ok, "", ""
+            return fl, wa, ok, "", "", (FLIGHT_SEARCH_API_SERPAPI if fl else "")
         tasks = [
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
@@ -674,18 +684,22 @@ def multi_source_search_flights(
                 preferred, "serpapi",
             )
             all_warnings.extend(ew)
-        return unique, list(dict.fromkeys(all_warnings)), api_responded_ok, "", ""
+        api_lbl_m = FLIGHT_SEARCH_API_SERPAPI if unique else ""
+        return unique, list(dict.fromkeys(all_warnings)), api_responded_ok, "", "", api_lbl_m
 
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
     if loop is None:
-        flights, warnings, api_responded_ok, ob_range, ret_range = asyncio.run(_run())
+        flights, warnings, api_responded_ok, ob_range, ret_range, search_api_label = asyncio.run(_run())
     else:
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(asyncio.run, _run())
-            flights, warnings, api_responded_ok, ob_range, ret_range = future.result()
+            flights, warnings, api_responded_ok, ob_range, ret_range, search_api_label = future.result()
+
+    if flights and not search_api_label:
+        search_api_label = FLIGHT_SEARCH_API_SERPAPI
 
     if not flights:
         # SerpAPI 한도 초과 시 Amadeus fallback 시도 (날짜 유연성 early return보다 먼저)
@@ -743,7 +757,7 @@ def multi_source_search_flights(
                             or (ret and _is_preferred_airline(ret, preferred_airlines))
                         )
                     flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
-                    return flights, warnings
+                    return flights, warnings, FLIGHT_SEARCH_API_AMADEUS
                 warnings.extend(amadeus_warnings)
             except Exception as e:
                 warnings.append(f"Amadeus fallback 실패: {e}")
@@ -752,7 +766,7 @@ def multi_source_search_flights(
             warnings.append(
                 f"출발일 {ob_range}까지와 귀환일 {ret_range} 사이에 해당되는 왕복 항공편이 없습니다."
             )
-            return [], warnings
+            return [], warnings, ""
         # 그 외: Mock 폴백
         from mcp_servers.flight.mock_fallback import mock_search_flights
 
@@ -775,7 +789,8 @@ def multi_source_search_flights(
             )
         else:
             warnings.append("실제 API 결과 없음. Mock 데이터로 대체합니다.")
-    return flights, warnings
+        return flights, warnings, FLIGHT_SEARCH_API_MOCK
+    return flights, warnings, search_api_label
 
 
 def multi_source_search_flights_multi_dest(
@@ -793,18 +808,20 @@ def multi_source_search_flights_multi_dest(
     amadeus_client_secret: str = "",
     date_flexibility_days: int | None = None,
     one_way: bool = False,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], str]:
     """
     다중 도착 공항 검색. 마일리지 직항 우선순으로 각 공항 검색 후 병합.
     정렬: 1) 마일리지 직항 공항·선호 항공사 2) 가격순
+    Returns (flights, warnings, flight_search_api) — 공항별 소스가 다르면 한 줄로 병합 표기.
     """
     airport_labels = {"MXP": "밀라노", "MUC": "뮌헨", "VCE": "베니스", "VRN": "베로나", "INN": "인스부르크", "TSF": "베니스", "BZO": "볼차노"}
     all_flights: list[dict] = []
     all_warnings: list[str] = []
     preferred_airlines = _get_preferred_airlines(mileage_program)
+    api_labels_seen: list[str] = []
 
     for i, dest in enumerate(destination_airports):
-        flights, warnings = multi_source_search_flights(
+        flights, warnings, api_lbl = multi_source_search_flights(
             origin, dest, start_date, end_date, seat_class, use_miles,
             mileage_program=mileage_program,
             travelpayouts_api_token=travelpayouts_api_token,
@@ -815,6 +832,8 @@ def multi_source_search_flights_multi_dest(
             date_flexibility_days=date_flexibility_days,
             one_way=one_way,
         )
+        if api_lbl and api_lbl not in api_labels_seen:
+            api_labels_seen.append(api_lbl)
         label = airport_labels.get(dest, dest)
         for f in flights:
             f["destination_airport"] = dest
@@ -843,7 +862,13 @@ def multi_source_search_flights_multi_dest(
         return (base[0], ap, base[1], base[2])
 
     unique.sort(key=sort_key_multi)
-    return unique, list(dict.fromkeys(all_warnings))  # 중복 경고 제거
+    if not api_labels_seen:
+        combined_api = ""
+    elif len(api_labels_seen) == 1:
+        combined_api = api_labels_seen[0]
+    else:
+        combined_api = "공항별 검색 소스: " + " · ".join(api_labels_seen)
+    return unique, list(dict.fromkeys(all_warnings)), combined_api  # 중복 경고 제거
 
 
 def mock_search_flights(

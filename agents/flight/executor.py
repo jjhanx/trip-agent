@@ -95,11 +95,17 @@ class FlightSearchExecutor(BaseAgentExecutor):
             if isinstance(parsed, dict):
                 flights = parsed.get("flights", parsed)
                 warnings = parsed.get("warnings", [])
+                flight_search_api = parsed.get("flight_search_api") or ""
             else:
                 flights = parsed if isinstance(parsed, list) else []
                 warnings = []
+                flight_search_api = ""
             # MCP가 추천순(선호 직항→선호 경유→나머지 직항→나머지 경유)으로 이미 정렬 반환
-            out = {"flights": flights or [], "warnings": warnings or []}
+            out = {
+                "flights": flights or [],
+                "warnings": warnings or [],
+                "flight_search_api": flight_search_api,
+            }
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
@@ -143,7 +149,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 one_way = data.get("trip_type") != "round_trip"
 
             if travel.destination_airports and flight_leg != "return" and not (isinstance(flight_leg, str) and flight_leg.startswith("multi_city_")):
-                flights, warnings = multi_source_search_flights_multi_dest(
+                flights, warnings, flight_search_api = multi_source_search_flights_multi_dest(
                     origin,
                     travel.destination_airports[:4],
                     start_d,
@@ -160,7 +166,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     one_way=one_way,
                 )
             else:
-                flights, warnings = multi_source_search_flights(
+                flights, warnings, flight_search_api = multi_source_search_flights(
                     origin,
                     dest,
                     start_d,
@@ -177,7 +183,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     one_way=one_way,
                 )
             # multi_source_search가 추천순으로 이미 정렬 반환
-            out = {"flights": flights, "warnings": warnings}
+            out = {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

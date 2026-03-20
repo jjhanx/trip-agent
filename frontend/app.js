@@ -184,6 +184,7 @@ function getFullPlanState() {
     flightsByLeg: state.flightsByLeg || {},
     currentFlights: state.currentFlights,
     flightWarnings: state.flightWarnings,
+    flightSearchApi: state.flightSearchApi || '',
     selectedOutboundFlight: state.selectedOutboundFlight,
     selectedReturnFlight: state.selectedReturnFlight,
     selectedMultiCityFlights: state.selectedMultiCityFlights,
@@ -210,6 +211,7 @@ function loadPlanIntoState(data) {
   state.flightsByLeg = data.flightsByLeg && typeof data.flightsByLeg === 'object' ? data.flightsByLeg : {};
   state.currentFlights = Array.isArray(data.currentFlights) ? data.currentFlights : (state.flights.length ? state.flights : null);
   state.flightWarnings = Array.isArray(data.flightWarnings) ? data.flightWarnings : [];
+  state.flightSearchApi = typeof data.flightSearchApi === 'string' ? data.flightSearchApi : '';
   state.selectedOutboundFlight = data.selectedOutboundFlight ?? null;
   state.selectedReturnFlight = data.selectedReturnFlight ?? null;
   state.selectedMultiCityFlights = Array.isArray(data.selectedMultiCityFlights) ? data.selectedMultiCityFlights : [];
@@ -349,6 +351,7 @@ function newPlan() {
   state.localTransport = [];
   state.selectedLocalTransport = null;
   state.flightWarnings = [];
+  state.flightSearchApi = '';
   loadFormFromStorage();
   initTripTypeUI();
   renderPlanUI();
@@ -374,6 +377,7 @@ let state = {
   selectedReturnFlight: null,
   selectedMultiCityFlights: [],
   selectedFlight: null,
+  flightSearchApi: '',
   flightLeg: 'outbound',
   itineraries: [],
   selectedItinerary: null,
@@ -473,10 +477,10 @@ function refreshStepView(step) {
     const sf = buildSelectedFlight();
     const flightsToShow = state.currentFlights || state.flights || (state.trip_type === 'multi_city' ? Object.values(state.flightsByLeg || {}).flat() : []);
     if (sf && flightsToShow.length) {
-      renderFlights(flightsToShow, state.flightWarnings || []);
+      renderFlights(flightsToShow, state.flightWarnings || [], state.flightSearchApi);
       showFlightSummaryForEdit(sf);
     } else if (flightsToShow.length) {
-      renderFlights(flightsToShow, state.flightWarnings || []);
+      renderFlights(flightsToShow, state.flightWarnings || [], state.flightSearchApi);
       $('#flights-list').classList.remove('hidden');
       $('#flight-sort-bar').classList.remove('hidden');
       $('#selected-flight-summary').classList.add('hidden');
@@ -792,7 +796,8 @@ async function doFlightSearch(leg) {
     state.flights = flights;
     state.flightsByLeg[state.flightLeg] = flights;
     state.flightWarnings = warnings;
-    renderFlights(flights, warnings);
+    state.flightSearchApi = typeof data?.flight_search_api === 'string' ? data.flight_search_api : '';
+    renderFlights(flights, warnings, state.flightSearchApi);
     if (state.flightLeg === 'return' || (state.trip_type === 'multi_city' && state.flightLeg !== 'multi_city_0')) {
       $('#flights-list').classList.remove('hidden');
       $('#flight-sort-bar').classList.remove('hidden');
@@ -866,13 +871,28 @@ function fmtFlightDateTime(iso) {
   return `${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
 }
 
-function renderFlights(flights, warnings) {
+function renderFlights(flights, warnings, searchApiLabel) {
+  const fList = flights !== undefined && flights !== null ? flights : state.currentFlights;
+  const warns = warnings !== undefined && warnings !== null ? warnings : (state.flightWarnings || []);
+  const apiLabel = searchApiLabel !== undefined && searchApiLabel !== null ? searchApiLabel : (state.flightSearchApi || '');
+  if (searchApiLabel !== undefined && searchApiLabel !== null) {
+    state.flightSearchApi = searchApiLabel;
+  }
   const list = $('#flights-list');
   const warnEl = $('#flight-warnings');
   const mockEl = $('#flight-mock-notice');
+  const apiEl = $('#flight-search-api');
   const sortBar = $('#flight-sort-bar');
   const stepTitle = $('#step-flights-title');
-  const warns = warnings || [];
+  if (apiEl) {
+    if (apiLabel) {
+      apiEl.textContent = '이번 검색에 사용된 API: ' + apiLabel;
+      apiEl.classList.remove('hidden');
+    } else {
+      apiEl.textContent = '';
+      apiEl.classList.add('hidden');
+    }
+  }
 
   if (stepTitle) {
     if (state.trip_type === 'multi_city') {
@@ -905,7 +925,7 @@ function renderFlights(flights, warnings) {
       outboundSummary.classList.add('hidden');
     }
   }
-  if (flights) {
+  if (flights !== undefined && flights !== null) {
     state.currentFlights = flights;
   }
   const currentFlights = state.currentFlights || [];
@@ -1288,12 +1308,13 @@ $('#btn-next-flights').addEventListener('click', async () => {
       }
       state.flights = data.flights;
       state.flightWarnings = data?.warnings || [];
+      state.flightSearchApi = typeof data?.flight_search_api === 'string' ? data.flight_search_api : '';
       if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
         state.flightLeg = 'return';
         state.selectedReturnFlight = null;
       }
       state.flightsByLeg[state.flightLeg] = data.flights;
-      renderFlights(data.flights, state.flightWarnings);
+      renderFlights(data.flights, state.flightWarnings, state.flightSearchApi);
       $('#flights-list').classList.remove('hidden');
       $('#flight-sort-bar').classList.remove('hidden');
       $('#selected-flight-summary').classList.add('hidden');

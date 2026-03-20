@@ -363,7 +363,7 @@ class SessionExecutor(BaseAgentExecutor):
                 one_way = travel.trip_type == "one_way" or leg == "outbound"
 
             if travel.destination_airports and leg != "return" and not (isinstance(leg, str) and leg.startswith("multi_city_")):
-                flights, warnings = multi_source_search_flights_multi_dest(
+                flights, warnings, flight_search_api = multi_source_search_flights_multi_dest(
                     origin,
                     travel.destination_airports[:4],
                     start_d,
@@ -380,7 +380,7 @@ class SessionExecutor(BaseAgentExecutor):
                     one_way=one_way,
                 )
             else:
-                flights, warnings = multi_source_search_flights(
+                flights, warnings, flight_search_api = multi_source_search_flights(
                     origin,
                     dest,
                     start_d,
@@ -396,7 +396,7 @@ class SessionExecutor(BaseAgentExecutor):
                     date_flexibility_days=flex,
                     one_way=one_way,
                 )
-            out = {"flights": flights, "warnings": warnings}
+            out = {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api}
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
