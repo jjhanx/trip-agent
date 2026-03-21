@@ -195,12 +195,12 @@ LLM_MODEL=google/gemini-3.1-pro-preview
 
 다른 모델(`google/gemini-2.5-pro`, `google/gemini-2.0-flash` 등)은 [OpenRouter 모델 목록](https://openrouter.ai/docs/features/models) 참고.
 
-### Travelpayouts (항공 1순위·렌트카 제휴 링크)
+### Travelpayouts (항공 캐시 참고·렌트카 제휴 링크)
 
-항공편은 **`TRAVELPAYOUTS_API_TOKEN`**이 있으면 [Travelpayouts Data API](https://api.travelpayouts.com/documentation)를 **먼저** 사용합니다. SerpApi·Amadeus는 Travelpayouts에 결과가 없을 때만 사용됩니다.
+항공편은 **SerpApi 우선**, Amadeus(429 시)·이후 **SerpApi·Amadeus 모두 결과가 없을 때만** `TRAVELPAYOUTS_API_TOKEN`이 있으면 [Travelpayouts Data API](https://api.travelpayouts.com/documentation)로 **캐시 기준 최저가·Aviasales 링크를 참고**합니다.
 
 ```env
-# 필수(항공 1순위). https://www.travelpayouts.com/programs/100/tools/api
+# 선택(항공: SerpApi·Amadeus 실패 시 캐시 참고). https://www.travelpayouts.com/programs/100/tools/api
 TRAVELPAYOUTS_API_TOKEN=발급받은_토큰
 # Aviasales 예약 딥링크·제휴 마커 (권장)
 TRAVELPAYOUTS_MARKER=제휴_마커
@@ -214,9 +214,9 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=https://...
 
 상세는 [docs/TRAVELPAYOUTS_API_GUIDE.md](docs/TRAVELPAYOUTS_API_GUIDE.md), 항공 흐름은 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고.
 
-### SerpApi (항공 2순위, 실시간 Google Flights)
+### SerpApi (항공 1순위, 실시간 Google Flights)
 
-Travelpayouts만으로 결과가 나오지 않을 때 사용합니다.
+항공 검색의 **기본 소스**입니다.
 
 ```env
 SERPAPI_API_KEY=발급받은_api_key

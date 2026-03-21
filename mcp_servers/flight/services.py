@@ -1,4 +1,4 @@
-"""Flight search logic — Travelpayouts(1순위) → SerpApi → Amadeus → Mock."""
+"""Flight search logic — SerpApi → Amadeus(429 등) → Travelpayouts(캐시 참고) → Mock."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -522,6 +522,84 @@ async def _search_serpapi_only(
     return unique, warnings, api_responded_ok
 
 
+async def _travelpayouts_cache_fallback(
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    config: dict,
+    *,
+    one_way: bool,
+    seat_class: str,
+    use_miles: bool,
+    mileage_program: str | None,
+) -> tuple[list[dict], list[str]]:
+    """
+    SerpApi·Amadeus에 결과가 없을 때만: Travelpayouts 캐시 최저가·제휴 링크 참고.
+    """
+    token = (config.get("travelpayouts_api_token") or "").strip()
+    if not token:
+        return [], []
+    tp_flights, tp_w = await search_travelpayouts_flights(
+        origin,
+        destination,
+        start_date,
+        end_date,
+        token,
+        one_way=one_way,
+        seat_class=seat_class,
+        marker=(config.get("travelpayouts_marker") or "").strip(),
+    )
+    preferred_airlines = _get_preferred_airlines(mileage_program)
+    if not tp_flights:
+        return [], list(tp_w)
+
+    seen_tp: set = set()
+    unique_tp: list = []
+    for f in tp_flights:
+        if f.get("round_trip"):
+            key = (
+                "rt",
+                f.get("flight_id"),
+                (f.get("outbound") or {}).get("departure"),
+                (f.get("return") or {}).get("departure"),
+            )
+        else:
+            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+        if key not in seen_tp:
+            seen_tp.add(key)
+            unique_tp.append(f)
+
+    for f in unique_tp:
+        ob = f.get("outbound") if f.get("round_trip") else f
+        ret = f.get("return") if f.get("round_trip") else None
+        f["mileage_eligible"] = bool(preferred_airlines) and (
+            _is_preferred_airline(ob or {}, preferred_airlines)
+            or (ret and _is_preferred_airline(ret, preferred_airlines))
+        )
+    unique_tp.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
+    unique_tp, ew = await _enrich_direct_first_and_cheapest(
+        unique_tp,
+        origin,
+        destination,
+        start_date,
+        end_date,
+        config,
+        one_way,
+        seat_class,
+        use_miles,
+        mileage_program,
+        preferred_airlines,
+        "travelpayouts",
+    )
+    prefix = (
+        "[Travelpayouts] SerpApi·Amadeus에 표시할 결과가 없어 "
+        "캐시 기준 최저가(참고)만 표시합니다."
+    )
+    merged_w = [prefix] + list(dict.fromkeys([*tp_w, *ew]))
+    return unique_tp, merged_w
+
+
 def multi_source_search_flights(
     origin: str,
     destination: str,
@@ -539,7 +617,7 @@ def multi_source_search_flights(
     one_way: bool = False,
 ) -> tuple[list[dict], list[str], str]:
     """
-    Travelpayouts(캐시 최저가) 우선 → SerpApi Google Flights → Amadeus → Mock.
+    SerpApi Google Flights 우선 → Amadeus(429 등) → Travelpayouts 캐시(참고) → Mock.
     왕복 + date_flexibility_days>=2: 출발일±N·귀환일±N 각각 편도 검색 후 조합, 가격 싼 순.
     그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
     Returns (flights, warnings, flight_search_api) — 세 번째 값은 실제로 표시 데이터를 만든 API 설명 문자열.
@@ -555,61 +633,6 @@ def multi_source_search_flights(
 
     async def _run():
         preferred = _get_preferred_airlines(mileage_program)
-        tp_carry: list[str] = []
-        tp_token = (config.get("travelpayouts_api_token") or "").strip()
-        if tp_token:
-            tp_flights, tp_w = await search_travelpayouts_flights(
-                origin,
-                destination,
-                start_date,
-                end_date,
-                tp_token,
-                one_way=one_way,
-                seat_class=seat_class,
-                marker=(config.get("travelpayouts_marker") or "").strip(),
-            )
-            tp_carry = list(tp_w)
-            if tp_flights:
-                seen_tp: set = set()
-                unique_tp: list = []
-                for f in tp_flights:
-                    if f.get("round_trip"):
-                        key = (
-                            "rt",
-                            f.get("flight_id"),
-                            (f.get("outbound") or {}).get("departure"),
-                            (f.get("return") or {}).get("departure"),
-                        )
-                    else:
-                        key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
-                    if key not in seen_tp:
-                        seen_tp.add(key)
-                        unique_tp.append(f)
-                preferred_airlines = preferred
-                for f in unique_tp:
-                    ob = f.get("outbound") if f.get("round_trip") else f
-                    ret = f.get("return") if f.get("round_trip") else None
-                    f["mileage_eligible"] = bool(preferred_airlines) and (
-                        _is_preferred_airline(ob or {}, preferred_airlines)
-                        or (ret and _is_preferred_airline(ret, preferred_airlines))
-                    )
-                sort_fn_tp = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
-                unique_tp.sort(key=sort_fn_tp)
-                unique_tp, ew = await _enrich_direct_first_and_cheapest(
-                    unique_tp,
-                    origin,
-                    destination,
-                    start_date,
-                    end_date,
-                    config,
-                    one_way,
-                    seat_class,
-                    use_miles,
-                    mileage_program,
-                    preferred_airlines,
-                    "travelpayouts",
-                )
-                return unique_tp, list(dict.fromkeys(tp_w + ew)), True, "", "", FLIGHT_SEARCH_API_TRAVELPAYOUTS
 
         # 왕복 + 날짜 유연성: 2단계 (편도로 조합 추출 → 왕복 deep_search로 정확한 가격)
         if not one_way and flex >= 1:
@@ -617,7 +640,6 @@ def multi_source_search_flights(
                 origin, destination, start_date, end_date,
                 seat_class, use_miles, mileage_program, config, flex,
             )
-            warnings = tp_carry + warnings
             if flights and api_ok:
                 flights, ew = await _enrich_direct_first_and_cheapest(
                     flights, origin, destination, start_date, end_date,
@@ -634,7 +656,6 @@ def multi_source_search_flights(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
                 seat_class, use_miles, mileage_program, config, one_way=one_way,
             )
-            wa = tp_carry + wa
             if fl and ok:
                 fl, ew = await _enrich_direct_first_and_cheapest(
                     fl, origin, destination, start_date, end_date,
@@ -652,7 +673,7 @@ def multi_source_search_flights(
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_flights: list[dict] = []
-        all_warnings: list[str] = list(tp_carry)
+        all_warnings: list[str] = []
         api_responded_ok = False
         for r in results:
             if isinstance(r, Exception):
@@ -765,6 +786,35 @@ def multi_source_search_flights(
                 warnings.extend(amadeus_warnings)
             except Exception as e:
                 warnings.append(f"Amadeus fallback 실패: {e}")
+        # SerpApi·Amadeus 모두 결과 없음 → Travelpayouts 캐시 최저가(참고)
+        if not flights and (travelpayouts_api_token or "").strip():
+
+            def _run_tp_fallback():
+                async def _do():
+                    return await _travelpayouts_cache_fallback(
+                        origin,
+                        destination,
+                        start_date,
+                        end_date,
+                        config,
+                        one_way=one_way,
+                        seat_class=seat_class,
+                        use_miles=use_miles,
+                        mileage_program=mileage_program,
+                    )
+
+                return asyncio.run(_do())
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    tp_flights, tp_warnings = pool.submit(_run_tp_fallback).result()
+                if tp_flights:
+                    flights = tp_flights
+                    warnings = list(dict.fromkeys([*warnings, *tp_warnings]))
+                    return flights, warnings, FLIGHT_SEARCH_API_TRAVELPAYOUTS
+                warnings.extend(tp_warnings)
+            except Exception as e:
+                warnings.append(f"Travelpayouts 보조 검색 실패: {e}")
         # 0건 시: 날짜범위 메시지로 안내 (편도조합 방식 사용 시, Amadeus도 실패한 경우)
         if not flights and ob_range and ret_range and flex >= 1 and not one_way:
             warnings.append(
@@ -788,7 +838,7 @@ def multi_source_search_flights(
             pass
         elif api_responded_ok and not has_api_error:
             warnings.append(
-                "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, Travelpayouts/SerpApi 일시적 오류 등) "
+                "검색 결과가 없습니다. (가능한 원인: 노선/날짜 조합, SerpApi·Travelpayouts·Amadeus 일시적 오류 등) "
                 "예시(Mock) 데이터로 보여드립니다."
             )
         else:

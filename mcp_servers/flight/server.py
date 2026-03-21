@@ -1,4 +1,4 @@
-"""Flight MCP Server — Travelpayouts 우선, 이어서 SerpApi Google Flights."""
+"""Flight MCP Server — SerpApi 우선, Amadeus(429)·Travelpayouts(캐시 참고)·Mock 순."""
 
 import json
 import os
@@ -37,7 +37,7 @@ def search_flights(
     one_way: bool = False,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    Travelpayouts(캐시 최저가)가 설정되어 있으면 우선 사용, 없거나 결과가 없으면 SerpApi Google Flights.
+    SerpApi(Google Flights) 우선. SerpApi·Amadeus에 표시할 결과가 없을 때 Travelpayouts 캐시(토큰 설정 시) 참고.
     mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
     date_flexibility_days > 0 시 ±일 범위 내 여러 날짜 병렬 검색.
     one_way=True 시 편도만 검색 (왕복의 가는 편/오는 편 별도 검색용).

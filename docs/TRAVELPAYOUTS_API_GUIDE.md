@@ -217,8 +217,8 @@ trip-agent/
 ├── mcp_servers/
 │   ├── flight/
 │   │   ├── travelpayouts_clients.py   # cheap / direct API + Aviasales URL
-│   │   ├── api_clients.py             # SerpApi (Travelpayouts 결과 없을 때)
-│   │   └── services.py                # Travelpayouts → SerpApi → Amadeus → Mock
+│   │   ├── api_clients.py             # SerpApi (1순위)
+│   │   └── services.py                # SerpApi → Amadeus(429) → Travelpayouts 참고 → Mock
 │   └── rental_car/
 │       └── services.py                # TRAVELPAYOUTS_RENTAL_BOOKING_URL 시 최상단 카드
 ├── config.py                          # TRAVELPAYOUTS_* + SERPAPI_*
@@ -236,7 +236,7 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=
 
 ### 7.2 동작 요약
 
-1. **항공**: `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap` 우선; 직항 보강은 `/v1/prices/direct`. `TRAVELPAYOUTS_MARKER`로 카드에 Aviasales `booking_url` 생성.
+1. **항공**: SerpApi·Amadeus에 결과가 없을 때 `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(직항 보강 `/v1/prices/direct`)로 캐시 참고. `TRAVELPAYOUTS_MARKER`로 카드에 Aviasales `booking_url` 생성.
 2. **렌트카**: Data API 없음. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`에 대시보드에서 받은 링크를 넣으면 검색 결과 맨 위에 제휴 카드가 붙고, 이어서 EconomyBookings 비교 카드·참고 차종이 표시됨.
 3. **숙소(Hotellook)**: 본 문서 §4 참고 — 코드 연동은 별도 확장 시 진행.
 
@@ -247,7 +247,7 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=
 | 항목 | 내용 |
 |------|------|
 | **응답 형태** | `data`는 `{ 목적지: { "0": 티켓, … } }` 외에 `{ 목적지: 티켓 }`(인덱스 없음), `data: [ … ]`(배열), `price` 대신 `value`, `departure_at` 대신 `depart_date` 등 변형이 있습니다. 클라이언트(`travelpayouts_clients._collect_fare_rows`)에서 모두 수집합니다. |
-| **진단 메시지** | 검색 시 `[Travelpayouts 진단]` 접두가 붙은 경고로 연결 성공(HTTP 200)·401/403·429·JSON 실패·캐시 0건 등을 구분합니다. SerpApi로 이어질 때도 동일 경고가 유지됩니다. |
+| **진단 메시지** | Travelpayouts 단계가 실행되면 `[Travelpayouts 진단]` 접두로 연결 성공(HTTP 200)·401/403·429·JSON 실패·캐시 0건 등을 구분합니다. (SerpApi·Amadeus가 먼저 시도됩니다.) |
 | **Rate limit** | IP당 시간당 약 200 요청 (Data API) |
 | **가격 통화** | 기본 RUB. `currency` 파라미터로 usd, eur 등 지정. KRW 지원 여부 확인 필요 |
 | **캐시 데이터** | Flight Data API는 캐시 기반. 실시간 검색은 별도 지원 요청 필요 |

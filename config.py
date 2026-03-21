@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     rental_car_mcp_url: str = "http://localhost:8003/mcp"
     transit_mcp_url: str = "http://localhost:8004/mcp"
 
-    # Flight API - Travelpayouts Data API (캐시 최저가, 1순위). Aviasales 제휴 예약 링크용 marker
+    # Flight API - Travelpayouts Data API (SerpApi·Amadeus 실패 시 캐시 참고). Aviasales 제휴 예약 링크용 marker
     travelpayouts_api_token: str = ""
     travelpayouts_marker: str = ""
     # 렌트카: Travelpayouts 대시보드 Link Generator로 만든 제휴 URL (선택, 설정 시 검색 결과 최상단)
