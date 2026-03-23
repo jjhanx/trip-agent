@@ -130,6 +130,9 @@ def _mileage_program_to_airline_codes(mileage_program: str | None) -> list[str]:
 
 AMADEUS_RATE_LIMIT_DELAY = 0.25  # 10 TPS 대응: 호출 간 최소 250ms
 
+# 마일리지 계획: 대한항공·아시아나 운임이 max 상한에 밀려 빠지지 않도록 항상 전용 검색 병합
+AMADEUS_MILEAGE_PLANNING_AIRLINE_CODES = ["KE", "OZ"]
+
 
 async def search_amadeus(
     origin: str,
@@ -366,9 +369,9 @@ async def search_amadeus_with_preferred(
     seat_class: str = "economy",
 ) -> tuple[list[dict], list[str]]:
     """
-    선호 항공사(대한항공/아시아나) 보강: 일반 검색 + 선호 항공사 전용 검색 병합.
-    Amadeus는 가격순으로 반환하므로 대한항공이 상대적으로 비싸면 누락될 수 있어,
-    마일리지 프로그램이 있으면 includedAirlineCodes로 전용 검색을 추가 병합.
+    일반 검색 + 대한항공·아시아나(KE,OZ) 전용 includedAirlineCodes 검색을 항상 병합.
+    Amadeus는 가격순 상한으로 KE/OZ가 빠질 수 있어 마일리지 계획용으로 보강한다.
+    마일리지 프로그램이 스카이패스·아시아나 외(예: Miles&More)이면 해당 항공사 전용 검색을 추가 병합.
     date_pairs: 검색할 (출발일, 귀환일) 쌍 목록 (services에서 계산해 전달).
     """
     preferred_codes = _mileage_program_to_airline_codes(mileage_program)
@@ -387,28 +390,52 @@ async def search_amadeus_with_preferred(
             included_airline_codes=None,
         )
 
-    if not preferred_codes:
-        return main_flights, main_warnings
+    if len(date_pairs) > 1:
+        supplement_pairs = date_pairs[:2]
+    elif date_pairs:
+        supplement_pairs = [date_pairs[0]]
+    else:
+        supplement_pairs = [(start_date, end_date)]
 
     await asyncio.sleep(AMADEUS_RATE_LIMIT_DELAY)
-    supplement_pairs = date_pairs[:2] if date_pairs else [(start_date, end_date)]
     if len(supplement_pairs) == 1:
         ob_d, ret_d = supplement_pairs[0]
-        supp_flights, supp_warnings = await search_amadeus(
+        ke_oz_flights, ke_oz_warnings = await search_amadeus(
             origin, destination, ob_d, ret_d, client_id, client_secret,
             one_way=one_way, seat_class=seat_class,
-            included_airline_codes=preferred_codes, max_offers=15,
+            included_airline_codes=AMADEUS_MILEAGE_PLANNING_AIRLINE_CODES, max_offers=15,
         )
     else:
-        supp_flights, supp_warnings = await search_amadeus_multi_pairs(
+        ke_oz_flights, ke_oz_warnings = await search_amadeus_multi_pairs(
             origin, destination, supplement_pairs, client_id, client_secret,
             one_way=one_way, seat_class=seat_class, max_offers_per_pair=15,
-            included_airline_codes=preferred_codes,
+            included_airline_codes=AMADEUS_MILEAGE_PLANNING_AIRLINE_CODES,
         )
+
+    extra_flights: list[dict] = []
+    extra_warnings = list(ke_oz_warnings)
+    pref_upper = {p.upper()[:2] for p in preferred_codes}
+    if preferred_codes and not pref_upper.issubset({"KE", "OZ"}):
+        await asyncio.sleep(AMADEUS_RATE_LIMIT_DELAY)
+        if len(supplement_pairs) == 1:
+            ob_d, ret_d = supplement_pairs[0]
+            prog_flights, prog_warnings = await search_amadeus(
+                origin, destination, ob_d, ret_d, client_id, client_secret,
+                one_way=one_way, seat_class=seat_class,
+                included_airline_codes=preferred_codes, max_offers=15,
+            )
+        else:
+            prog_flights, prog_warnings = await search_amadeus_multi_pairs(
+                origin, destination, supplement_pairs, client_id, client_secret,
+                one_way=one_way, seat_class=seat_class, max_offers_per_pair=15,
+                included_airline_codes=preferred_codes,
+            )
+        extra_flights.extend(prog_flights)
+        extra_warnings.extend(prog_warnings)
 
     seen: set = set()
     merged: list[dict] = []
-    for f in main_flights + supp_flights:
+    for f in main_flights + ke_oz_flights + extra_flights:
         if f.get("round_trip"):
             ob, ret = f.get("outbound") or {}, f.get("return") or {}
             key = (ob.get("departure"), ob.get("arrival"), ret.get("departure"), ret.get("arrival"))
@@ -418,5 +445,5 @@ async def search_amadeus_with_preferred(
             seen.add(key)
             merged.append(f)
 
-    combined_warnings = list(dict.fromkeys(main_warnings + supp_warnings))
+    combined_warnings = list(dict.fromkeys(main_warnings + extra_warnings))
     return merged, combined_warnings

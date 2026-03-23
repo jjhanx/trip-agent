@@ -37,8 +37,9 @@ def search_flights(
     one_way: bool = False,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
-    SerpApi(Google Flights) 우선. SerpApi·Amadeus에 표시할 결과가 없을 때 Travelpayouts 캐시(토큰 설정 시) 참고.
-    mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 노출.
+    SerpApi(Google Flights) 우선. 결과에 대한항공(KE)·아시아나(OZ)가 없으면 SerpApi include_airlines로 보강 병합.
+    SerpApi·Amadeus에 표시할 결과가 없을 때 Travelpayouts 캐시(토큰 설정 시) 참고.
+    mileage_program이 있으면 해당 마일리지 적립 항공사 편 우선 정렬·배지.
     date_flexibility_days > 0 시 ±일 범위 내 여러 날짜 병렬 검색.
     one_way=True 시 편도만 검색 (왕복의 가는 편/오는 편 별도 검색용).
 

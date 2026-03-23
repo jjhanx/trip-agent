@@ -68,8 +68,10 @@ AMADEUS_CLIENT_SECRET=발급받은_API_Secret
 - **테스트(test.api.amadeus.com)**: 무료, **제한된 캐시 데이터**. 노선/항공사에 따라 대한항공·직항 노선이 누락될 수 있음. 직항 전용(nonStop) 검색이 0건이면 메인 검색 결과(직항 포함 가능)를 표시.
 - **프로덕션(api.amadeus.com)**: 유료·실시간 전체 데이터. Production API Key 발급 후 사용.
 
-### 선호 항공사(Skypass·아시아나) 보강
-마일리지 프로그램(Skypass, Asiana 등)을 선택한 경우, Amadeus는 **일반 검색 + 선호 항공사 전용 검색**을 병합합니다. Amadeus가 가격순으로 반환하므로 대한항공이 상대적으로 비싸면 기본 결과에서 누락될 수 있어, `includedAirlineCodes=KE`(또는 OZ)로 추가 검색해 병합합니다. 결과는 선호 직항 → 선호 경유 → 그 외 순으로 정렬됩니다.
+### 대한항공·아시아나(KE, OZ) 보강 (마일리지 계획)
+- **SerpApi**: 메인 Google Flights 결과에 KE 또는 OZ 편이 없으면, 동일 조건으로 `include_airlines=KE` / `OZ` 보조 검색을 **추가 호출**해 병합합니다. (노선에 해당 항공사가 없으면 0건 유지.)
+- **Amadeus**(SerpApi 429 fallback): **항상** 일반 검색에 더해 `includedAirlineCodes=KE,OZ` 전용 검색을 병합합니다. 마일리지 프로그램이 스카이패스·아시아나가 아닌 경우(예: Miles&More)에는 해당 항공사 코드로 **추가** 전용 검색을 한 번 더 병합합니다.
+- UI의 `mileage_eligible` 배지는 KE/OZ 편은 프로그램 미선택이어도 표시됩니다.
 
 ---
 
@@ -98,8 +100,9 @@ Trip Agent의 항공편 검색 모듈은 다음 순서로 동작합니다.
    - **편도(One-way)**: `type=2` (귀환일 검색 제외)
    - **다구간(Multi-city)**: `type=3` (최대 20개 구간의 출도착지/날짜 파라미터 배열 조합)
    - **날짜 유연성 (Date Flexibility)**: 2단계 검색. 1) 편도 검색으로 출발일±N·귀환일±N 중 가능한 날짜 조합 추출. 2) 추출된 조합별 왕복 검색(`deep_search=true`)으로 Google Flights와 동일한 실제 왕복가 획득. (최대 12쌍 왕복 검색)
+   - **대한항공·아시아나 보강**: 메인 결과에 KE 또는 OZ가 없으면 `include_airlines`로 해당 항공사만 추가 검색해 병합합니다. (SerpApi 호출이 0~2회 늘 수 있음.)
    - 디버깅을 위해 `mcp_servers/flight/api_clients.py` 파일 내의 `DEBUG_SERPAPI = True` 플래그를 통해 검색 요청/응답 결과를 터미널에서 확인할 수 있습니다.
-2. **Amadeus Fallback**: SerpApi 429(한도 초과) 등 **한도 관련** 응답이 감지되고 `AMADEUS_CLIENT_ID`/`AMADEUS_CLIENT_SECRET`이 설정되어 있으면 Amadeus Flight Offers Search API를 호출합니다.
+2. **Amadeus Fallback**: SerpApi 429(한도 초과) 등 **한도 관련** 응답이 감지되고 `AMADEUS_CLIENT_ID`/`AMADEUS_CLIENT_SECRET`이 설정되어 있으면 Amadeus Flight Offers Search API를 호출합니다. 이때 **일반 검색 + `includedAirlineCodes=KE,OZ` 전용 검색**을 항상 병합합니다.
 3. **Travelpayouts (참고)**: SerpApi·Amadeus **모두** 표시할 결과가 없고 `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(및 직항 보강용 `/v1/prices/direct`)로 캐시 최저가를 조회합니다. Data API는 문서상 **도시 IATA**를 기대하는 경우가 많아, 입력이 공항 코드(예: ICN→SEL, MXP→MIL)이면 **같은 엔드포인트로 도시 코드 조합을 한 번 더** 시도합니다. 특정 일(yyyy-mm-dd)에 캐시가 없으면 **같은 URL에 출발·귀환을 yyyy-mm(월)**로 한 번 더 묻는 것은 API 관례이며, 그래도 비면 **`/v2/prices/week-matrix`**(`show_to_affiliates=false`)로 주변 날짜 매트릭스를 보조 조회합니다. **Aviasales 검색 링크와 구간 표시용 코드는 사용자가 입력한 공항 코드를 유지**합니다. 이 단계에서 `[Travelpayouts 진단]` 등으로 연결·토큰·캐시 0건이 구분되어 표시될 수 있습니다. `flight_search_api`는 **최종적으로 화면에 쓰인** 소스를 가리킵니다.
 4. **Mock 데이터 (최후의 보루)**: 위 단계가 모두 실패하거나 출발일이 너무 멀어 예약 불가 구간이면 Mock 데이터를 표시합니다. (실제 데이터가 하나라도 나온 경우 Mock으로 덮어쓰지 않습니다.)
 

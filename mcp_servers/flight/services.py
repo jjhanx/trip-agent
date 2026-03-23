@@ -16,6 +16,9 @@ FLIGHT_SEARCH_API_SERPAPI = "SerpApi — GET https://serpapi.com/search.json (Go
 FLIGHT_SEARCH_API_AMADEUS = "Amadeus — Flight Offers Search API (test/production)"
 FLIGHT_SEARCH_API_MOCK = "내부 Mock (예시 항공편 데이터)"
 
+# 마일리지(스카이패스·아시아나 클럽 등) 계획용 — 결과에 반드시 반영할 대한항공·아시아나(IATA)
+MILEAGE_PLANNING_CARRIER_CODES = ("KE", "OZ")
+
 
 def _flight_key(f: dict) -> tuple:
     """중복 제거용 flight 키."""
@@ -110,12 +113,7 @@ async def _enrich_direct_first_and_cheapest(
 
     # 3) 직항 mileage_eligible + 정렬
     for f in direct_flights:
-        ob = f.get("outbound") if f.get("round_trip") else f
-        ret = f.get("return") if f.get("round_trip") else None
-        f["mileage_eligible"] = bool(preferred_airlines) and (
-            _is_preferred_airline(ob or {}, preferred_airlines)
-            or (ret and _is_preferred_airline(ret, preferred_airlines))
-        )
+        f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
     direct_flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
 
     direct_set = {_flight_key(f) for f in direct_flights}
@@ -200,6 +198,60 @@ def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
     return frozenset()
 
 
+def _flight_includes_carrier(flight: dict, carrier_code: str) -> bool:
+    """편/왕복 카드에 해당 IATA(KE, OZ 등) 운항·편명이 포함되는지."""
+    cc = carrier_code.upper()[:2]
+    if len(cc) != 2:
+        return False
+
+    def leg_matches(leg: dict) -> bool:
+        if not leg:
+            return False
+        fn = str(leg.get("flight_number") or "").upper().replace(" ", "")
+        if len(fn) >= 2 and fn.startswith(cc):
+            return True
+        air = str(leg.get("airline") or "").lower()
+        if cc == "KE" and ("korean" in air or air in ("ke", "koreanair")):
+            return True
+        if cc == "OZ" and ("asiana" in air or air in ("oz", "asianaair")):
+            return True
+        for seg in leg.get("segments") or []:
+            sfn = str(seg.get("flight_number") or "").upper().replace(" ", "")
+            if len(sfn) >= 2 and sfn.startswith(cc):
+                return True
+            sa = str(seg.get("airline") or "").lower()
+            if cc == "KE" and "korean" in sa:
+                return True
+            if cc == "OZ" and "asiana" in sa:
+                return True
+        return False
+
+    if flight.get("round_trip"):
+        ob = flight.get("outbound") or {}
+        ret = flight.get("return") or {}
+        return leg_matches(ob) or leg_matches(ret)
+    return leg_matches(flight)
+
+
+def _is_ke_or_oz_flight(flight: dict) -> bool:
+    return _flight_includes_carrier(flight, "KE") or _flight_includes_carrier(flight, "OZ")
+
+
+def _mileage_eligible_for_flight(flight: dict, preferred_airlines: frozenset[str]) -> bool:
+    """UI 배지: 대한항공·아시아나는 프로그램 미선택이어도 마일리지 후보로 표시. 그 외는 선택 프로그램 일치 시."""
+    if _is_ke_or_oz_flight(flight):
+        return True
+    if not preferred_airlines:
+        return False
+    if flight.get("round_trip"):
+        ob = flight.get("outbound") or {}
+        ret = flight.get("return") or {}
+        return _is_preferred_airline(ob, preferred_airlines) or (
+            bool(ret) and _is_preferred_airline(ret, preferred_airlines)
+        )
+    return _is_preferred_airline(flight, preferred_airlines)
+
+
 def _is_preferred_airline(flight: dict, preferred: frozenset[str]) -> bool:
     """해당 편이 선호 항공사(마일리지 적립 항공사)인지."""
     if not preferred:
@@ -247,6 +299,96 @@ def _recommend_sort_key(
     return (cat, dur, price)
 
 
+async def _merge_ke_oz_serpapi_supplements(
+    flights: list[dict],
+    warnings: list[str],
+    origin: str,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    api_key: str,
+    seat_class: str,
+    one_way: bool,
+    *,
+    deep_search: bool = False,
+) -> tuple[list[dict], list[str]]:
+    """
+    일반 Google Flights 결과 상위에 KE/OZ가 없을 수 있어 SerpApi `include_airlines`로 보강 검색 후 병합.
+    (마일리지 계획용 — 노선에 해당 항공사가 없으면 0건 유지)
+    """
+    if not (api_key or "").strip():
+        return flights, warnings
+    codes_needed: list[str] = []
+    for cc in MILEAGE_PLANNING_CARRIER_CODES:
+        if not any(_flight_includes_carrier(f, cc) for f in flights):
+            codes_needed.append(cc)
+    if not codes_needed:
+        return flights, warnings
+
+    seen: set = set()
+    for f in flights:
+        if f.get("round_trip"):
+            key = (
+                "rt",
+                f.get("flight_id"),
+                (f.get("outbound") or {}).get("departure"),
+                (f.get("return") or {}).get("departure"),
+            )
+        else:
+            key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+        seen.add(key)
+    codes = codes_needed
+
+    async def _fetch(code: str) -> tuple[list[dict], list[str]]:
+        try:
+            return await search_serpapi(
+                origin,
+                destination,
+                start_date,
+                end_date,
+                api_key,
+                seat_class,
+                one_way=one_way,
+                deep_search=deep_search,
+                non_stop=False,
+                include_airlines=code,
+            )
+        except Exception as e:
+            return [], [f"대한항공·아시아나 보강 검색({code}) 오류: {e}"]
+
+    gathered = await asyncio.gather(*[_fetch(c) for c in codes], return_exceptions=True)
+    added = 0
+    for i, code in enumerate(codes):
+        r = gathered[i]
+        if isinstance(r, Exception):
+            warnings.append(f"{code} 보강 검색 오류: {r}")
+            continue
+        extra_flights, w = r
+        warnings.extend(w)
+        for f in extra_flights:
+            if f.get("round_trip"):
+                key = (
+                    "rt",
+                    f.get("flight_id"),
+                    (f.get("outbound") or {}).get("departure"),
+                    (f.get("return") or {}).get("departure"),
+                )
+            else:
+                key = (f.get("airline"), f.get("flight_number"), f.get("departure"))
+            if key in seen:
+                continue
+            seen.add(key)
+            flights.append(f)
+            added += 1
+
+    if added:
+        warnings.append(
+            f"마일리지 계획용 SerpApi 항공사 필터(include_airlines={','.join(codes)})로 "
+            f"대한항공·아시아나 편 {added}건을 추가했습니다."
+        )
+    return flights, warnings
+
+
 async def _search_round_trip_flex_2phase(
     origin: str,
     destination: str,
@@ -275,14 +417,14 @@ async def _search_round_trip_flex_2phase(
     tasks_out = [
         _search_serpapi_only(
             origin, destination, d, d, seat_class, use_miles,
-            mileage_program, config, one_way=True,
+            mileage_program, config, one_way=True, skip_ke_oz_supplement=True,
         )
         for d in od_dates
     ]
     tasks_ret = [
         _search_serpapi_only(
             destination, origin, r, r, seat_class, use_miles,
-            mileage_program, config, one_way=True,
+            mileage_program, config, one_way=True, skip_ke_oz_supplement=True,
         )
         for r in rd_dates
     ]
@@ -412,12 +554,20 @@ async def _search_round_trip_flex_2phase(
         if all_flights:
             all_warnings.append("일반 검색으로 결과를 찾았습니다. (deep_search 0건)")
 
+    all_flights, all_warnings = await _merge_ke_oz_serpapi_supplements(
+        all_flights,
+        all_warnings,
+        origin,
+        destination,
+        start_date,
+        end_date,
+        api_key,
+        seat_class,
+        one_way=False,
+        deep_search=True,
+    )
     for f in all_flights:
-        ob = f.get("outbound") or {}
-        ret = f.get("return") or {}
-        f["mileage_eligible"] = bool(preferred) and (
-            _is_preferred_airline(ob, preferred) or _is_preferred_airline(ret, preferred)
-        )
+        f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred)
     all_flights.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
     return all_flights[:100], list(dict.fromkeys(all_warnings)), api_responded, ob_range, ret_range
 
@@ -477,8 +627,10 @@ async def _search_serpapi_only(
     mileage_program: str | None,
     config: dict,
     one_way: bool = False,
+    skip_ke_oz_supplement: bool = False,
 ) -> tuple[list[dict], list[str], bool]:
-    """SerpApi Google Flights 호출 (대한항공·아시아나 포함).
+    """SerpApi Google Flights 호출. 마일리지 계획용 KE/OZ가 없으면 include_airlines 보강 병합.
+    skip_ke_oz_supplement=True: 날짜 다건 병렬 검색 등에서 호출 후 상위에서 한 번만 보강.
     one_way=True 시 편도 검색.
     Returns (flights, warnings, api_responded_ok)."""
     api_key = config.get("serpapi_api_key", "")
@@ -507,15 +659,23 @@ async def _search_serpapi_only(
             seen.add(key)
             unique.append(f)
 
-    # mileage_eligible 표시 및 추천순 정렬 (검색 결과 있을 때 Mock 보충 안 함)
+    if not skip_ke_oz_supplement:
+        unique, warnings = await _merge_ke_oz_serpapi_supplements(
+            unique,
+            warnings,
+            origin,
+            destination,
+            start_date,
+            end_date,
+            api_key,
+            seat_class,
+            one_way,
+            deep_search=False,
+        )
+
     preferred_airlines = _get_preferred_airlines(mileage_program)
     for f in unique:
-        ob = f.get("outbound") if f.get("round_trip") else f
-        ret = f.get("return") if f.get("round_trip") else None
-        f["mileage_eligible"] = bool(preferred_airlines) and (
-            _is_preferred_airline(ob, preferred_airlines)
-            or (ret and _is_preferred_airline(ret, preferred_airlines))
-        )
+        f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
     sort_fn = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
     unique.sort(key=sort_fn)
 
@@ -571,12 +731,7 @@ async def _travelpayouts_cache_fallback(
             unique_tp.append(f)
 
     for f in unique_tp:
-        ob = f.get("outbound") if f.get("round_trip") else f
-        ret = f.get("return") if f.get("round_trip") else None
-        f["mileage_eligible"] = bool(preferred_airlines) and (
-            _is_preferred_airline(ob or {}, preferred_airlines)
-            or (ret and _is_preferred_airline(ret, preferred_airlines))
-        )
+        f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
     unique_tp.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
     unique_tp, ew = await _enrich_direct_first_and_cheapest(
         unique_tp,
@@ -618,6 +773,7 @@ def multi_source_search_flights(
 ) -> tuple[list[dict], list[str], str]:
     """
     SerpApi Google Flights 우선 → Amadeus(429 등) → Travelpayouts 캐시(참고) → Mock.
+    대한항공(KE)·아시아나(OZ)는 마일리지 계획상 항상 노출되도록 SerpApi 보강·Amadeus 병합을 수행.
     왕복 + date_flexibility_days>=2: 출발일±N·귀환일±N 각각 편도 검색 후 조합, 가격 싼 순.
     그 외: 기존 (날짜쌍 왕복) 또는 편도 검색.
     Returns (flights, warnings, flight_search_api) — 세 번째 값은 실제로 표시 데이터를 만든 API 설명 문자열.
@@ -667,7 +823,7 @@ def multi_source_search_flights(
         tasks = [
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
-                mileage_program, config, one_way=one_way,
+                mileage_program, config, one_way=one_way, skip_ke_oz_supplement=True,
             )
             for ds, de in date_pairs
         ]
@@ -694,13 +850,21 @@ def multi_source_search_flights(
             if key not in seen:
                 seen.add(key)
                 unique.append(f)
-        for f in unique:
-            ob = f.get("outbound") if f.get("round_trip") else f
-            ret = f.get("return") if f.get("round_trip") else None
-            f["mileage_eligible"] = bool(preferred) and (
-                _is_preferred_airline(ob, preferred)
-                or (ret and _is_preferred_airline(ret, preferred))
+        if unique and (config.get("serpapi_api_key") or "").strip():
+            unique, all_warnings = await _merge_ke_oz_serpapi_supplements(
+                unique,
+                all_warnings,
+                origin,
+                destination,
+                start_date,
+                end_date,
+                config["serpapi_api_key"].strip(),
+                seat_class,
+                one_way,
+                deep_search=False,
             )
+        for f in unique:
+            f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred)
         unique.sort(key=lambda x: _recommend_sort_key(x, preferred, use_miles))
         if unique and api_responded_ok:
             unique, ew = await _enrich_direct_first_and_cheapest(
@@ -775,12 +939,7 @@ def multi_source_search_flights(
                     warnings.extend(amadeus_warnings)
                     preferred_airlines = _get_preferred_airlines(mileage_program)
                     for f in flights:
-                        ob = f.get("outbound") if f.get("round_trip") else f
-                        ret = f.get("return") if f.get("round_trip") else None
-                        f["mileage_eligible"] = bool(preferred_airlines) and (
-                            _is_preferred_airline(ob or {}, preferred_airlines)
-                            or (ret and _is_preferred_airline(ret, preferred_airlines))
-                        )
+                        f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
                     flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
                     return flights, warnings, FLIGHT_SEARCH_API_AMADEUS
                 warnings.extend(amadeus_warnings)
@@ -829,7 +988,7 @@ def multi_source_search_flights(
         )
         preferred_airlines = _get_preferred_airlines(mileage_program)
         for f in flights:
-            f["mileage_eligible"] = bool(preferred_airlines) and _is_preferred_airline(f, preferred_airlines)
+            f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
         flights.sort(key=lambda x: _recommend_sort_key(x, preferred_airlines, use_miles))
         api_error_keywords = ("인증", "API 키가", "토큰", "검색 실패", "401", "403", "404", "500", "API 오류")
         has_quota_msg = any("한도" in w or "429" in w for w in warnings)

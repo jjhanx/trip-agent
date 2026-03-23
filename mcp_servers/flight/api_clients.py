@@ -242,9 +242,11 @@ async def search_serpapi(
     one_way: bool = False,
     deep_search: bool = False,
     non_stop: bool = False,
+    include_airlines: str | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     SerpApi Google Flights 검색. 대한항공·아시아나 포함.
+    include_airlines: IATA 코드 쉼표 구분(예: KE, OZ). SerpApi `include_airlines`와 동일.
     one_way=True 시 편도만 검색 (type=2).
     Returns (flights, warnings)
     """
@@ -272,6 +274,8 @@ async def search_serpapi(
         params["deep_search"] = "true"  # Google Flights와 동일한 결과·가격
     if non_stop:
         params["stops"] = "1"  # 1 = Nonstop only (직항만)
+    if include_airlines and str(include_airlines).strip():
+        params["include_airlines"] = str(include_airlines).strip().upper()
 
     if DEBUG_SERPAPI:
         print(f"[SerpApi] Request: {o} -> {d}, {start_date}" + (f" ~ {end_date}" if not one_way else " (편도)"))
