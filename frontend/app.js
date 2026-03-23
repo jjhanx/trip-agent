@@ -962,29 +962,31 @@ function renderFlights(flights, warnings, searchApiLabel) {
   list.innerHTML = currentFlights.map((f, i) => {
     const isRt = f.round_trip === true;
     const ob = isRt ? (f.outbound || f) : f;
-    const ret = isRt ? (f.return || {}) : null;
-    const destLabel = (ob.destination_label ? `${ob.destination || ''} (${ob.destination_label})` : ob.destination) || (f.destination_label ? `${f.destination || ''} (${f.destination_label})` : f.destination) || '';
-    const route = isRt ? `${ob.origin || ''} ⇌ ${destLabel}` : `${f.origin || ''} → ${destLabel}`;
-    const timeRange = isRt ? `${fmtFlightDateTime(ob.departure)} ~ ${fmtFlightDateTime(ret.arrival || ob.arrival)}` : `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
-    const durOb = ob.duration_hours || 0;
-    const durRet = ret.duration_hours || 0;
+    const ret = isRt ? (f.return || null) : null;
+    const destLabel = (ob?.destination_label ? `${ob.destination || ''} (${ob.destination_label})` : ob?.destination) || (f.destination_label ? `${f.destination || ''} (${f.destination_label})` : f.destination) || '';
+    const route = isRt ? `${ob?.origin || ''} ⇌ ${destLabel}` : `${f.origin || ''} → ${destLabel}`;
+    const timeRange = isRt
+      ? `${fmtFlightDateTime(ob?.departure)} ~ ${fmtFlightDateTime((ret && ret.arrival) || ob?.arrival)}`
+      : `${fmtFlightDateTime(f.departure)} ~ ${fmtFlightDateTime(f.arrival)}`;
+    const durOb = ob?.duration_hours || 0;
+    const durRet = ret?.duration_hours || 0;
     const totalDur = isRt ? durOb + durRet : durOb;
     const duration = totalDur ? ` · 약 ${totalDur}시간` : '';
     const priceDisplay = (f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일') + (isRt ? ' (왕복)' : '');
     const mileageBadge = f.mileage_eligible ? '<span class="flight-badge mileage">마일리지 적립</span>' : '';
-    const mockBadge = (ob.source === 'mock_reference' || ob.source === 'mock' || f.source === 'mock')
+    const mockBadge = (ob?.source === 'mock_reference' || ob?.source === 'mock' || f.source === 'mock')
       ? '<span class="flight-badge" style="background:#fff3cd; color:#856404; margin-left: 5px;">예시(Mock) 참고용</span>'
       : '';
 
     // Segments and layovers details
     let detailsHtml = '';
-    const segsForDetails = isRt ? [...(ob.segments || []), ...(ret.segments || [])] : (f.segments || []);
+    const segsForDetails = isRt ? [...(ob?.segments || []), ...(ret?.segments || [])] : (f.segments || []);
     if (segsForDetails.length > 0) {
       detailsHtml += `<div class="flight-details hidden" id="flight-details-${i}" style="margin-top: 1rem; padding: 1rem; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; background: rgba(0,0,0,0.15); border-radius: 0 0 8px 8px;">`;
 
       let isReturnFlightStarted = false;
-      const outboundDateStart = ob.departure ? ob.departure.substring(0, 10) : "";
-      const obSegCount = (ob.segments || []).length;
+      const outboundDateStart = ob?.departure ? ob.departure.substring(0, 10) : "";
+      const obSegCount = (ob?.segments || []).length;
 
       segsForDetails.forEach((seg, sIdx) => {
         const dAirport = seg.departure_airport?.name || seg.departure_airport?.id || "";
@@ -1007,7 +1009,7 @@ function renderFlights(flights, warnings, searchApiLabel) {
             isReturnFlightStarted = true;
             detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
             detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
-          } else if (dAirport.includes(ob.destination) || (seg.departure_airport?.id || '') === (ob.destination || '')) {
+          } else if (dAirport.includes(ob?.destination || '') || (seg.departure_airport?.id || '') === (ob?.destination || '')) {
             isReturnFlightStarted = true;
             detailsHtml += `<hr style="border-color: rgba(255,255,255,0.2); margin: 1rem 0;">`;
             detailsHtml += `<div style="color: var(--accent); font-weight: bold; margin-bottom: 0.5rem;">[오는 편]</div>`;
@@ -1051,12 +1053,12 @@ function renderFlights(flights, warnings, searchApiLabel) {
         </div>`;
     }
 
-    const routeDisplay = isRt ? route : (state.travelInput?.trip_type === 'round_trip' ? `${ob.origin || ''} ⇌ ${destLabel}` : route);
+    const routeDisplay = isRt ? route : (state.travelInput?.trip_type === 'round_trip' ? `${ob?.origin || ''} ⇌ ${destLabel}` : route);
 
     return `
     <div class="option-item" data-idx="${i}" style="flex-direction: column; align-items: stretch; padding: 0;">
       <div class="flight-summary" style="padding: 1rem;">
-        <h3>${ob.airline || '항공사'} ${ob.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
+        <h3>${ob?.airline || '항공사'} ${ob?.flight_number || ''} ${mileageBadge}${mockBadge}</h3>
         <p class="flight-route">${routeDisplay}</p>
         <p class="flight-time">${timeRange}${duration}</p>
         <p class="price">${priceDisplay}</p>
