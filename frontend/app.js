@@ -1388,6 +1388,39 @@ function isoToDatetimeLocal(iso) {
   return s.length >= 16 ? s.slice(0, 16) : '';
 }
 
+/** YYYY-MM-DDTHH:MM(:SS)? → 로컬 Date (타임존 접미사 없을 때 구성요소 파싱). */
+function parseIsoLocalToDate(iso) {
+  if (!iso || typeof iso !== 'string') return null;
+  const m = iso.trim().replace(' ', 'T').match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/
+  );
+  if (!m) return null;
+  const y = +m[1], mo = +m[2] - 1, d = +m[3], h = +m[4], mi = +m[5], s = +(m[6] || 0);
+  const dt = new Date(y, mo, d, h, mi, s);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatDatetimeLocalFromDate(dt) {
+  if (!dt) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+/** 도착 +1h → 픽업, 출발 -2h → 반납 */
+function rentalPickupFromArrival(iso) {
+  const dt = parseIsoLocalToDate(iso);
+  if (!dt) return isoToDatetimeLocal(iso);
+  dt.setHours(dt.getHours() + 1);
+  return formatDatetimeLocalFromDate(dt);
+}
+
+function rentalDropoffBeforeDeparture(iso) {
+  const dt = parseIsoLocalToDate(iso);
+  if (!dt) return isoToDatetimeLocal(iso);
+  dt.setHours(dt.getHours() - 2);
+  return formatDatetimeLocalFromDate(dt);
+}
+
 /** 항공 확정 일정 → 렌트 검색 폼 (force면 항상 덮어씀). */
 function fillRentalSearchFormFromFlight(force) {
   const panel = $('#rental-search-panel');
@@ -1407,18 +1440,18 @@ function fillRentalSearchFormFromFlight(force) {
     const first = sf.legs[0];
     const last = sf.legs[sf.legs.length - 1];
     const arr = first.arrival || first.departure;
-    if (arr) pEl.value = isoToDatetimeLocal(arr);
+    if (arr) pEl.value = rentalPickupFromArrival(arr);
     const dep = last.departure || last.arrival;
-    if (dep) dEl.value = isoToDatetimeLocal(dep);
+    if (dep) dEl.value = rentalDropoffBeforeDeparture(dep);
     const ld = (first.destination || '').toString().toUpperCase().slice(0, 3);
     if (iEl && ld.length === 3) iEl.value = ld;
     return;
   }
   if (iEl && iata.length === 3) iEl.value = iata;
-  if (sf?.outbound?.arrival) pEl.value = isoToDatetimeLocal(sf.outbound.arrival);
-  else if (ti?.start_date) pEl.value = `${ti.start_date}T12:00`;
-  if (sf?.return?.departure) dEl.value = isoToDatetimeLocal(sf.return.departure);
-  else if (ti?.end_date) dEl.value = `${ti.end_date}T10:00`;
+  if (sf?.outbound?.arrival) pEl.value = rentalPickupFromArrival(sf.outbound.arrival);
+  else if (ti?.start_date) pEl.value = rentalPickupFromArrival(`${ti.start_date}T12:00`);
+  if (sf?.return?.departure) dEl.value = rentalDropoffBeforeDeparture(sf.return.departure);
+  else if (ti?.end_date) dEl.value = rentalDropoffBeforeDeparture(`${ti.end_date}T10:00`);
 }
 
 function renderRentalOptions(items) {

@@ -93,7 +93,7 @@ state.localTransport = Array.isArray(data?.local_transport) ? data.local_transpo
 - Booking.com Cars 등 파트너 API
 
 ### 4.4 Session → Rental Car payload (agents/session/executor.py)
-- `_build_local_transport_payload`: `pickup_datetime`(도착), `dropoff_datetime`(귀국 출발 등), `pickup_airport_iata`
+- `_build_local_transport_payload`: `pickup_datetime` = **도착 +1시간**, `dropoff_datetime` = **출발(귀국 등) -2시간**, `pickup_airport_iata`. `date_time`은 대중교통용으로 **실제 도착** 시각 유지
 - `_merge_rental_search`: 프론트 `rental_search` `{ pickup_datetime, dropoff_datetime, pickup_iata }` 로 덮어쓰기
 - `_rental_car_fallback_json`: Agent 실패 시 동일 로직으로 JSON 생성
 

@@ -4,7 +4,7 @@
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from a2a.server.agent_execution import RequestContext
 from a2a.server.events import EventQueue
@@ -72,6 +72,38 @@ def _transit_trip_days(start_d: str, end_d: str) -> int:
         return 1
 
 
+def _parse_local_dt(s: str) -> datetime | None:
+    """항공 응답의 'YYYY-MM-DDTHH:MM(:SS)?' 로컬 시각 파싱."""
+    if not s or not isinstance(s, str) or len(s) < 16:
+        return None
+    t = s.strip().replace(" ", "T")
+    if len(t) >= 19:
+        try:
+            return datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(t[:16], "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+
+
+def _rental_pickup_after_arrival(arrival_str: str | None) -> str | None:
+    """도착 시각 + 1시간 → 렌트 픽업."""
+    dt = _parse_local_dt(arrival_str or "")
+    if dt is None:
+        return None
+    return (dt + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _rental_dropoff_before_departure(departure_str: str | None) -> str | None:
+    """출발 시각 - 2시간 → 렌트 반납(공항 이동 여유)."""
+    dt = _parse_local_dt(departure_str or "")
+    if dt is None:
+        return None
+    return (dt - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _normalize_rental_datetime(s: str | None) -> str | None:
     """datetime-local / ISO 혼용 → YYYY-MM-DDTHH:MM:SS."""
     if not s or not isinstance(s, str):
@@ -115,7 +147,11 @@ def _build_local_transport_payload(
     start_d: str,
     end_d: str,
 ) -> dict:
-    """렌트카·대중교통 MCP: 항공 도착/출발 일정·목적지 공항 코드 반영."""
+    """렌트카·대중교통 MCP: 항공 도착/출발·공항 코드 반영.
+
+    렌트 픽업/반납 시각: 도착 +1시간, 귀국(또는 마지막 구간) 출발 -2시간.
+    date_time(대중교통 등)은 여전히 실제 도착 시각 기준.
+    """
     passengers = _total_passengers(travel)
     dac = (travel.destination_airport_code or "").strip().upper()[:3] or None
     if len(dac or "") != 3:
@@ -140,12 +176,12 @@ def _build_local_transport_payload(
             arr = first.get("arrival") or first.get("departure")
             if isinstance(arr, str) and len(arr) >= 16:
                 date_time = arr[:19]
-                pickup_dt = arr[:19]
+                pickup_dt = _rental_pickup_after_arrival(arr)
             last = legs[-1] if len(legs) > 1 else first
             if isinstance(last, dict):
                 dep = last.get("departure") or last.get("arrival")
                 if isinstance(dep, str) and len(dep) >= 16:
-                    dropoff_dt = dep[:19]
+                    dropoff_dt = _rental_dropoff_before_departure(dep)
         elif isinstance(ob, dict):
             leg_dest = (ob.get("destination") or "").strip().upper()[:3]
             if len(leg_dest) == 3:
@@ -153,16 +189,19 @@ def _build_local_transport_payload(
             arr = ob.get("arrival")
             if isinstance(arr, str) and len(arr) >= 16:
                 date_time = arr[:19]
-                pickup_dt = arr[:19]
+                pickup_dt = _rental_pickup_after_arrival(arr)
             if isinstance(ret, dict):
                 dep = ret.get("departure")
                 if isinstance(dep, str) and len(dep) >= 16:
-                    dropoff_dt = dep[:19]
+                    dropoff_dt = _rental_dropoff_before_departure(dep)
 
+    # 일시 미확보 시: 도착 12:00·출발 10:00 가정 후 동일 오프셋 적용
     if not pickup_dt and len(start_d or "") >= 10:
-        pickup_dt = f"{start_d[:10]}T12:00:00"
+        base = datetime.strptime(start_d[:10], "%Y-%m-%d") + timedelta(hours=12)
+        pickup_dt = (base + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
     if not dropoff_dt and len(end_d or "") >= 10:
-        dropoff_dt = f"{end_d[:10]}T10:00:00"
+        dep_guess = datetime.strptime(end_d[:10], "%Y-%m-%d") + timedelta(hours=10)
+        dropoff_dt = (dep_guess - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
 
     pickup_drop = dac if dac else city
     trip_days = _transit_trip_days(start_d, end_d)
