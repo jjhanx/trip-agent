@@ -1488,9 +1488,9 @@ function renderRentalOptions(items) {
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
       const priceBasis = opt.price_basis || '';
       const bookingLabel = opt.provider === 'EconomyBookings'
-        ? 'EconomyBookings에서 검색'
+        ? '날짜·시각 반영해 보기'
         : kind === 'vehicle_class_guide'
-          ? '이 차급으로 가격 보기'
+          ? '이 차급·일정으로 보기'
           : kind === 'serpapi_self_drive'
             ? '가격·차종 확인(출처)'
             : '예약·약관 확인';

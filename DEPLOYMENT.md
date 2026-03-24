@@ -208,7 +208,7 @@ TRAVELPAYOUTS_MARKER=제휴_마커
 
 렌트카 **셀프 드라이브** 공개 Data API는 없습니다. UI에서 픽업·반납 일시를 바꾼 뒤 재검색하면 EconomyBookings 링크에 날짜가 반영됩니다.
 
-**SerpApi** (`SERPAPI_API_KEY`, 항공과 동일): 렌트 단계에서 **Google 검색**(영문·현지어 쿼리 병합)으로 셀프 드라이브 후보·스니펫 기반 가격 힌트를 붙입니다(추정치). **차급별 스펙 참고 카드**와 EconomyBookings 비교 링크가 이어집니다.
+**SerpApi** (`SERPAPI_API_KEY`, 항공과 동일): 렌트 단계에서 **Google 검색**(영문·현지어 쿼리 병합)으로 셀프 드라이브 후보·스니펫 기반 가격 힌트를 붙입니다(추정치). **EconomyBookings** 공항·차급 페이지 HTML에서 From 일당을 읽어 **추가 힌트**를 붙일 수 있습니다(표시용 환율·네트워크 필요).
 
 **Amadeus** 키는 **항공** fallback용입니다. 렌트 단계에서는 장기 렌트와 혼동을 줄이기 위해 **트랜스퍼 API를 호출하지 않습니다**.
 
