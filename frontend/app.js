@@ -1464,7 +1464,7 @@ function renderRentalOptions(items) {
   }
   const isRental = state.travelInput?.local_transport === 'rental_car';
   list.innerHTML = (items || []).map((opt, i) => {
-    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'info')) {
+    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'info')) {
       const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
       const title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
       const features = Array.isArray(opt.features) ? opt.features.join(' · ') : opt.features || '';
@@ -1472,21 +1472,31 @@ function renderRentalOptions(items) {
       const kind = opt.offer_kind || '';
       const kindBadge = kind === 'amadeus_transfer'
         ? '<span class="rental-badge">트랜스퍼 견적</span>'
-        : kind === 'self_drive_compare'
-          ? '<span class="rental-badge">셀프 드라이브 비교</span>'
-          : kind === 'info'
-            ? '<span class="rental-badge">안내</span>'
-            : kind === 'affiliate'
-              ? '<span class="rental-badge">제휴</span>'
-              : '';
+        : kind === 'serpapi_self_drive'
+          ? '<span class="rental-badge">셀프 드라이브 후보</span>'
+          : kind === 'self_drive_compare'
+            ? '<span class="rental-badge">셀프 드라이브 비교</span>'
+            : kind === 'info'
+              ? '<span class="rental-badge">안내</span>'
+              : kind === 'affiliate'
+                ? '<span class="rental-badge">제휴</span>'
+                : '';
       const imgHtml = opt.image_url ? `<img src="${opt.image_url}" alt="${opt.vehicle_name || opt.car_type}" class="rental-card-img" loading="lazy">` : '';
       const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
       const priceBasis = opt.price_basis || '';
-      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${opt.provider === 'EconomyBookings' ? 'EconomyBookings에서 검색' : '예약 사이트'}</a>` : '';
+      const bookingLabel = opt.provider === 'EconomyBookings'
+        ? 'EconomyBookings에서 검색'
+        : kind === 'serpapi_self_drive'
+          ? '가격·차종 확인(출처)'
+          : '예약·약관 확인';
+      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>` : '';
       const orig = (opt.price_original_amount && opt.price_original_currency)
         ? ` <span class="rental-original-price">(${opt.price_original_amount} ${opt.price_original_currency})</span>`
         : '';
+      const snipRaw = opt.price_snippet_raw ? `<span class="rental-snippet-price">스니펫: ${opt.price_snippet_raw}</span>` : '';
+      const srcLine = opt.source_label ? `<p class="rental-source">${opt.source_label}</p>` : '';
+      const priceEst = opt.price_is_estimate && opt.price_total_krw ? '약 ' : '';
       return `
         <div class="option-item rental-card" data-idx="${i}">
           <div class="rental-card-media">${imgHtml}</div>
@@ -1494,10 +1504,11 @@ function renderRentalOptions(items) {
             <h3>${title} ${kindBadge} ${recommendedBadge}</h3>
             ${detailHtml}
             ${features ? `<p class="rental-features">${features}</p>` : ''}
+            ${srcLine}
             ${luggageHtml}
             <p class="rental-location">${[opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ')}</p>
             <div class="rental-footer">
-              ${opt.price_total_krw ? `<span class="price">${opt.price_total_krw.toLocaleString()}원</span>${orig}` : '<span class="rental-no-price">가격: 예약 사이트에서 확인</span>'}
+              ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}
               ${bookingBtn}
             </div>
             ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}

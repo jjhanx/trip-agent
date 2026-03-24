@@ -22,7 +22,7 @@ def search_rentals(
     dropoff_datetime: str | None = None,
     pickup_airport_iata: str | None = None,
 ) -> str:
-    """렌트카 단계: Amadeus 트랜스퍼 견적(가능 시) + 셀프 드라이브 비교 링크.
+    """렌트카 단계: SerpApi(Google) 셀프 드라이브 후보 링크·가격 힌트, Amadeus 트랜스퍼, 비교·제휴 링크.
 
     Args:
         pickup: 픽업 위치 (공항 IATA 또는 도시)
@@ -57,6 +57,7 @@ def search_rentals(
         pickup_airport_iata=pickup_airport_iata,
         amadeus_client_id=os.environ.get("AMADEUS_CLIENT_ID", "").strip() or None,
         amadeus_client_secret=os.environ.get("AMADEUS_CLIENT_SECRET", "").strip() or None,
+        serpapi_api_key=os.environ.get("SERPAPI_API_KEY", "").strip() or None,
     )
     return json.dumps(rentals, ensure_ascii=False)
 

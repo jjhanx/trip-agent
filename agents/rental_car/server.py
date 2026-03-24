@@ -23,7 +23,7 @@ def main():
             AgentSkill(
                 id="search_rentals",
                 name="Search rentals",
-                description="Rental step: Amadeus transfer quotes (airport↔city) when keys set; self-drive via EconomyBookings link; pickup/dropoff datetimes optional",
+                description="Rental step: SerpApi Google self-drive candidates with links and price hints; Amadeus transfer; EconomyBookings; datetimes optional",
                 tags=["rental"],
             )
         ],

@@ -126,11 +126,11 @@ def search_rentals_combined(
     pickup_airport_iata: str | None = None,
     amadeus_client_id: str | None = None,
     amadeus_client_secret: str | None = None,
+    serpapi_api_key: str | None = None,
 ) -> list[dict]:
-    """렌트카 단계 결과: (1) Amadeus 공항↔시내 트랜스퍼 견적, (2) 셀프 드라이브 비교 링크.
+    """렌트 단계: SerpApi(Google) 셀프 드라이브 후보 링크·가격 힌트, Amadeus 트랜스퍼, 비교·제휴 링크.
 
-    셀프 드라이브 일일·총액은 공개 API가 없어 EconomyBookings 링크로 안내.
-    트랜스퍼는 장기 렌트와 다른 상품임을 카드 문구로 구분.
+    공개 렌트카 JSON 쇼핑 API가 없어, SerpApi로 일정·일행이 반영된 검색의 organic 결과를 카드화합니다.
     """
     raw_seats = passengers or 1
     start_d = (start_date or "")[:10]
@@ -181,12 +181,32 @@ def search_rentals_combined(
 
     results: list[dict] = []
     amadeus_cards: list[dict] = []
+    serpapi_cards: list[dict] = []
 
     iata = (pickup_airport_iata or "").strip().upper()[:3]
     if len(iata) != 3 and pickup:
         p = pickup.strip().upper()
         if len(p) == 3 and p.isalpha():
             iata = p
+
+    sk = (serpapi_api_key or "").strip()
+    if sk and len(iata) == 3 and len(start_d) >= 10 and len(end_d) >= 10:
+        from mcp_servers.rental_car.serpapi_rental import search_serpapi_rental_offers
+
+        city_t = _AIRPORT_TO_CITY.get(iata)
+        city_name = city_t[0] if city_t else None
+        country_gl = (city_t[1] if city_t else "US").lower()
+        serpapi_cards = search_serpapi_rental_offers(
+            sk,
+            iata,
+            city_name,
+            country_gl,
+            start_d,
+            end_d,
+            days=max(1, days),
+            passengers=raw_seats,
+            max_results=12,
+        )
 
     aid = (amadeus_client_id or "").strip()
     asec = (amadeus_client_secret or "").strip()
@@ -212,8 +232,8 @@ def search_rentals_combined(
                 )
             )
 
-    # 가격이 있는 Amadeus 옵션을 먼저
     amadeus_cards.sort(key=lambda x: x.get("price_total_krw") or 0)
+    results.extend(serpapi_cards)
     results.extend(amadeus_cards)
 
     if tp_rental:
@@ -223,7 +243,13 @@ def search_rentals_combined(
     pdt_s = (pickup_datetime or "").strip()
     ddt_s = (dropoff_datetime or "").strip()
     attempted_amadeus = len(pdt_s) >= 16 or len(ddt_s) >= 16
-    if not amadeus_cards and aid and asec and attempted_amadeus:
+    if (
+        not amadeus_cards
+        and not serpapi_cards
+        and aid
+        and asec
+        and attempted_amadeus
+    ):
         if len(iata) == 3 and iata not in _AIRPORT_TO_CITY:
             hint_desc = "이 공항 코드는 앱의 시내 매핑에 없어 트랜스퍼 API를 호출하지 않았습니다."
         else:
@@ -270,6 +296,7 @@ def mock_search_rentals(
     pickup_airport_iata: str | None = None,
     amadeus_client_id: str | None = None,
     amadeus_client_secret: str | None = None,
+    serpapi_api_key: str | None = None,
 ) -> list[dict]:
     """search_rentals_combined 별칭 (기존 호출부 호환)."""
     return search_rentals_combined(
@@ -286,4 +313,5 @@ def mock_search_rentals(
         pickup_airport_iata=pickup_airport_iata,
         amadeus_client_id=amadeus_client_id,
         amadeus_client_secret=amadeus_client_secret,
+        serpapi_api_key=serpapi_api_key,
     )

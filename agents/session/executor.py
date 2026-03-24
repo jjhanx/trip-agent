@@ -278,6 +278,7 @@ class SessionExecutor(BaseAgentExecutor):
             pickup_airport_iata=lt_payload.get("pickup_airport_iata"),
             amadeus_client_id=(self.settings.amadeus_client_id or "").strip() or None,
             amadeus_client_secret=(self.settings.amadeus_client_secret or "").strip() or None,
+            serpapi_api_key=(self.settings.serpapi_api_key or "").strip() or None,
         )
         return json.dumps(arr, ensure_ascii=False)
 

@@ -128,6 +128,7 @@ def _offer_to_card(
     img = vehicle.get("imageURL") or vehicle.get("imageUrl")
     leg_ko = "공항→시내" if leg == "arrival" else "시내→공항"
     prov = (sp.get("name") or "Provider").strip()
+    terms = (sp.get("termsUrl") or sp.get("terms_url") or "").strip()
     return {
         "rental_id": f"AMADEUS-{leg}-{oid[:12]}",
         "offer_kind": "amadeus_transfer",
@@ -150,7 +151,8 @@ def _offer_to_card(
             "셀프 드라이브 렌트의 ‘기간 총 렌트료’와는 다른 상품입니다."
         ),
         "recommended": seats >= passengers,
-        "booking_url": None,
+        "booking_url": terms if terms else None,
+        "source_label": "Amadeus Transfer API",
     }
 
 

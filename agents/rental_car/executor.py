@@ -83,6 +83,7 @@ class RentalCarExecutor(BaseAgentExecutor):
                 pickup_airport_iata=pickup_airport_iata if isinstance(pickup_airport_iata, str) else None,
                 amadeus_client_id=(self.settings.amadeus_client_id or "").strip() or None,
                 amadeus_client_secret=(self.settings.amadeus_client_secret or "").strip() or None,
+                serpapi_api_key=(self.settings.serpapi_api_key or "").strip() or None,
             )
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(rentals, ensure_ascii=False))

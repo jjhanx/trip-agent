@@ -23,11 +23,12 @@
 
 ### 1.1 데이터 소스 (요약)
 
-- **Amadeus Transfer Offers** (`AMADEUS_CLIENT_ID`/`SECRET`, 항공과 동일): 공항(IATA)→시내·시내→공항 **1회 이동** 견적. 차종 설명·좌석·견적 금액(원화는 고정 환율 환산). **장기 셀프 드라이브 렌트 총액과는 다른 상품**임을 카드 문구로 구분.
-- **EconomyBookings**: 픽업·반납 **날짜**가 URL에 반영된 **셀프 드라이브 비교** 링크. 실시간 총액은 해당 사이트에서 확인.
-- **Travelpayouts 제휴 URL** (선택, `TRAVELPAYOUTS_RENTAL_BOOKING_URL`): 공개 Data API 없음. 제휴 카드만 추가.
+- **SerpApi Google Search** (`SERPAPI_API_KEY`, 항공과 동일): 공항·픽업/반납일·일행 수를 검색어에 넣어 **organic 결과**를 카드로 변환. `booking_url` = 실제 사이트 링크. 스니펫에서 EUR/USD/원 등을 파싱해 **추정** `price_total_krw`(`price_is_estimate`)를 붙일 수 있음. 일당×대여일 수 추정 시 `price_basis`에 명시.
+- **Amadeus Transfer Offers** (`AMADEUS_CLIENT_ID`/`SECRET`): 공항↔시내 **1회** 견적. `serviceProvider.termsUrl`을 `booking_url`로 사용 가능.
+- **EconomyBookings**: 날짜 반영 비교 링크.
+- **Travelpayouts 제휴 URL** (선택): 제휴 카드.
 
-구현: `mcp_servers/rental_car/services.search_rentals_combined`, `amadeus_transfer.py`. 배포·변수는 [DEPLOYMENT.md](../DEPLOYMENT.md), [TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) 참고.
+구현: `search_rentals_combined`, `serpapi_rental.py`, `amadeus_transfer.py`.
 
 ## 2. 렌트카 단계가 나타나는 조건
 

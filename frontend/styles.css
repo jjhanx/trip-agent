@@ -580,6 +580,8 @@ button.secondary:hover {
 }
 .rental-price-basis { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
 .rental-original-price { font-size: 0.8rem; color: var(--muted); font-weight: normal; }
+.rental-source { font-size: 0.75rem; color: var(--muted); margin: 0.25rem 0 0 !important; }
+.rental-snippet-price { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
 .rental-disclaimer {
   font-size: 0.85rem;
   color: var(--muted);
