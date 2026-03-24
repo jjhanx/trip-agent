@@ -23,12 +23,12 @@
 
 ### 1.1 데이터 소스 (요약)
 
-- **SerpApi Google Search** (`SERPAPI_API_KEY`, 항공과 동일): 공항·픽업/반납일·일행 수를 검색어에 넣어 **organic 결과**를 카드로 변환. `booking_url` = 실제 사이트 링크. 스니펫에서 EUR/USD/원 등을 파싱해 **추정** `price_total_krw`(`price_is_estimate`)를 붙일 수 있음. 일당×대여일 수 추정 시 `price_basis`에 명시.
-- **Amadeus Transfer Offers** (`AMADEUS_CLIENT_ID`/`SECRET`): 공항↔시내 **1회** 견적. `serviceProvider.termsUrl`을 `booking_url`로 사용 가능.
-- **EconomyBookings**: 날짜 반영 비교 링크.
-- **Travelpayouts 제휴 URL** (선택): 제휴 카드.
+- **SerpApi Google Search** (`SERPAPI_API_KEY`, 항공과 동일): 공항·일정·일행을 반영한 영문 검색에 더해, 국가별 현지어 키워드로 **보조 검색**한 뒤 도메인 기준 병합. `booking_url` = 실제 사이트 링크. 스니펫에서 EUR/USD/원 등을 파싱해 **추정** `price_total_krw`(`price_is_estimate`)를 붙일 수 있음.
+- **차급 스펙 카드** (`offer_kind`: `vehicle_class_guide`): compact/sedan/SUV/van 참고 스펙·수하물·이미지. 가격 없음. 동일 EconomyBookings URL로 실시간 총액 확인 유도.
+- **EconomyBookings**: 날짜 반영 전체 업체 비교 링크.
+- **Travelpayouts 제휴 URL** (선택): 목록 하단 제휴 카드.
 
-구현: `search_rentals_combined`, `serpapi_rental.py`, `amadeus_transfer.py`.
+구현: `search_rentals_combined`, `serpapi_rental.py`. (`amadeus_transfer.py`는 코드에 남아 있으나 렌트 통합 검색에서는 호출하지 않음.)
 
 ## 2. 렌트카 단계가 나타나는 조건
 
@@ -83,12 +83,12 @@ state.localTransport = Array.isArray(data?.local_transport) ? data.local_transpo
 - 출력: JSON 배열 문자열 (`offer_kind`, `price_total_krw`, `booking_url` 등)
 
 ### 4.2 MCP Server (mcp_servers/rental_car/server.py)
-- `search_rentals`: 위 필드 + 선택 일시·공항 코드. 환경변수 `AMADEUS_*`, `TRAVELPAYOUTS_RENTAL_BOOKING_URL` 사용
-- `search_rentals_combined` (services.py): Amadeus 트랜스퍼 + EconomyBookings + 선택 제휴 카드
+- `search_rentals`: 위 필드 + 선택 일시·공항 코드. 환경변수 `SERPAPI_API_KEY`, `TRAVELPAYOUTS_RENTAL_BOOKING_URL` 등 사용 (`AMADEUS_*`는 항공용; 렌트 통합 검색에서 트랜스퍼 미호출)
+- `search_rentals_combined` (services.py): SerpApi 후보 → 차급 스펙 카드 → EconomyBookings → 선택 제휴
 
 ### 4.3 가격 및 예약 사이트
-- **트랜스퍼**: Amadeus `quotation` 기준(원화는 서버 고정 환율 환산, 표시용).
-- **셀프 드라이브 총액**: 공개 API 미연동. EconomyBookings 링크에서 픽업·반납일 반영 후 확인.
+- **SerpApi 후보**: 스니펫 기반 추정 원화(있을 때만). 최종 요금·차종은 출처 링크에서 확인.
+- **셀프 드라이브 실시간 총액**: 공개 쇼핑 API 미연동. EconomyBookings(및 SerpApi로 찾은 OTA) 링크에서 확인.
 
 **실시간 셀프 드라이브 API (향후 후보)**:
 - Booking.com Cars 등 파트너 API

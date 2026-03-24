@@ -23,7 +23,7 @@ def main():
             AgentSkill(
                 id="search_rentals",
                 name="Search rentals",
-                description="Rental step: SerpApi Google self-drive candidates with links and price hints; Amadeus transfer; EconomyBookings; datetimes optional",
+                description="Rental step: SerpApi self-drive candidates, vehicle-class spec cards, EconomyBookings compare link, optional affiliate; datetimes optional",
                 tags=["rental"],
             )
         ],

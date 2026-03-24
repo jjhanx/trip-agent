@@ -22,7 +22,7 @@ def search_rentals(
     dropoff_datetime: str | None = None,
     pickup_airport_iata: str | None = None,
 ) -> str:
-    """렌트카 단계: SerpApi(Google) 셀프 드라이브 후보 링크·가격 힌트, Amadeus 트랜스퍼, 비교·제휴 링크.
+    """렌트카 단계: SerpApi(Google) 셀프 드라이브 후보, 차급별 스펙 카드, EconomyBookings 비교, 선택 시 제휴 링크.
 
     Args:
         pickup: 픽업 위치 (공항 IATA 또는 도시)
@@ -31,9 +31,9 @@ def search_rentals(
         end_date: 반납일 YYYY-MM-DD
         car_type: 참고용 차급
         passengers: 일행 수
-        pickup_datetime: 픽업 일시 (ISO, Amadeus 트랜스퍼 공항→시내)
-        dropoff_datetime: 반납·출발 일시 (ISO, 시내→공항 트랜스퍼)
-        pickup_airport_iata: 목적지 공항 3자 코드 (트랜스퍼 구간 기준)
+        pickup_datetime: 픽업 일시 (ISO, 세션·UI 호환·선택)
+        dropoff_datetime: 반납 일시 (ISO, 세션·UI 호환·선택)
+        pickup_airport_iata: 목적지 공항 3자 코드 (SerpApi·EconomyBookings 조건에 사용)
 
     Returns:
         JSON 배열 (offer_kind, price_total_krw, booking_url 등)
