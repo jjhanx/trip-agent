@@ -1098,6 +1098,90 @@ function renderFlights(flights, warnings, searchApiLabel) {
   });
 }
 
+/** 항공 선택이 모두 끝났는지 (렌트카/대중교통 단계로 자동 진행 가능). */
+function isLocalTransportSelectionComplete() {
+  const tt = state.trip_type || $('#trip_type_select')?.value || 'round_trip';
+  if (tt === 'one_way') return !!state.selectedOutboundFlight;
+  if (tt === 'round_trip') return !!(state.selectedOutboundFlight && state.selectedReturnFlight);
+  if (tt === 'multi_city') {
+    const mc = state.multi_cities || state.travelInput?.multi_cities || [];
+    const m = (state.flightLeg || '').match(/multi_city_(\d+)/);
+    const idx = m ? parseInt(m[1], 10) : 0;
+    return !!(mc.length && idx === mc.length - 1 && state.selectedMultiCityFlights?.[idx]);
+  }
+  return false;
+}
+
+/** 항공 확정 후 세션에 렌트카/대중교통 검색 요청 → step-rental 등. */
+async function advanceToLocalTransportStep() {
+  state.travelInput = buildTravelInput();
+  state.selectedFlight = buildSelectedFlight();
+  if (!state.selectedFlight) {
+    alert('항공편 선택을 완료해 주세요.');
+    return false;
+  }
+  show('loading');
+  try {
+    const payload = { ...state.travelInput, selected_flight: state.selectedFlight };
+    let data = await callAgent(payload);
+    if (data?.error) throw new Error(data.error);
+
+    if (data?.step === 'rental') {
+      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      renderRentalOptions(state.localTransport);
+      show('step-rental');
+      return true;
+    }
+    if (Array.isArray(data?.flights) && data.flights.length > 0 && !data?.step) {
+      const hasCompleteRoundTrip = state.trip_type === 'round_trip' && state.selectedOutboundFlight && state.selectedReturnFlight;
+      if (hasCompleteRoundTrip) {
+        const retryData = await callAgent(payload);
+        if (retryData?.step === 'rental') {
+          state.localTransport = Array.isArray(retryData?.local_transport) ? retryData.local_transport : [];
+          renderRentalOptions(state.localTransport);
+          show('step-rental');
+          return true;
+        }
+        if (retryData?.error) throw new Error(retryData.error);
+        throw new Error('다음 단계로 진행할 수 없습니다. 다시 시도해 주세요.');
+      }
+      state.flights = data.flights;
+      state.flightWarnings = data?.warnings || [];
+      state.flightSearchApi = typeof data?.flight_search_api === 'string' ? data.flight_search_api : '';
+      if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
+        state.flightLeg = 'return';
+        state.selectedReturnFlight = null;
+      }
+      state.flightsByLeg[state.flightLeg] = data.flights;
+      renderFlights(data.flights, state.flightWarnings, state.flightSearchApi);
+      $('#flights-list').classList.remove('hidden');
+      $('#flight-sort-bar').classList.remove('hidden');
+      $('#selected-flight-summary').classList.add('hidden');
+      if (state.flightLeg === 'return') state.selectedReturnFlight = null;
+      show('step-flights');
+      return true;
+    }
+    if (data?.step === 'accommodation_and_transport') {
+      state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
+      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      renderAccommodations(state.accommodations);
+      renderRentalOptions(state.localTransport);
+      show('step-accommodation');
+      return true;
+    }
+
+    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
+    if (!Array.isArray(itin)) itin = [itin];
+    state.itineraries = itin;
+    renderItineraries(state.itineraries);
+    show('step-itineraries');
+    return true;
+  } catch (err) {
+    showError(err.message);
+    return false;
+  }
+}
+
 function selectFlight(f) {
   if (state.trip_type === 'multi_city') {
     const idx = parseInt((state.flightLeg.match(/multi_city_(\d+)/) || [,'0'])[1], 10);
@@ -1134,6 +1218,10 @@ function selectFlight(f) {
   nextBtn.style.opacity = '1';
   nextBtn.style.cursor = 'pointer';
   updateFlightNextButtonLabel();
+
+  if (isLocalTransportSelectionComplete()) {
+    advanceToLocalTransportStep();
+  }
 }
 
 function updateFlightNextButtonLabel() {
@@ -1275,72 +1363,7 @@ $('#btn-next-flights').addEventListener('click', async () => {
     }
   }
 
-  state.selectedFlight = buildSelectedFlight();
-  if (!state.selectedFlight) {
-    alert('항공편 선택을 완료해 주세요.');
-    return;
-  }
-  show('loading');
-  try {
-    const payload = { ...state.travelInput, selected_flight: state.selectedFlight };
-    let data = await callAgent(payload);
-    if (data?.error) throw new Error(data.error);
-
-    if (data?.step === 'rental') {
-      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
-      renderRentalOptions(state.localTransport);
-      show('step-rental');
-      return;
-    }
-    if (Array.isArray(data?.flights) && data.flights.length > 0 && !data?.step) {
-      // Flight search results (fallback): incomplete selection triggered search
-      const hasCompleteRoundTrip = state.trip_type === 'round_trip' && state.selectedOutboundFlight && state.selectedReturnFlight;
-      if (hasCompleteRoundTrip) {
-        // 출국+귀국 모두 선택됐는데 flights가 온 경우: rental 재요청 (백엔드가 잘못된 경로로 간 경우)
-        const retryPayload = { ...state.travelInput, selected_flight: state.selectedFlight };
-        const retryData = await callAgent(retryPayload);
-        if (retryData?.step === 'rental') {
-          state.localTransport = Array.isArray(retryData?.local_transport) ? retryData.local_transport : [];
-          renderRentalOptions(state.localTransport);
-          show('step-rental');
-          return;
-        }
-        if (retryData?.error) throw new Error(retryData.error);
-        throw new Error('다음 단계로 진행할 수 없습니다. 다시 시도해 주세요.');
-      }
-      state.flights = data.flights;
-      state.flightWarnings = data?.warnings || [];
-      state.flightSearchApi = typeof data?.flight_search_api === 'string' ? data.flight_search_api : '';
-      if (state.trip_type === 'round_trip' && state.selectedOutboundFlight && !state.selectedReturnFlight) {
-        state.flightLeg = 'return';
-        state.selectedReturnFlight = null;
-      }
-      state.flightsByLeg[state.flightLeg] = data.flights;
-      renderFlights(data.flights, state.flightWarnings, state.flightSearchApi);
-      $('#flights-list').classList.remove('hidden');
-      $('#flight-sort-bar').classList.remove('hidden');
-      $('#selected-flight-summary').classList.add('hidden');
-      if (state.flightLeg === 'return') state.selectedReturnFlight = null;
-      show('step-flights');
-      return;
-    }
-    if (data?.step === 'accommodation_and_transport') {
-      state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
-      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
-      renderAccommodations(state.accommodations);
-      renderRentalOptions(state.localTransport);
-      show('step-accommodation');
-      return;
-    }
-
-    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
-    if (!Array.isArray(itin)) itin = [itin];
-    state.itineraries = itin;
-    renderItineraries(state.itineraries);
-    show('step-itineraries');
-  } catch (err) {
-    showError(err.message);
-  }
+  await advanceToLocalTransportStep();
 });
 
 function renderRentalOptions(items) {

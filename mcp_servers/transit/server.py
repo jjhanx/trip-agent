@@ -12,38 +12,43 @@ def search_routes(
     origin: str,
     destination: str,
     date_time: str,
+    trip_days: int = 1,
 ) -> str:
-    """Search for public transit routes.
+    """Search for public transit routes (공항·역 → 시내 등). 항공 도착 시각 date_time 반영.
 
     Args:
-        origin: Start location/station
-        destination: End location/station
+        origin: Start (e.g. airport name or code)
+        destination: End (city / district)
         date_time: Departure date-time (YYYY-MM-DDTHH:MM or YYYY-MM-DD)
+        trip_days: 현지 체류 일수 (참고용 문구)
 
     Returns:
         JSON array of route options
     """
+    ctx = f"{origin} → {destination}"
+    when = f" ({date_time})" if date_time else ""
+    td = max(1, min(int(trip_days or 1), 30))
     routes = [
         {
             "route_id": "TR001",
-            "description": "Metro Line 1 → Bus 101",
-            "duration_minutes": 35,
+            "description": f"{ctx}: 공항철도/리무진 → 시청 방향{when}",
+            "duration_minutes": 35 + (td % 3),
             "pass_name": None,
             "pass_price_krw": None,
         },
         {
             "route_id": "TR002",
-            "description": "Direct bus",
+            "description": f"{ctx}: 직행 버스 (Express){when}",
             "duration_minutes": 50,
-            "pass_name": "City Pass 1-day",
-            "pass_price_krw": 15000,
+            "pass_name": None,
+            "pass_price_krw": None,
         },
         {
             "route_id": "TR003",
-            "description": "Train + Metro",
-            "duration_minutes": 40,
-            "pass_name": "Rail Pass",
-            "pass_price_krw": 25000,
+            "description": f"{ctx}: 전철 환승{when}",
+            "duration_minutes": 42,
+            "pass_name": None,
+            "pass_price_krw": None,
         },
     ]
     return json.dumps(routes, ensure_ascii=False)
@@ -61,11 +66,12 @@ def get_transit_passes(location: str, duration_days: int = 1) -> str:
         JSON array of pass options
     """
     passes_list = [
-        {"name": "1-day pass", "price_krw": 12000, "duration_days": 1},
-        {"name": "3-day pass", "price_krw": 28000, "duration_days": 3},
-        {"name": "7-day pass", "price_krw": 55000, "duration_days": 7},
+        {"name": "1일 패스", "price_krw": 12000, "duration_days": 1},
+        {"name": "3일 패스", "price_krw": 28000, "duration_days": 3},
+        {"name": "7일 패스", "price_krw": 55000, "duration_days": 7},
     ]
-    found = [p for p in passes_list if p["duration_days"] <= duration_days] or passes_list
+    d = max(1, min(int(duration_days or 1), 14))
+    found = [p for p in passes_list if p["duration_days"] <= d] or passes_list
     return json.dumps(found, ensure_ascii=False)
 
 
