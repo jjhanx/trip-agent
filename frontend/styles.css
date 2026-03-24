@@ -579,6 +579,7 @@ button.secondary:hover {
   font-weight: 600;
 }
 .rental-price-basis { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
+.rental-original-price { font-size: 0.8rem; color: var(--muted); font-weight: normal; }
 .rental-disclaimer {
   font-size: 0.85rem;
   color: var(--muted);
@@ -589,6 +590,24 @@ button.secondary:hover {
 }
 .rental-result-count { font-size: 0.9rem; margin-bottom: 0.5rem; }
 .rental-no-price { font-size: 0.85rem; color: var(--muted); }
+
+.rental-search-panel {
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2a2f3a);
+  background: var(--surface-2, rgba(0,0,0,0.15));
+}
+.rental-search-heading { font-size: 1rem; margin: 0 0 0.75rem; font-weight: 600; }
+.rental-search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.rental-field { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; color: var(--muted); }
+.rental-field input { font-size: 1rem; padding: 0.45rem 0.5rem; border-radius: 6px; border: 1px solid var(--border, #2a2f3a); background: var(--bg); color: inherit; }
+#btn-rental-refresh { margin-top: 0.25rem; }
 a.btn-primary {
   display: inline-flex;
   align-items: center;

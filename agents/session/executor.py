@@ -72,6 +72,43 @@ def _transit_trip_days(start_d: str, end_d: str) -> int:
         return 1
 
 
+def _normalize_rental_datetime(s: str | None) -> str | None:
+    """datetime-local / ISO 혼용 → YYYY-MM-DDTHH:MM:SS."""
+    if not s or not isinstance(s, str):
+        return None
+    t = s.strip().replace(" ", "T")
+    if len(t) == 16 and t[10] == "T":
+        return t + ":00"
+    if len(t) >= 19:
+        return t[:19]
+    if len(t) >= 10:
+        return t[:10] + "T12:00:00"
+    return None
+
+
+def _merge_rental_search(lt: dict, rs: dict | None) -> dict:
+    """프론트 rental_search로 픽업·반납 일시·공항·날짜 덮어쓰기."""
+    if not rs or not isinstance(rs, dict):
+        return lt
+    out = {**lt}
+    pdt = _normalize_rental_datetime(rs.get("pickup_datetime"))
+    ddt = _normalize_rental_datetime(rs.get("dropoff_datetime"))
+    if pdt:
+        out["pickup_datetime"] = pdt
+        out["date_time"] = pdt
+        out["start_date"] = pdt[:10]
+    if ddt:
+        out["dropoff_datetime"] = ddt
+        out["end_date"] = ddt[:10]
+    pi = (rs.get("pickup_iata") or rs.get("pickup_airport_iata") or "").strip().upper()[:3]
+    if len(pi) == 3:
+        out["pickup"] = pi
+        out["dropoff"] = pi
+        out["pickup_airport_iata"] = pi
+        out["dropoff_airport_iata"] = pi
+    return out
+
+
 def _build_local_transport_payload(
     selected_flight: dict | None,
     travel: TravelInput,
@@ -88,10 +125,13 @@ def _build_local_transport_payload(
         oac = None
     city = (travel.destination or "").strip()
     date_time = (start_d or "")[:10] if len(start_d or "") >= 10 else start_d
+    pickup_dt: str | None = None
+    dropoff_dt: str | None = None
 
     if selected_flight and isinstance(selected_flight, dict):
         ob = selected_flight.get("outbound")
         legs = selected_flight.get("legs")
+        ret = selected_flight.get("return")
         if isinstance(legs, list) and len(legs) > 0 and isinstance(legs[0], dict):
             first = legs[0]
             leg_dest = (first.get("destination") or "").strip().upper()[:3]
@@ -100,6 +140,12 @@ def _build_local_transport_payload(
             arr = first.get("arrival") or first.get("departure")
             if isinstance(arr, str) and len(arr) >= 16:
                 date_time = arr[:19]
+                pickup_dt = arr[:19]
+            last = legs[-1] if len(legs) > 1 else first
+            if isinstance(last, dict):
+                dep = last.get("departure") or last.get("arrival")
+                if isinstance(dep, str) and len(dep) >= 16:
+                    dropoff_dt = dep[:19]
         elif isinstance(ob, dict):
             leg_dest = (ob.get("destination") or "").strip().upper()[:3]
             if len(leg_dest) == 3:
@@ -107,6 +153,16 @@ def _build_local_transport_payload(
             arr = ob.get("arrival")
             if isinstance(arr, str) and len(arr) >= 16:
                 date_time = arr[:19]
+                pickup_dt = arr[:19]
+            if isinstance(ret, dict):
+                dep = ret.get("departure")
+                if isinstance(dep, str) and len(dep) >= 16:
+                    dropoff_dt = dep[:19]
+
+    if not pickup_dt and len(start_d or "") >= 10:
+        pickup_dt = f"{start_d[:10]}T12:00:00"
+    if not dropoff_dt and len(end_d or "") >= 10:
+        dropoff_dt = f"{end_d[:10]}T10:00:00"
 
     pickup_drop = dac if dac else city
     trip_days = _transit_trip_days(start_d, end_d)
@@ -121,6 +177,8 @@ def _build_local_transport_payload(
         "origin": travel.origin,
         "destination": travel.destination,
         "date_time": date_time,
+        "pickup_datetime": pickup_dt,
+        "dropoff_datetime": dropoff_dt,
         "passengers": passengers,
         "pickup_airport_iata": dac,
         "dropoff_airport_iata": dac,
@@ -151,6 +209,38 @@ class SessionExecutor(BaseAgentExecutor):
             return await self.clients[name].send_message(json.dumps(payload, default=str))
         except Exception:
             return None
+
+    def _rental_car_fallback_json(self, lt_payload: dict) -> str:
+        from datetime import datetime
+
+        from mcp_servers.rental_car.services import search_rentals_combined
+
+        sd = (lt_payload.get("start_date") or "")[:10]
+        ed = (lt_payload.get("end_date") or sd)[:10]
+        try:
+            d1 = datetime.strptime(sd, "%Y-%m-%d")
+            d2 = datetime.strptime(ed, "%Y-%m-%d")
+            days = max(1, (d2 - d1).days)
+        except ValueError:
+            days = 1
+        arr = search_rentals_combined(
+            pickup=lt_payload.get("pickup") or "",
+            dropoff=lt_payload.get("dropoff") or "",
+            car_type="compact",
+            days=days,
+            passengers=lt_payload.get("passengers"),
+            start_date=sd,
+            end_date=ed,
+            travelpayouts_rental_booking_url=(
+                (self.settings.travelpayouts_rental_booking_url or "").strip() or None
+            ),
+            pickup_datetime=lt_payload.get("pickup_datetime"),
+            dropoff_datetime=lt_payload.get("dropoff_datetime"),
+            pickup_airport_iata=lt_payload.get("pickup_airport_iata"),
+            amadeus_client_id=(self.settings.amadeus_client_id or "").strip() or None,
+            amadeus_client_secret=(self.settings.amadeus_client_secret or "").strip() or None,
+        )
+        return json.dumps(arr, ensure_ascii=False)
 
     async def execute(
         self,
@@ -188,6 +278,9 @@ class SessionExecutor(BaseAgentExecutor):
         selected_itinerary = data.get("selected_itinerary")
         selected_accommodation = data.get("selected_accommodation")
         selected_local_transport = data.get("selected_local_transport")
+        rental_search = data.get("rental_search")
+        if not isinstance(rental_search, dict):
+            rental_search = None
         flight_leg = data.get("flight_leg")  # "outbound" | "return" | "multi_city_0", ...
         selected_outbound_flight = data.get("selected_outbound_flight")
         selected_multi_city_flights = data.get("selected_multi_city_flights") or []
@@ -206,6 +299,36 @@ class SessionExecutor(BaseAgentExecutor):
             return bool(sf)
 
         flight_complete = _is_flight_complete(selected_flight)
+
+        if (
+            flight_complete
+            and rental_search
+            and travel.local_transport == LocalTransportType.RENTAL_CAR
+        ):
+            start_d, end_d = _extract_rental_dates_from_flight(
+                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+            )
+            lt_payload = _merge_rental_search(
+                _build_local_transport_payload(selected_flight, travel, start_d, end_d),
+                rental_search,
+            )
+            lt_resp = await self._call_agent("rental_car", lt_payload)
+            if not lt_resp:
+                lt_resp = self._rental_car_fallback_json(lt_payload)
+            parsed_lt = (
+                json.loads(lt_resp)
+                if lt_resp and isinstance(lt_resp, str) and lt_resp.strip().startswith("[")
+                else lt_resp or []
+            )
+            await event_queue.enqueue_event(
+                new_agent_text_message(
+                    json.dumps(
+                        {"step": "rental", "local_transport": parsed_lt},
+                        ensure_ascii=False,
+                    )
+                )
+            )
+            return
 
         if selected_flight and selected_itinerary and selected_accommodation:
             resp = await self._call_agent(
@@ -252,27 +375,14 @@ class SessionExecutor(BaseAgentExecutor):
             start_d, end_d = _extract_rental_dates_from_flight(
                 selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
-            lt_payload = _build_local_transport_payload(selected_flight, travel, start_d, end_d)
+            lt_payload = _merge_rental_search(
+                _build_local_transport_payload(selected_flight, travel, start_d, end_d),
+                rental_search,
+            )
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
                 lt_resp = await self._call_agent("rental_car", lt_payload)
                 if not lt_resp:
-                    from mcp_servers.rental_car.services import mock_search_rentals
-                    from datetime import datetime
-
-                    d1 = datetime.strptime(lt_payload["start_date"], "%Y-%m-%d")
-                    d2 = datetime.strptime(lt_payload["end_date"], "%Y-%m-%d")
-                    days = max(1, (d2 - d1).days)
-                    lt_resp = json.dumps(
-                        mock_search_rentals(
-                            lt_payload["pickup"],
-                            lt_payload["dropoff"],
-                            "compact",
-                            days,
-                            passengers=lt_payload["passengers"],
-                            start_date=lt_payload["start_date"],
-                            end_date=lt_payload["end_date"],
-                        )
-                    )
+                    lt_resp = self._rental_car_fallback_json(lt_payload)
             else:
                 lt_resp = await self._call_agent("transit", lt_payload)
                 if not lt_resp:
@@ -320,27 +430,14 @@ class SessionExecutor(BaseAgentExecutor):
             start_d, end_d = _extract_rental_dates_from_flight(
                 selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
-            lt_payload = _build_local_transport_payload(selected_flight, travel, start_d, end_d)
+            lt_payload = _merge_rental_search(
+                _build_local_transport_payload(selected_flight, travel, start_d, end_d),
+                rental_search,
+            )
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
                 lt_resp = await self._call_agent("rental_car", lt_payload)
                 if not lt_resp:
-                    from mcp_servers.rental_car.services import mock_search_rentals
-                    from datetime import datetime
-
-                    d1 = datetime.strptime(lt_payload["start_date"], "%Y-%m-%d")
-                    d2 = datetime.strptime(lt_payload["end_date"], "%Y-%m-%d")
-                    days = max(1, (d2 - d1).days)
-                    lt_resp = json.dumps(
-                        mock_search_rentals(
-                            lt_payload["pickup"],
-                            lt_payload["dropoff"],
-                            "compact",
-                            days,
-                            passengers=lt_payload["passengers"],
-                            start_date=lt_payload["start_date"],
-                            end_date=lt_payload["end_date"],
-                        )
-                    )
+                    lt_resp = self._rental_car_fallback_json(lt_payload)
             else:
                 lt_resp = await self._call_agent("transit", lt_payload)
                 if not lt_resp:

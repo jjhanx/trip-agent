@@ -12,7 +12,7 @@
     ↓
 [Rental Car Agent] (agents/rental_car/server.py, executor.py)
     - A2AClient로 HTTP 호출
-    - MCP search_rentals 또는 mock_search_rentals 사용
+    - MCP `search_rentals` 또는 `search_rentals_combined` 폴백
     ↓
 [Session Agent] → { step: "rental", local_transport: [...] } 반환
     ↓
@@ -21,9 +21,13 @@
     - renderRentalOptions(state.localTransport)
 ```
 
-### 1.1 Travelpayouts 제휴 링크 (선택)
+### 1.1 데이터 소스 (요약)
 
-렌트카는 Travelpayouts **공개 Data API가 없습니다.** `.env`에 `TRAVELPAYOUTS_RENTAL_BOOKING_URL`을 넣으면(대시보드 Link Generator 등에서 생성) `mcp_servers/rental_car/services.mock_search_rentals`가 **목록 최상단**에 제휴 카드를 붙입니다. 이어서 EconomyBookings 비교 카드·참고 차종이 옵니다. 배포·변수 설명은 [DEPLOYMENT.md](../DEPLOYMENT.md) §3.2, [docs/TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) §6 참고.
+- **Amadeus Transfer Offers** (`AMADEUS_CLIENT_ID`/`SECRET`, 항공과 동일): 공항(IATA)→시내·시내→공항 **1회 이동** 견적. 차종 설명·좌석·견적 금액(원화는 고정 환율 환산). **장기 셀프 드라이브 렌트 총액과는 다른 상품**임을 카드 문구로 구분.
+- **EconomyBookings**: 픽업·반납 **날짜**가 URL에 반영된 **셀프 드라이브 비교** 링크. 실시간 총액은 해당 사이트에서 확인.
+- **Travelpayouts 제휴 URL** (선택, `TRAVELPAYOUTS_RENTAL_BOOKING_URL`): 공개 Data API 없음. 제휴 카드만 추가.
+
+구현: `mcp_servers/rental_car/services.search_rentals_combined`, `amadeus_transfer.py`. 배포·변수는 [DEPLOYMENT.md](../DEPLOYMENT.md), [TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) 참고.
 
 ## 2. 렌트카 단계가 나타나는 조건
 
@@ -32,13 +36,15 @@
 | `flight_complete` | 왕복: 출국+귀국 선택 완료 / 편도: 출국 선택 완료 |
 | `!selected_local_transport` | 아직 렌트카·대중교통 옵션을 선택하지 않음 |
 | `travel.local_transport == "rental_car"` | 여행 정보 폼에서 "렌트카" 선택 |
+| `rental_search` (JSON 객체) | 프론트에서 픽업·반납 일시 수정 후 재검색 시. `flight_complete`이면 **렌트 단계만** 다시 응답 |
 
 **Session 조건 판단 순서** (위에서 아래):
 1. booking: 항공+일정+숙소 모두 선택됨 → 예약 안내
-2. accommodation_and_transport: 항공+일정 선택됨, 숙소 미선택 → 숙소+렌트카 같이 표시
-3. itinerary: 항공+렌트카 선택됨, 일정 미선택 → 일정 Agent
-4. **rental**: 항공 선택 완료, 렌트카/대중교통 미선택 → **렌트카 단계**
-5. flight: 그 외 → 항공편 검색
+2. `rental_search` + `rental_car` + 항공 완료 → `{ step: "rental", local_transport }` 만 반환 (일시 수정 후 재검색)
+3. accommodation_and_transport: 항공+일정 선택됨, 숙소 미선택 → 숙소+렌트카 같이 표시
+4. itinerary: 항공+렌트카 선택됨, 일정 미선택 → 일정 Agent
+5. **rental**: 항공 선택 완료, 렌트카/대중교통 미선택 → **렌트카 단계**
+6. flight: 그 외 → 항공편 검색
 
 ## 3. 렌트카가 안 보일 때 점검사항
 
@@ -71,30 +77,36 @@ state.localTransport = Array.isArray(data?.local_transport) ? data.local_transpo
 ## 4. Rental Car Agent 구현 상세
 
 ### 4.1 RentalCarExecutor (agents/rental_car/executor.py)
-- 입력: `pickup`, `dropoff`, `start_date`, `end_date`, `car_type`, `passengers`
-- MCP `search_rentals` 호출 (실패 시 mock_search_rentals 사용)
-- 출력: JSON 배열 문자열 `[{rental_id, provider, car_type, seats, ...}, ...]`
+- 입력: `pickup`, `dropoff`, `start_date`, `end_date`, `car_type`, `passengers`, 선택 `pickup_datetime`, `dropoff_datetime`, `pickup_airport_iata`
+- MCP `search_rentals` 호출 (실패 시 `search_rentals_combined` + Settings의 Amadeus·Travelpayouts URL)
+- 출력: JSON 배열 문자열 (`offer_kind`, `price_total_krw`, `booking_url` 등)
 
 ### 4.2 MCP Server (mcp_servers/rental_car/server.py)
-- `search_rentals` 도구: pickup, dropoff, start_date, end_date, car_type, passengers
-- `mock_search_rentals` (mcp_servers/rental_car/services.py): 차급별 참고 카드 + EconomyBookings 검색 포함
+- `search_rentals`: 위 필드 + 선택 일시·공항 코드. 환경변수 `AMADEUS_*`, `TRAVELPAYOUTS_RENTAL_BOOKING_URL` 사용
+- `search_rentals_combined` (services.py): Amadeus 트랜스퍼 + EconomyBookings + 선택 제휴 카드
 
 ### 4.3 가격 및 예약 사이트
-- **가격**: 근거 없는 추정 가격은 표시하지 않음. 실시간 가격은 예약 사이트에서 확인.
-- **EconomyBookings.com**: 사용자 선호 사이트. 검색 결과 상단에 "600+ 업체 비교" 카드로 포함. 모든 예약 링크가 EconomyBookings로 연결됨 (픽업지·날짜 파라미터 반영).
+- **트랜스퍼**: Amadeus `quotation` 기준(원화는 서버 고정 환율 환산, 표시용).
+- **셀프 드라이브 총액**: 공개 API 미연동. EconomyBookings 링크에서 픽업·반납일 반영 후 확인.
 
-**실시간 가격 API (향후 연동 후보)**:
-- Amadeus Cars API: `AMADEUS_CLIENT_ID`/`SECRET`로 항공과 동일 계정 사용 가능
-- Booking.com Demand API: Affiliate 파트너십 필요
+**실시간 셀프 드라이브 API (향후 후보)**:
+- Booking.com Cars 등 파트너 API
 
-### 4.4 Session → Rental Car payload (agents/session/executor.py 259행)
+### 4.4 Session → Rental Car payload (agents/session/executor.py)
+- `_build_local_transport_payload`: `pickup_datetime`(도착), `dropoff_datetime`(귀국 출발 등), `pickup_airport_iata`
+- `_merge_rental_search`: 프론트 `rental_search` `{ pickup_datetime, dropoff_datetime, pickup_iata }` 로 덮어쓰기
+- `_rental_car_fallback_json`: Agent 실패 시 동일 로직으로 JSON 생성
+
 ```python
 lt_payload = {
-    "pickup": travel.destination,
-    "dropoff": travel.destination,
-    "start_date": ...,   # 항공편 현지 도착일
-    "end_date": ...,     # 항공편 현지 출발일
-    "passengers": ...,   # 일행 수
+    "pickup": "MXP 또는 도시명",
+    "dropoff": "...",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "pickup_datetime": "YYYY-MM-DDTHH:MM:SS",
+    "dropoff_datetime": "...",
+    "pickup_airport_iata": "MXP",
+    "passengers": 2,
     ...
 }
 ```

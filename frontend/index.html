@@ -264,8 +264,23 @@
 
       <section id="step-rental" class="card hidden">
         <h2>3. 렌트카/대중교통</h2>
-        <p class="muted">선택한 현지 이동 수단의 옵션입니다. 선택 후 예약 사이트에서 바로 예약할 수 있습니다.</p>
-        <p id="rental-price-disclaimer" class="rental-disclaimer hidden">실시간 가격·가용성은 예약 사이트(EconomyBookings 등)에서 확인하세요.</p>
+        <p class="muted">선택한 현지 이동 수단의 옵션입니다. 픽업·반납 일시는 항공 일정을 기준으로 채워지며 수정 후 다시 검색할 수 있습니다.</p>
+        <div id="rental-search-panel" class="rental-search-panel hidden">
+          <h3 class="rental-search-heading">렌트·이동 일정</h3>
+          <div class="rental-search-grid">
+            <label class="rental-field"><span>픽업 공항 (IATA)</span>
+              <input type="text" id="rental-pickup-iata" maxlength="3" placeholder="예: MXP" autocomplete="off">
+            </label>
+            <label class="rental-field"><span>픽업 일시 (도착 기준)</span>
+              <input type="datetime-local" id="rental-pickup-dt">
+            </label>
+            <label class="rental-field"><span>반납·공항 출발 일시</span>
+              <input type="datetime-local" id="rental-dropoff-dt">
+            </label>
+          </div>
+          <button type="button" id="btn-rental-refresh" class="secondary">이 일정으로 다시 검색</button>
+        </div>
+        <p id="rental-price-disclaimer" class="rental-disclaimer hidden">Amadeus 트랜스퍼는 공항↔시내 1회 이동 견적입니다. 셀프 드라이브 기간 총액은 EconomyBookings 등에서 확인하세요.</p>
         <p id="rental-result-count" class="rental-result-count muted"></p>
         <div id="rental-list" class="options-grid"></div>
         <div id="rental-actions" class="rental-actions" style="margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">

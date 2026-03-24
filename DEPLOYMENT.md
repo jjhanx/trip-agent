@@ -206,13 +206,17 @@ TRAVELPAYOUTS_API_TOKEN=발급받은_토큰
 TRAVELPAYOUTS_MARKER=제휴_마커
 ```
 
-렌트카는 공개 Data API가 없습니다. 대시보드 **Tools → Link Generator** 등에서 렌트카 프로그램용 URL을 만든 뒤 아래에 넣으면 검색 결과 **맨 위**에 제휴 카드가 붙습니다.
+렌트카 **셀프 드라이브** 공개 Data API는 없습니다. UI에서 픽업·반납 일시를 바꾼 뒤 재검색하면 EconomyBookings 링크에 날짜가 반영됩니다.
+
+**Amadeus** (`AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET`, 항공과 동일): 렌트 단계에서 **Transfer Offers**로 공항↔시내 **1회 이동** 견적을 붙입니다. 장기 렌트 총액과는 다른 상품입니다.
+
+선택: 대시보드 **Tools → Link Generator**에서 렌트카 제휴 URL을 넣으면 목록에 제휴 카드가 추가됩니다.
 
 ```env
 TRAVELPAYOUTS_RENTAL_BOOKING_URL=https://...
 ```
 
-상세는 [docs/TRAVELPAYOUTS_API_GUIDE.md](docs/TRAVELPAYOUTS_API_GUIDE.md), 항공 흐름은 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고.
+상세는 [docs/TRAVELPAYOUTS_API_GUIDE.md](docs/TRAVELPAYOUTS_API_GUIDE.md), [docs/RENTAL_CAR_AGENT.md](docs/RENTAL_CAR_AGENT.md), 항공 흐름은 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고.
 
 ### SerpApi (항공 1순위, 실시간 Google Flights)
 

@@ -34,6 +34,9 @@ class RentalCarExecutor(BaseAgentExecutor):
             end_date = data.get("end_date", "")
             car_type = data.get("car_type", "compact")
             passengers = data.get("passengers")
+            pickup_datetime = data.get("pickup_datetime")
+            dropoff_datetime = data.get("dropoff_datetime")
+            pickup_airport_iata = data.get("pickup_airport_iata")
         except Exception as e:
             await event_queue.enqueue_event(new_agent_text_message(f"입력 오류: {e}"))
             return
@@ -46,6 +49,12 @@ class RentalCarExecutor(BaseAgentExecutor):
         }
         if passengers is not None:
             mcp_args["passengers"] = passengers
+        if pickup_datetime:
+            mcp_args["pickup_datetime"] = pickup_datetime
+        if dropoff_datetime:
+            mcp_args["dropoff_datetime"] = dropoff_datetime
+        if pickup_airport_iata:
+            mcp_args["pickup_airport_iata"] = pickup_airport_iata
         try:
             result = await self.mcp.call_tool("search_rentals", mcp_args)
             text = result.get("text", json.dumps(result))
@@ -53,20 +62,28 @@ class RentalCarExecutor(BaseAgentExecutor):
         except Exception:
             from datetime import datetime
 
-            from mcp_servers.rental_car.services import mock_search_rentals
+            from mcp_servers.rental_car.services import search_rentals_combined
 
             d1 = datetime.strptime(start_date, "%Y-%m-%d")
             d2 = datetime.strptime(end_date, "%Y-%m-%d")
             days = max(1, (d2 - d1).days)
-            kwargs = {"pickup": pickup, "dropoff": dropoff, "car_type": car_type, "days": days}
-            if passengers is not None:
-                kwargs["passengers"] = passengers
-            kwargs["start_date"] = start_date
-            kwargs["end_date"] = end_date
-            kwargs["travelpayouts_rental_booking_url"] = (
-                (self.settings.travelpayouts_rental_booking_url or "").strip() or None
+            rentals = search_rentals_combined(
+                pickup=pickup,
+                dropoff=dropoff,
+                car_type=car_type,
+                days=days,
+                passengers=passengers,
+                start_date=start_date,
+                end_date=end_date,
+                travelpayouts_rental_booking_url=(
+                    (self.settings.travelpayouts_rental_booking_url or "").strip() or None
+                ),
+                pickup_datetime=pickup_datetime if isinstance(pickup_datetime, str) else None,
+                dropoff_datetime=dropoff_datetime if isinstance(dropoff_datetime, str) else None,
+                pickup_airport_iata=pickup_airport_iata if isinstance(pickup_airport_iata, str) else None,
+                amadeus_client_id=(self.settings.amadeus_client_id or "").strip() or None,
+                amadeus_client_secret=(self.settings.amadeus_client_secret or "").strip() or None,
             )
-            rentals = mock_search_rentals(**kwargs)
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(rentals, ensure_ascii=False))
         )
