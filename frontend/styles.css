@@ -548,6 +548,14 @@ button.secondary:hover {
 .rental-features { font-size: 0.8rem; color: var(--accent); opacity: 0.9; margin: 0 !important; }
 .rental-luggage { font-size: 0.8rem; color: var(--muted); }
 .rental-location { font-size: 0.85rem; color: var(--muted); margin: 0 !important; }
+
+.rental-schedule {
+  font-size: 0.8rem;
+  color: var(--text);
+  margin: 0.35rem 0 0 !important;
+  line-height: 1.35;
+  font-weight: 500;
+}
 .rental-footer {
   margin-top: auto;
   padding-top: 0.5rem;

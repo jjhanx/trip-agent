@@ -66,6 +66,28 @@ def fetch_economybookings_tracking_params(affiliate_url: str) -> dict[str, str]:
     return out
 
 
+def apply_economybookings_tracking_to_url(
+    economybookings_target_url: str,
+    tracking: dict[str, str],
+) -> str:
+    """이미 추출한 제휴 쿼리(btag, tpo_uid 등)를 EB URL에 병합. `tracking`이 비면 원본 반환."""
+    target = (economybookings_target_url or "").strip()
+    if not target or not tracking:
+        return target
+    if "economybookings.com" not in target.lower():
+        return target
+    p = urlparse(target)
+    existing = parse_qs(p.query, keep_blank_values=True)
+    merged: dict[str, str] = {}
+    for k, vals in existing.items():
+        if vals:
+            merged[k] = vals[0]
+    for k, v in tracking.items():
+        merged[k] = v
+    new_q = urlencode(merged)
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, new_q, p.fragment))
+
+
 def merge_economybookings_affiliate_query(
     economybookings_target_url: str,
     affiliate_entry_url: str | None,
@@ -78,15 +100,4 @@ def merge_economybookings_affiliate_query(
     if "economybookings.com" not in target.lower():
         return target
     tracking = fetch_economybookings_tracking_params(aff)
-    if not tracking:
-        return target
-    p = urlparse(target)
-    existing = parse_qs(p.query, keep_blank_values=True)
-    merged: dict[str, str] = {}
-    for k, vals in existing.items():
-        if vals:
-            merged[k] = vals[0]
-    for k, v in tracking.items():
-        merged[k] = v
-    new_q = urlencode(merged)
-    return urlunparse((p.scheme, p.netloc, p.path, p.params, new_q, p.fragment))
+    return apply_economybookings_tracking_to_url(target, tracking)

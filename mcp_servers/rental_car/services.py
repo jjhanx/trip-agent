@@ -10,7 +10,9 @@ from mcp_servers.rental_car.economybookings_hint import (
 )
 from mcp_servers.rental_car.economybookings_links import build_airport_landing_url
 from mcp_servers.rental_car.travelpayouts_economybookings import (
-    merge_economybookings_affiliate_query,
+    apply_economybookings_tracking_to_url,
+    fetch_economybookings_tracking_params,
+    is_travelpayouts_economybookings_gateway,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,52 @@ def _hhmm_from_iso(dt: str | None, default: str = "10:00") -> str:
     return default
 
 
+def _fmt_rental_display_datetime(iso: str | None) -> str | None:
+    s = (iso or "").strip().replace(" ", "T")
+    if len(s) >= 16:
+        return s[:16].replace("T", " ")
+    return None
+
+
+def _rental_schedule_payload(
+    pickup_dt: str | None,
+    dropoff_dt: str | None,
+    passengers: int,
+    airport_iata: str,
+    start_d: str,
+    end_d: str,
+) -> dict:
+    """모든 렌트 카드에 동일하게 붙여 UI·제휴 링크 맥락을 드러냄."""
+    pax = max(1, int(passengers) if passengers else 1)
+    iata = (airport_iata or "").strip().upper()[:3]
+    ds = (start_d or "")[:10]
+    de = (end_d or ds)[:10]
+    pu = _fmt_rental_display_datetime(pickup_dt)
+    du = _fmt_rental_display_datetime(dropoff_dt)
+    out: dict = {
+        "rental_party_passengers": pax,
+        "rental_date_start": ds if len(ds) >= 10 else None,
+        "rental_date_end": de if len(de) >= 10 else None,
+        "rental_pickup_datetime": pu,
+        "rental_dropoff_datetime": du,
+        "rental_pickup_airport_iata": iata if len(iata) == 3 else None,
+    }
+    segs: list[str] = []
+    if len(iata) == 3:
+        segs.append(iata)
+    if pu:
+        segs.append(f"픽업 {pu}")
+    elif len(ds) >= 10:
+        segs.append(f"픽업일 {ds} {_hhmm_from_iso(pickup_dt)}")
+    if du:
+        segs.append(f"반납 {du}")
+    elif len(de) >= 10:
+        segs.append(f"반납일 {de} {_hhmm_from_iso(dropoff_dt)}")
+    segs.append(f"일행 {pax}명")
+    out["rental_schedule_line"] = " · ".join(segs)
+    return out
+
+
 def _filter_tiers_for_party(tiers: list[dict], pax: int) -> list[dict]:
     """좌석 정원이 [일행, ceil(일행×1.5)]에 들어가는 차급만 우선.
 
@@ -182,7 +230,7 @@ def _build_economybookings_url(
     if path:
         region, country, city, airport = path
         return build_airport_landing_url(region, country, city, airport, sd, ed, pt, dt)
-    base = "https://www.economybookings.com/car-rental/all"
+    base = "https://www.economybookings.com/en/car-rental/all"
     if len(sd) >= 10 and len(ed) >= 10:
         return f"{base}?{urlencode({'pickup_date': sd, 'dropoff_date': ed, 'pickup_time': pt, 'dropoff_time': dt, 'return_time': dt})}"
     return base
@@ -230,8 +278,9 @@ def _vehicle_class_guide_cards(
     dropoff_datetime: str | None,
     eb_path: tuple[str, str, str, str] | None,
     daily_eur_cache: dict[str, float | None] | None = None,
+    eb_tracking_params: dict[str, str] | None = None,
 ) -> list[dict]:
-    """일행·짐(×1.5) 범위에 맞는 차급만. 버튼 링크는 cars/results 딥링크(일정·위치). 가격 힌트는 차급 소개 페이지만 스크레이프."""
+    """일행·짐(×1.5) 범위에 맞는 차급만. 공항 매핑이 있으면 차급별 EB URL(날짜·시각 쿼리)로 버튼을 구분. 가격 힌트는 차급 소개 페이지 스크레이프."""
     pax = max(1, passengers)
     need_bags = math.ceil(pax * _CAPACITY_MULTIPLIER)
     country_slug: str | None = None
@@ -300,6 +349,7 @@ def _vehicle_class_guide_cards(
     ]
 
     tiers = _filter_tiers_for_party(tiers_all, pax)
+    track = eb_tracking_params or {}
     out: list[dict] = []
     for t in tiers:
         seats = int(t["seats"])
@@ -310,7 +360,7 @@ def _vehicle_class_guide_cards(
             desc += f" 일행 {pax}명 기준 정원이 부족할 수 있어 2대 또는 더 큰 클래스를 확인하세요."
 
         if country_slug and city_slug:
-            scrape_url = _build_economybookings_car_type_url(
+            car_type_url = _build_economybookings_car_type_url(
                 country_slug,
                 city_slug,
                 str(t["eb_slug"]),
@@ -319,10 +369,11 @@ def _vehicle_class_guide_cards(
                 pickup_datetime,
                 dropoff_datetime,
             )
+            scrape_url = car_type_url
+            booking_url = apply_economybookings_tracking_to_url(car_type_url, track)
         else:
             scrape_url = eb_user_booking_url
-
-        booking_url = eb_user_booking_url
+            booking_url = eb_user_booking_url
 
         if daily_eur_cache is not None and scrape_url in daily_eur_cache:
             daily_eur = daily_eur_cache[scrape_url]
@@ -331,10 +382,16 @@ def _vehicle_class_guide_cards(
             if daily_eur_cache is not None:
                 daily_eur_cache[scrape_url] = daily_eur
         price_krw: int | None = None
-        price_basis = (
-            f"픽업 {start_d} ~ 반납 {end_d}({days}일). 버튼은 공항 페이지(날짜·시각 쿼리)로 연결됩니다. "
-            "가격 숫자는 차급 소개 페이지 스니펫 기준입니다."
-        )
+        if country_slug and city_slug:
+            price_basis = (
+                f"픽업 {start_d} ~ 반납 {end_d}({days}일). 예약 버튼은 이 차급 전용 EB 페이지(날짜·시각 쿼리)로 열립니다. "
+                "가격 힌트는 동일 차급 소개 페이지 스니펫 기준입니다."
+            )
+        else:
+            price_basis = (
+                f"픽업 {start_d} ~ 반납 {end_d}({days}일). 버튼은 공항 랜딩(날짜·시각 쿼리)입니다. "
+                "가격 숫자는 차급 소개 페이지 스니펫 기준입니다."
+            )
         if daily_eur is not None:
             price_krw = daily_to_total_krw_hint(daily_eur, days)
             price_basis = (
@@ -365,7 +422,7 @@ def _vehicle_class_guide_cards(
             "price_basis": price_basis,
             "recommended": rec_bags and fits_pax,
             "booking_url": booking_url,
-            "source_label": "EconomyBookings · 공항·일정 링크",
+            "source_label": "EconomyBookings · 차급 페이지(일정·시각 쿼리)",
             "fits_passengers": fits_pax,
         })
     out.sort(
@@ -396,7 +453,7 @@ def search_rentals_combined(
     amadeus_client_secret: str | None = None,
     serpapi_api_key: str | None = None,
 ) -> list[dict]:
-    """렌트 단계: SerpApi 후보(가격 힌트 가능) → 차급별 스펙 카드(EB 동일 링크) → 비교·제휴.
+    """렌트 단계: SerpApi 후보 → 차급별 EB 딥링크(차급·일정 구분) → 공항 비교 카드 → 제휴.
 
     Amadeus 트랜스퍼는 렌트 UX와 겹쳐 혼란을 주어 호출하지 않습니다.
     """
@@ -430,9 +487,11 @@ def search_rentals_combined(
             "Use Travelpayouts dashboard → Cars (렌트카) deep link."
         )
         tp_rental = ""
-    if tp_rental:
-        eb_booking_url = merge_economybookings_affiliate_query(eb_landing_url, tp_rental)
-    affiliate_tracking_merged = bool(tp_rental) and eb_booking_url != eb_landing_url
+    tp_track: dict[str, str] = {}
+    if tp_rental and is_travelpayouts_economybookings_gateway(tp_rental):
+        tp_track = fetch_economybookings_tracking_params(tp_rental)
+    eb_booking_url = apply_economybookings_tracking_to_url(eb_landing_url, tp_track)
+    affiliate_tracking_merged = bool(tp_track)
 
     tp_card = {
         "rental_id": "TP-AFFILIATE",
@@ -503,7 +562,7 @@ def search_rentals_combined(
         "price_basis": "",
         "recommended": False,
         "booking_url": eb_booking_url,
-        "source_label": "EconomyBookings"
+        "source_label": "EconomyBookings · 공항 전체 비교(일정·시각)"
         + (" · Travelpayouts" if affiliate_tracking_merged else ""),
     }
 
@@ -573,6 +632,7 @@ def search_rentals_combined(
         dropoff_datetime,
         eb_path,
         eb_daily_cache,
+        eb_tracking_params=tp_track,
     )
 
     results.extend(serpapi_cards)
@@ -580,6 +640,17 @@ def search_rentals_combined(
     results.append(economy_card)
     if tp_rental:
         results.append(tp_card)
+
+    sched = _rental_schedule_payload(
+        pickup_datetime,
+        dropoff_datetime,
+        raw_seats,
+        pickup_code,
+        start_d,
+        end_d,
+    )
+    for item in results:
+        item.update(sched)
 
     return results
 

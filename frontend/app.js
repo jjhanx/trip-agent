@@ -1487,15 +1487,15 @@ function renderRentalOptions(items) {
       const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
       const priceBasis = opt.price_basis || '';
-      const bookingLabel = opt.provider === 'EconomyBookings'
-        ? 'EconomyBookings 열기'
+      const bookingLabel = kind === 'self_drive_compare'
+        ? '공항 전체 비교 (EB)'
         : kind === 'vehicle_class_guide'
-          ? '같은 공항·일정 열기'
+          ? '이 차급·일정 (EB)'
           : kind === 'serpapi_self_drive'
             ? '가격·차종 확인(출처)'
             : kind === 'affiliate'
-              ? '제휴 렌트 링크'
-              : '예약·약관 확인';
+              ? 'Travelpayouts 제휴 열기'
+              : (opt.provider === 'EconomyBookings' ? 'EconomyBookings 열기' : '예약·약관 확인');
       const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>` : '';
       const orig = (opt.price_original_amount && opt.price_original_currency)
         ? ` <span class="rental-original-price">(${opt.price_original_amount} ${opt.price_original_currency})</span>`
@@ -1512,6 +1512,7 @@ function renderRentalOptions(items) {
             ${features ? `<p class="rental-features">${features}</p>` : ''}
             ${srcLine}
             ${luggageHtml}
+            ${opt.rental_schedule_line ? `<p class="rental-schedule">${opt.rental_schedule_line}</p>` : ''}
             <p class="rental-location">${[opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ')}</p>
             <div class="rental-footer">
               ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}

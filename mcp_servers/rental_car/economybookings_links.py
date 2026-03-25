@@ -29,7 +29,7 @@ def _parse_merged_location_id(html: str) -> int | None:
 
 @lru_cache(maxsize=128)
 def fetch_merged_location_id_for_airport_url(airport_car_rental_url: str) -> int | None:
-    """예: https://www.economybookings.com/car-rental/europe/italy/milan/mxp → 2042 (MXP)."""
+    """예: https://www.economybookings.com/en/car-rental/europe/italy/milan/mxp → mergedLocationId."""
     u = (airport_car_rental_url or "").strip()
     if not u.startswith("http"):
         return None
@@ -87,8 +87,8 @@ def build_airport_landing_url(
     pickup_time_hhmm: str,
     dropoff_time_hhmm: str,
 ) -> str:
-    """매핑 없는 공항용 폴백(구 SEO 랜딩)."""
-    base = f"https://www.economybookings.com/car-rental/{region}/{country}/{city}/{airport}"
+    """공항 랜딩(영문 경로). 쿼리로 일시를 붙이면 사이트 폼에 반영되는 경우가 많습니다."""
+    base = f"https://www.economybookings.com/en/car-rental/{region}/{country}/{city}/{airport}"
     if len(pickup_date) >= 10 and len(dropoff_date) >= 10:
         q = urlencode({
             "pickup_date": pickup_date[:10],
