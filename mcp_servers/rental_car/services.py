@@ -1,5 +1,6 @@
 """Rental car search logic - shared by MCP server and agents."""
 
+import logging
 import math
 from urllib.parse import urlencode
 
@@ -7,17 +8,42 @@ from mcp_servers.rental_car.economybookings_hint import (
     daily_to_total_krw_hint,
     fetch_lowest_daily_eur,
 )
-from mcp_servers.rental_car.economybookings_links import (
-    build_airport_landing_url,
-    build_cars_results_url,
-    fetch_merged_location_id_for_airport_url,
-)
+from mcp_servers.rental_car.economybookings_links import build_airport_landing_url
+
+logger = logging.getLogger(__name__)
 
 # 차급별 최대 탑승 인원 (compact=4, sedan=5, suv=7, van=8)
 _CAR_SEATS = {"compact": 4, "sedan": 5, "suv": 7, "van": 8, "minivan": 8}
 
 # 여행 가방 고려: 일행 x 1.5 좌석 → "추천" 배지. 최소 seats >= passengers 인 차량은 모두 표시
 _CAPACITY_MULTIPLIER = 1.5
+
+# Travelpayouts 렌트 제휴 URL이 항공 검색으로 잘못 설정된 경우 목록에서 제외
+_TP_FLIGHT_URL_MARKERS = (
+    "/flights",
+    "travel/flights",
+    "google.com/flights",
+    "kayak.com/flights",
+    "skyscanner.net/transport/flights",
+    "skyscanner.com/transport/flights",
+    "expedia.com/flights",
+    "booking.com/flights",
+    "cheapoair.com",
+    "momondo.com/flight",
+)
+
+
+def _travelpayouts_rental_url_valid(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if not u.startswith("http"):
+        return False
+    if any(m in u for m in _TP_FLIGHT_URL_MARKERS):
+        return False
+    if "aviasales." in u or "aviasales/" in u:
+        if not any(k in u for k in ("car", "rent", "rental", "cars", "авто")):
+            return False
+    return True
+
 
 # 공항코드 → economybookings.com 경로 (region, country, city, airport_slug)
 # 사용자 선호: economybookings.com. 실시간 가격은 해당 사이트에서 확인.
@@ -303,8 +329,8 @@ def _vehicle_class_guide_cards(
                 daily_eur_cache[scrape_url] = daily_eur
         price_krw: int | None = None
         price_basis = (
-            f"픽업 {start_d} ~ 반납 {end_d}({days}일). 아래 버튼은 공항·일정·시각이 쿼리로 넘어가 "
-            "결과 목록으로 바로 이어지는 EconomyBookings 주소입니다."
+            f"픽업 {start_d} ~ 반납 {end_d}({days}일). 버튼은 공항 페이지(날짜·시각 쿼리)로 연결됩니다. "
+            "가격 숫자는 차급 소개 페이지 스니펫 기준입니다."
         )
         if daily_eur is not None:
             price_krw = daily_to_total_krw_hint(daily_eur, days)
@@ -336,7 +362,7 @@ def _vehicle_class_guide_cards(
             "price_basis": price_basis,
             "recommended": rec_bags and fits_pax,
             "booking_url": booking_url,
-            "source_label": "EconomyBookings · cars/results 딥링크",
+            "source_label": "EconomyBookings · 공항·일정 링크",
             "fits_passengers": fits_pax,
         })
     out.sort(
@@ -390,20 +416,17 @@ def search_rentals_combined(
         pickup_datetime,
         dropoff_datetime,
     )
+    # cars/results?plc&py… 딥링크는 EB 쪽에서 빈 결과로 이어지는 사례가 있어, 사용자 링크는 공항 랜딩만 사용합니다.
     eb_booking_url = eb_landing_url
-    if len(pickup_code) == 3 and len(start_d) >= 10 and len(end_d) >= 10:
-        merged_id = fetch_merged_location_id_for_airport_url(eb_landing_url)
-        if merged_id:
-            eb_booking_url = build_cars_results_url(
-                merged_id,
-                start_d,
-                end_d,
-                _hhmm_from_iso(pickup_datetime),
-                _hhmm_from_iso(dropoff_datetime),
-            )
     eb_path = _AIRPORT_TO_ECONOMYBOOKINGS.get(pickup_code)
 
     tp_rental = (travelpayouts_rental_booking_url or "").strip()
+    if tp_rental and not _travelpayouts_rental_url_valid(tp_rental):
+        logger.warning(
+            "TRAVELPAYOUTS_RENTAL_BOOKING_URL looks like a flight URL; skipping affiliate card. "
+            "Use Travelpayouts dashboard → Cars (렌트카) deep link."
+        )
+        tp_rental = ""
     tp_card = {
         "rental_id": "TP-AFFILIATE",
         "offer_kind": "affiliate",
@@ -431,11 +454,11 @@ def search_rentals_combined(
         "seats": 9,
         "vehicle_name": "전체 업체 비교 (필터로 차급·가격)",
         "description": (
-            f"픽업 {start_d} ~ 반납 {end_d} · 공항 위치(plc)·연월일(py/pm/pd)·시각(pt/dt)·운전자 나이(age)가 "
-            "URL에 포함되어 있으면 결과 목록으로 바로 이어집니다."
+            f"픽업 {start_d} ~ 반납 {end_d} · 공항 전용 페이지로 연결됩니다. "
+            "URL에 픽업·반납 날짜와 시각이 붙어 있으면 사이트에서 입력이 일부 채워질 수 있습니다."
         ),
         "features": [
-            "cars/results 딥링크",
+            "공항·날짜·시각 쿼리",
             "600+ 업체",
             "차급·좌석 필터",
         ],
@@ -448,7 +471,7 @@ def search_rentals_combined(
         "price_basis": "",
         "recommended": False,
         "booking_url": eb_booking_url,
-        "source_label": "EconomyBookings · cars/results",
+        "source_label": "EconomyBookings",
     }
 
     results: list[dict] = []
@@ -478,12 +501,8 @@ def search_rentals_combined(
 
     d_days = max(1, days)
     eb_daily_cache: dict[str, float | None] = {}
-    eb_daily_airport = fetch_lowest_daily_eur(eb_booking_url)
-    eb_daily_cache[eb_booking_url] = eb_daily_airport
-    if eb_landing_url != eb_booking_url:
-        eb_daily_cache[eb_landing_url] = fetch_lowest_daily_eur(eb_landing_url)
-        if eb_daily_airport is None and eb_daily_cache[eb_landing_url] is not None:
-            eb_daily_airport = eb_daily_cache[eb_landing_url]
+    eb_daily_airport = fetch_lowest_daily_eur(eb_landing_url)
+    eb_daily_cache[eb_landing_url] = eb_daily_airport
     eb_airport_krw = (
         daily_to_total_krw_hint(eb_daily_airport, d_days) if eb_daily_airport is not None else None
     )

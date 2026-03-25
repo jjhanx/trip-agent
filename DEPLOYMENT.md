@@ -212,7 +212,7 @@ TRAVELPAYOUTS_MARKER=제휴_마커
 
 **Amadeus** 키는 **항공** fallback용입니다. 렌트 단계에서는 장기 렌트와 혼동을 줄이기 위해 **트랜스퍼 API를 호출하지 않습니다**.
 
-선택: 대시보드 **Tools → Link Generator**에서 렌트카 제휴 URL을 넣으면 목록 **하단**에 제휴 카드가 추가됩니다.
+선택: Travelpayouts 대시보드에서 **Cars(렌트카)** 용 딥링크를 넣으면 목록 **하단**에 제휴 카드가 추가됩니다. **항공 검색용 Aviasales 등 URL은 자동으로 제외**됩니다.
 
 ```env
 TRAVELPAYOUTS_RENTAL_BOOKING_URL=https://...

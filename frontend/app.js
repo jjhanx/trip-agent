@@ -1464,7 +1464,7 @@ function renderRentalOptions(items) {
   }
   const isRental = state.travelInput?.local_transport === 'rental_car';
   list.innerHTML = (items || []).map((opt, i) => {
-    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'vehicle_class_guide' || opt.offer_kind === 'info')) {
+    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'vehicle_class_guide' || opt.offer_kind === 'affiliate' || opt.offer_kind === 'info')) {
       const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
       const title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
       const features = Array.isArray(opt.features) ? opt.features.join(' · ') : opt.features || '';
@@ -1488,12 +1488,14 @@ function renderRentalOptions(items) {
       const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
       const priceBasis = opt.price_basis || '';
       const bookingLabel = opt.provider === 'EconomyBookings'
-        ? '날짜·시각 반영해 보기'
+        ? 'EconomyBookings 열기'
         : kind === 'vehicle_class_guide'
-          ? '이 차급·일정으로 보기'
+          ? '같은 공항·일정 열기'
           : kind === 'serpapi_self_drive'
             ? '가격·차종 확인(출처)'
-            : '예약·약관 확인';
+            : kind === 'affiliate'
+              ? '제휴 렌트 링크'
+              : '예약·약관 확인';
       const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>` : '';
       const orig = (opt.price_original_amount && opt.price_original_currency)
         ? ` <span class="rental-original-price">(${opt.price_original_amount} ${opt.price_original_currency})</span>`

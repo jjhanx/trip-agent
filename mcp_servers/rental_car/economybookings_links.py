@@ -1,6 +1,6 @@
-"""EconomyBookings `/[lang]/cars/results` 딥링크 — plc/dlc·연월일·시각·나이 쿼리.
+"""EconomyBookings 공항 랜딩 URL 빌더.
 
-공항 랜딩 페이지 `__NEXT_DATA__`의 `mergedLocationId`를 읽어 plc/dlc에 넣습니다.
+`build_cars_results_url` 등은 사이트 동작 변경으로 빈 결과가 나올 수 있어, 앱에서는 랜딩 URL만 사용합니다.
 """
 
 from __future__ import annotations
