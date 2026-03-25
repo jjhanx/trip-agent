@@ -7,6 +7,11 @@ from mcp_servers.rental_car.economybookings_hint import (
     daily_to_total_krw_hint,
     fetch_lowest_daily_eur,
 )
+from mcp_servers.rental_car.economybookings_links import (
+    build_airport_landing_url,
+    build_cars_results_url,
+    fetch_merged_location_id_for_airport_url,
+)
 
 # 차급별 최대 탑승 인원 (compact=4, sedan=5, suv=7, van=8)
 _CAR_SEATS = {"compact": 4, "sedan": 5, "suv": 7, "van": 8, "minivan": 8}
@@ -138,25 +143,19 @@ def _build_economybookings_url(
     pickup_datetime: str | None = None,
     dropoff_datetime: str | None = None,
 ) -> str:
-    """economybookings.com 공항 검색 URL. 날짜·픽업/반납 시각 쿼리로 폼 자동 채움 유도."""
+    """공항 SEO 랜딩 URL (mergedLocationId 조회·가격 스크레이프 폴백용)."""
     pickup_upper = (pickup or "").strip().upper()[:3]
     path = _AIRPORT_TO_ECONOMYBOOKINGS.get(pickup_upper)
+    pt = _hhmm_from_iso(pickup_datetime)
+    dt = _hhmm_from_iso(dropoff_datetime)
+    sd = (start_date or "")[:10]
+    ed = (end_date or sd)[:10]
     if path:
         region, country, city, airport = path
-        base = f"https://www.economybookings.com/car-rental/{region}/{country}/{city}/{airport}"
-    else:
-        base = "https://www.economybookings.com/car-rental/all"
-    if start_date and len(start_date) >= 10 and end_date and len(end_date) >= 10:
-        pt = _hhmm_from_iso(pickup_datetime)
-        dt = _hhmm_from_iso(dropoff_datetime)
-        q = urlencode({
-            "pickup_date": start_date[:10],
-            "dropoff_date": end_date[:10],
-            "pickup_time": pt,
-            "dropoff_time": dt,
-            "return_time": dt,
-        })
-        return f"{base}?{q}"
+        return build_airport_landing_url(region, country, city, airport, sd, ed, pt, dt)
+    base = "https://www.economybookings.com/car-rental/all"
+    if len(sd) >= 10 and len(ed) >= 10:
+        return f"{base}?{urlencode({'pickup_date': sd, 'dropoff_date': ed, 'pickup_time': pt, 'dropoff_time': dt, 'return_time': dt})}"
     return base
 
 
@@ -191,7 +190,7 @@ def _min_serp_price_krw(serp_cards: list[dict]) -> int | None:
 
 
 def _vehicle_class_guide_cards(
-    eb_airport_url: str,
+    eb_user_booking_url: str,
     pickup: str,
     dropoff: str,
     passengers: int,
@@ -203,7 +202,7 @@ def _vehicle_class_guide_cards(
     eb_path: tuple[str, str, str, str] | None,
     daily_eur_cache: dict[str, float | None] | None = None,
 ) -> list[dict]:
-    """일행·짐(×1.5) 범위에 맞는 차급만. 링크는 EB 차종별 경로+날짜·시각. 가격은 해당 페이지 HTML 일당 From 추정."""
+    """일행·짐(×1.5) 범위에 맞는 차급만. 버튼 링크는 cars/results 딥링크(일정·위치). 가격 힌트는 차급 소개 페이지만 스크레이프."""
     pax = max(1, passengers)
     need_bags = math.ceil(pax * _CAPACITY_MULTIPLIER)
     country_slug: str | None = None
@@ -282,7 +281,7 @@ def _vehicle_class_guide_cards(
             desc += f" 일행 {pax}명 기준 정원이 부족할 수 있어 2대 또는 더 큰 클래스를 확인하세요."
 
         if country_slug and city_slug:
-            booking_url = _build_economybookings_car_type_url(
+            scrape_url = _build_economybookings_car_type_url(
                 country_slug,
                 city_slug,
                 str(t["eb_slug"]),
@@ -292,17 +291,20 @@ def _vehicle_class_guide_cards(
                 dropoff_datetime,
             )
         else:
-            booking_url = eb_airport_url
+            scrape_url = eb_user_booking_url
 
-        if daily_eur_cache is not None and booking_url in daily_eur_cache:
-            daily_eur = daily_eur_cache[booking_url]
+        booking_url = eb_user_booking_url
+
+        if daily_eur_cache is not None and scrape_url in daily_eur_cache:
+            daily_eur = daily_eur_cache[scrape_url]
         else:
-            daily_eur = fetch_lowest_daily_eur(booking_url)
+            daily_eur = fetch_lowest_daily_eur(scrape_url)
             if daily_eur_cache is not None:
-                daily_eur_cache[booking_url] = daily_eur
+                daily_eur_cache[scrape_url] = daily_eur
         price_krw: int | None = None
         price_basis = (
-            f"픽업 {start_d} ~ 반납 {end_d}({days}일). 링크에 날짜·시각이 붙어 있어 검색 입력을 줄일 수 있습니다."
+            f"픽업 {start_d} ~ 반납 {end_d}({days}일). 아래 버튼은 공항·일정·시각이 쿼리로 넘어가 "
+            "결과 목록으로 바로 이어지는 EconomyBookings 주소입니다."
         )
         if daily_eur is not None:
             price_krw = daily_to_total_krw_hint(daily_eur, days)
@@ -334,7 +336,7 @@ def _vehicle_class_guide_cards(
             "price_basis": price_basis,
             "recommended": rec_bags and fits_pax,
             "booking_url": booking_url,
-            "source_label": "EconomyBookings 차급 페이지 · 날짜·시각 쿼리",
+            "source_label": "EconomyBookings · cars/results 딥링크",
             "fits_passengers": fits_pax,
         })
     out.sort(
@@ -380,7 +382,7 @@ def search_rentals_combined(
             iata = p
     pickup_code = iata if len(iata) == 3 else (pickup or "").strip().upper()[:3]
 
-    eb_url = _build_economybookings_url(
+    eb_landing_url = _build_economybookings_url(
         pickup_code,
         dropoff,
         start_d,
@@ -388,6 +390,17 @@ def search_rentals_combined(
         pickup_datetime,
         dropoff_datetime,
     )
+    eb_booking_url = eb_landing_url
+    if len(pickup_code) == 3 and len(start_d) >= 10 and len(end_d) >= 10:
+        merged_id = fetch_merged_location_id_for_airport_url(eb_landing_url)
+        if merged_id:
+            eb_booking_url = build_cars_results_url(
+                merged_id,
+                start_d,
+                end_d,
+                _hhmm_from_iso(pickup_datetime),
+                _hhmm_from_iso(dropoff_datetime),
+            )
     eb_path = _AIRPORT_TO_ECONOMYBOOKINGS.get(pickup_code)
 
     tp_rental = (travelpayouts_rental_booking_url or "").strip()
@@ -418,11 +431,11 @@ def search_rentals_combined(
         "seats": 9,
         "vehicle_name": "전체 업체 비교 (필터로 차급·가격)",
         "description": (
-            f"픽업 {start_d} ~ 반납 {end_d} · 링크에 날짜·픽업/반납 시각이 포함됩니다. "
-            "열리면 검색 버튼 한 번으로 결과를 볼 수 있는 경우가 많습니다."
+            f"픽업 {start_d} ~ 반납 {end_d} · 공항 위치(plc)·연월일(py/pm/pd)·시각(pt/dt)·운전자 나이(age)가 "
+            "URL에 포함되어 있으면 결과 목록으로 바로 이어집니다."
         ),
         "features": [
-            "날짜·시각 URL 반영",
+            "cars/results 딥링크",
             "600+ 업체",
             "차급·좌석 필터",
         ],
@@ -434,8 +447,8 @@ def search_rentals_combined(
         "price_is_estimate": False,
         "price_basis": "",
         "recommended": False,
-        "booking_url": eb_url,
-        "source_label": "EconomyBookings",
+        "booking_url": eb_booking_url,
+        "source_label": "EconomyBookings · cars/results",
     }
 
     results: list[dict] = []
@@ -465,8 +478,12 @@ def search_rentals_combined(
 
     d_days = max(1, days)
     eb_daily_cache: dict[str, float | None] = {}
-    eb_daily_airport = fetch_lowest_daily_eur(eb_url)
-    eb_daily_cache[eb_url] = eb_daily_airport
+    eb_daily_airport = fetch_lowest_daily_eur(eb_booking_url)
+    eb_daily_cache[eb_booking_url] = eb_daily_airport
+    if eb_landing_url != eb_booking_url:
+        eb_daily_cache[eb_landing_url] = fetch_lowest_daily_eur(eb_landing_url)
+        if eb_daily_airport is None and eb_daily_cache[eb_landing_url] is not None:
+            eb_daily_airport = eb_daily_cache[eb_landing_url]
     eb_airport_krw = (
         daily_to_total_krw_hint(eb_daily_airport, d_days) if eb_daily_airport is not None else None
     )
@@ -478,7 +495,7 @@ def search_rentals_combined(
         basis_parts: list[str] = []
         if eb_airport_krw is not None and eb_daily_airport is not None:
             basis_parts.append(
-                f"EconomyBookings 공항 목록의 From 일당 중 최저 약 {eb_daily_airport:.2f}€ × {d_days}일 "
+                f"EconomyBookings(결과·랜딩 페이지) From 일당 중 최저 약 {eb_daily_airport:.2f}€ × {d_days}일 "
                 f"→ 표시용 환율로 총액 힌트 약 {eb_airport_krw:,}원 (보험·옵션 제외 가능)."
             )
         if serp_min_krw is not None:
@@ -493,7 +510,7 @@ def search_rentals_combined(
         )
 
     vehicle_cards = _vehicle_class_guide_cards(
-        eb_url,
+        eb_booking_url,
         pickup,
         dropoff,
         raw_seats,

@@ -29,6 +29,32 @@ _SKIP_SUBSTR = (
     "linkedin.com",
 )
 
+_FLIGHT_ONLY_HINT = re.compile(
+    r"(cheap\s+flight|flight\s+tickets?|book\s+flights?|search\s+.*\sflights?\b|airline\s+tickets?|"
+    r"plane\s+tickets?|\bflights?\s+to\b|항공권|항공\s*예약|비행기\s*표)",
+    re.I,
+)
+_RENTAL_HINT = re.compile(
+    r"(car\s*(hire|rental)|rent\s+a\s+car|van\s+rental|suv\s+rental|minivan|mietwagen|noleggio|"
+    r"autohuur|alquiler|レンタカ|렌트카)",
+    re.I,
+)
+
+
+def _looks_like_flight_only(title: str, snippet: str, link: str) -> bool:
+    """렌트 단계에서 항공 전용 스니펫/URL 제외."""
+    blob = f"{title} {snippet}"
+    u = (link or "").lower()
+    if _RENTAL_HINT.search(blob):
+        return False
+    if _FLIGHT_ONLY_HINT.search(blob):
+        return True
+    if re.search(r"/flights?(/|$|\?)", u) and "car" not in u and "rent" not in u:
+        return True
+    if "google.com/travel/flights" in u or "google.com/flights" in u:
+        return True
+    return False
+
 
 def _domain(url: str) -> str:
     try:
@@ -133,6 +159,8 @@ def _organic_results_to_cards(
         if not dom or dom in seen:
             continue
         if any(s in dom for s in _SKIP_SUBSTR):
+            continue
+        if _looks_like_flight_only(title, snippet, link):
             continue
         seen.add(dom)
 
