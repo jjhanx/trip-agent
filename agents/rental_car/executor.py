@@ -58,6 +58,10 @@ class RentalCarExecutor(BaseAgentExecutor):
         try:
             result = await self.mcp.call_tool("search_rentals", mcp_args)
             text = result.get("text", json.dumps(result))
+            if isinstance(text, str):
+                text = text.strip()
+                if text.startswith("\ufeff"):
+                    text = text[1:].lstrip()
             rentals = json.loads(text) if isinstance(text, str) else text
         except Exception:
             from datetime import datetime

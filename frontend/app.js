@@ -221,7 +221,7 @@ function loadPlanIntoState(data) {
   state.selectedItinerary = data.selectedItinerary ?? null;
   state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
   state.selectedAccommodation = data.selectedAccommodation ?? null;
-  state.localTransport = Array.isArray(data.localTransport) ? data.localTransport : [];
+  state.localTransport = normalizeLocalTransport(data.localTransport);
   state.selectedLocalTransport = data.selectedLocalTransport ?? null;
 }
 
@@ -1141,7 +1141,7 @@ async function advanceToLocalTransportStep() {
     if (data?.error) throw new Error(data.error);
 
     if (data?.step === 'rental') {
-      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderRentalOptions(state.localTransport);
       show('step-rental');
       fillRentalSearchFormFromFlight(true);
@@ -1152,7 +1152,7 @@ async function advanceToLocalTransportStep() {
       if (hasCompleteRoundTrip) {
         const retryData = await callAgent(payload);
         if (retryData?.step === 'rental') {
-          state.localTransport = Array.isArray(retryData?.local_transport) ? retryData.local_transport : [];
+          state.localTransport = normalizeLocalTransport(retryData?.local_transport);
           renderRentalOptions(state.localTransport);
           show('step-rental');
           fillRentalSearchFormFromFlight(true);
@@ -1179,7 +1179,7 @@ async function advanceToLocalTransportStep() {
     }
     if (data?.step === 'accommodation_and_transport') {
       state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
-      state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+      state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
       show('step-accommodation');
@@ -1454,6 +1454,40 @@ function fillRentalSearchFormFromFlight(force) {
   else if (ti?.end_date) dEl.value = rentalDropoffBeforeDeparture(`${ti.end_date}T10:00`);
 }
 
+function escapeHtml(str) {
+  if (str == null || str === '') return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
+function normalizeLocalTransport(lt) {
+  if (Array.isArray(lt)) return lt;
+  if (lt == null) return [];
+  if (typeof lt === 'string') {
+    let s = lt.trim();
+    if (s.charCodeAt(0) === 0xfeff) s = s.slice(1).trim();
+    if (!s) return [];
+    try {
+      const p = JSON.parse(s);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      const i = s.indexOf('[');
+      if (i >= 0) {
+        try {
+          const p = JSON.parse(s.slice(i));
+          return Array.isArray(p) ? p : [];
+        } catch { /* ignore */ }
+      }
+    }
+    return [];
+  }
+  return [];
+}
+
 function renderRentalOptions(items) {
   const list = $('#rental-list');
   if (!list) return;
@@ -1463,11 +1497,26 @@ function renderRentalOptions(items) {
     panel.classList.toggle('hidden', !isRentalCar);
   }
   const isRental = state.travelInput?.local_transport === 'rental_car';
-  list.innerHTML = (items || []).map((opt, i) => {
-    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'vehicle_class_guide' || opt.offer_kind === 'affiliate' || opt.offer_kind === 'info')) {
+  const rows = normalizeLocalTransport(items);
+  const selectHint = $('#rental-select-hint');
+  if (selectHint) selectHint.classList.add('hidden');
+  if (isRental && rows.length === 0) {
+    list.innerHTML = '<p class="rental-empty muted" role="status">렌트카 목록이 비어 있습니다. 픽업·반납 일시와 공항 코드(IATA)를 확인한 뒤 「이 일정으로 다시 검색」을 눌러 주세요. 계속 비면 서버에서 렌트 MCP 응답이 JSON 배열로 오는지 확인하세요.</p>';
+    state.selectedLocalTransport = null;
+    const countEl = $('#rental-result-count');
+    if (countEl) countEl.textContent = '';
+    const discEl = $('#rental-price-disclaimer');
+    if (discEl) discEl.classList.add('hidden');
+    updateRentalBookingButton();
+    return;
+  }
+  if (isRental && rows.length > 0 && selectHint) selectHint.classList.remove('hidden');
+  list.innerHTML = rows.map((opt, i) => {
+    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'vehicle_class_guide' || opt.offer_kind === 'self_drive_compare' || opt.offer_kind === 'affiliate' || opt.offer_kind === 'info')) {
       const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
-      const title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
-      const features = Array.isArray(opt.features) ? opt.features.join(' · ') : opt.features || '';
+      const titleRaw = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
+      const title = escapeHtml(titleRaw);
+      const features = escapeHtml(Array.isArray(opt.features) ? opt.features.join(' · ') : (opt.features || ''));
       const recommendedBadge = opt.recommended ? '<span class="rental-badge recommended">여행가방 추천</span>' : '';
       const kind = opt.offer_kind || '';
       const kindBadge = kind === 'amadeus_transfer'
@@ -1483,10 +1532,14 @@ function renderRentalOptions(items) {
                 : kind === 'affiliate'
                   ? '<span class="rental-badge">제휴</span>'
                   : '';
-      const imgHtml = opt.image_url ? `<img src="${opt.image_url}" alt="${opt.vehicle_name || opt.car_type}" class="rental-card-img" loading="lazy">` : '';
-      const detailHtml = opt.description || opt.vehicle_name ? `<p class="rental-desc">${opt.vehicle_name || ''}${opt.description ? ' · ' + opt.description : ''}</p>` : '';
-      const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${opt.luggage_capacity}</span>` : '';
-      const priceBasis = opt.price_basis || '';
+      const imgHtml = opt.image_url
+        ? `<img src="${String(opt.image_url).replace(/"/g, '%22')}" alt="${escapeHtml(opt.vehicle_name || opt.car_type || '')}" class="rental-card-img" loading="lazy">`
+        : '';
+      const vn = escapeHtml(opt.vehicle_name || '');
+      const od = escapeHtml(opt.description || '');
+      const detailHtml = (opt.description || opt.vehicle_name) ? `<p class="rental-desc">${vn}${od ? ' · ' + od : ''}</p>` : '';
+      const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${escapeHtml(opt.luggage_capacity)}</span>` : '';
+      const priceBasis = escapeHtml(opt.price_basis || '');
       const bookingLabel = kind === 'self_drive_compare'
         ? '공항 전체 비교 (EB)'
         : kind === 'vehicle_class_guide'
@@ -1496,12 +1549,17 @@ function renderRentalOptions(items) {
             : kind === 'affiliate'
               ? 'Travelpayouts 제휴 열기'
               : (opt.provider === 'EconomyBookings' ? 'EconomyBookings 열기' : '예약·약관 확인');
-      const bookingBtn = opt.booking_url ? `<a href="${opt.booking_url}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>` : '';
-      const orig = (opt.price_original_amount && opt.price_original_currency)
-        ? ` <span class="rental-original-price">(${opt.price_original_amount} ${opt.price_original_currency})</span>`
+      const safeBooking = typeof opt.booking_url === 'string' && /^https?:\/\//i.test(opt.booking_url) ? opt.booking_url : '';
+      const bookingBtn = safeBooking
+        ? `<a href="${safeBooking.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>`
         : '';
-      const snipRaw = opt.price_snippet_raw ? `<span class="rental-snippet-price">스니펫: ${opt.price_snippet_raw}</span>` : '';
-      const srcLine = opt.source_label ? `<p class="rental-source">${opt.source_label}</p>` : '';
+      const orig = (opt.price_original_amount && opt.price_original_currency)
+        ? ` <span class="rental-original-price">(${escapeHtml(String(opt.price_original_amount))} ${escapeHtml(String(opt.price_original_currency))})</span>`
+        : '';
+      const snipRaw = opt.price_snippet_raw ? `<span class="rental-snippet-price">스니펫: ${escapeHtml(opt.price_snippet_raw)}</span>` : '';
+      const srcLine = opt.source_label ? `<p class="rental-source">${escapeHtml(opt.source_label)}</p>` : '';
+      const schedLine = opt.rental_schedule_line ? `<p class="rental-schedule">${escapeHtml(opt.rental_schedule_line)}</p>` : '';
+      const locLine = [opt.pickup_location, opt.dropoff_location].filter(Boolean).map((x) => escapeHtml(x)).join(' → ');
       const priceEst = opt.price_is_estimate && opt.price_total_krw ? '약 ' : '';
       return `
         <div class="option-item rental-card" data-idx="${i}">
@@ -1512,8 +1570,8 @@ function renderRentalOptions(items) {
             ${features ? `<p class="rental-features">${features}</p>` : ''}
             ${srcLine}
             ${luggageHtml}
-            ${opt.rental_schedule_line ? `<p class="rental-schedule">${opt.rental_schedule_line}</p>` : ''}
-            <p class="rental-location">${[opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ')}</p>
+            ${schedLine}
+            <p class="rental-location">${locLine}</p>
             <div class="rental-footer">
               ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}
               ${bookingBtn}
@@ -1536,8 +1594,8 @@ function renderRentalOptions(items) {
     }
     return `
       <div class="option-item" data-idx="${i}">
-        <h3>${title}</h3>
-        <p>${desc}</p>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(desc)}</p>
       </div>
     `;
   }).join('');
@@ -1546,23 +1604,23 @@ function renderRentalOptions(items) {
       if (e.target?.closest('.btn-booking')) return;
       list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
-      state.selectedLocalTransport = items[parseInt(el.dataset.idx)];
+      state.selectedLocalTransport = rows[parseInt(el.dataset.idx, 10)];
       updateRentalBookingButton();
     });
   });
   let pickIdx = 0;
-  if (items && items.length > 0) {
-    const withUrl = items.findIndex(o => o.booking_url);
+  if (rows && rows.length > 0) {
+    const withUrl = rows.findIndex(o => o.booking_url);
     pickIdx = withUrl >= 0 ? withUrl : 0;
-    state.selectedLocalTransport = items[pickIdx];
+    state.selectedLocalTransport = rows[pickIdx];
     list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
     list.querySelector(`.option-item[data-idx="${pickIdx}"]`)?.classList.add('selected');
   }
   // 결과 수 및 면책 표시
   const countEl = $('#rental-result-count');
-  if (countEl) countEl.textContent = isRental && items?.length ? `총 ${items.length}건` : '';
+  if (countEl) countEl.textContent = isRental && rows.length ? `총 ${rows.length}건` : '';
   const discEl = $('#rental-price-disclaimer');
-  if (discEl) discEl.classList.toggle('hidden', !isRental || !items?.length);
+  if (discEl) discEl.classList.toggle('hidden', !isRental || !rows.length);
   updateRentalBookingButton();
 }
 
@@ -1626,7 +1684,7 @@ if (btnRentalRefresh) btnRentalRefresh.addEventListener('click', async () => {
     const data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
     if (data?.step !== 'rental') throw new Error('렌트카 검색 응답이 올바르지 않습니다.');
-    state.localTransport = Array.isArray(data?.local_transport) ? data.local_transport : [];
+    state.localTransport = normalizeLocalTransport(data?.local_transport);
     state.selectedLocalTransport = null;
     renderRentalOptions(state.localTransport);
     show('step-rental');
@@ -1637,7 +1695,12 @@ if (btnRentalRefresh) btnRentalRefresh.addEventListener('click', async () => {
 });
 
 $('#btn-next-rental').addEventListener('click', async () => {
-  state.selectedLocalTransport = state.selectedLocalTransport || (state.localTransport && state.localTransport[0]) || {};
+  const ltNorm = normalizeLocalTransport(state.localTransport);
+  if (state.travelInput?.local_transport === 'rental_car' && ltNorm.length === 0) {
+    alert('렌트카 검색 결과가 없습니다. 픽업·반납 일시와 공항 코드를 확인한 뒤 「이 일정으로 다시 검색」을 눌러 주세요.');
+    return;
+  }
+  state.selectedLocalTransport = state.selectedLocalTransport || ltNorm[0] || {};
   show('loading');
   try {
     const payload = {
@@ -1673,7 +1736,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     const acc = data?.accommodations || [];
     const lt = data?.local_transport || [];
     state.accommodations = Array.isArray(acc) ? acc : [];
-    state.localTransport = Array.isArray(lt) ? lt : [];
+    state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
       ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`

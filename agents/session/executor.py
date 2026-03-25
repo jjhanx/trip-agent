@@ -15,6 +15,46 @@ from shared.models import TravelInput, LocalTransportType
 from shared.utils import A2AClient, new_agent_text_message
 
 
+def _parse_agent_json_array(raw: str | list | None) -> list:
+    """MCP/A2A 텍스트에 선행 공백·BOM·짧은 머리말·마크다운 코드펜스가 있어도 JSON 배열로 파싱.
+
+    `startswith('[')` 만으로는 실패하는 경우(UTF-8 BOM, \\n 접두)에도 목록이 비지 않게 합니다.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str):
+        return []
+    s = raw.strip()
+    if s.startswith("\ufeff"):
+        s = s[1:].lstrip()
+    if not s:
+        return []
+    if "```" in s:
+        for ch in s.split("```"):
+            t = ch.strip()
+            if t.lower().startswith("json"):
+                t = t[4:].lstrip()
+            if t.startswith("["):
+                s = t
+                break
+    if s.startswith("["):
+        try:
+            out = json.loads(s)
+            return out if isinstance(out, list) else []
+        except json.JSONDecodeError:
+            pass
+    i = s.find("[")
+    if i >= 0:
+        try:
+            out = json.loads(s[i:])
+            return out if isinstance(out, list) else []
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
 def _extract_rental_dates_from_flight(selected_flight: dict | None, fallback_start: str, fallback_end: str) -> tuple[str, str]:
     """선택한 항공편의 현지 도착일·출발일을 렌트카 시작일·반납일로 추출.
 
@@ -432,8 +472,8 @@ class SessionExecutor(BaseAgentExecutor):
                     ])
             result = {
                 "step": "accommodation_and_transport",
-                "accommodations": json.loads(acc_resp) if acc_resp and acc_resp.startswith("[") else acc_resp or [],
-                "local_transport": json.loads(lt_resp) if lt_resp and lt_resp.startswith("[") else lt_resp or [],
+                "accommodations": _parse_agent_json_array(acc_resp),
+                "local_transport": _parse_agent_json_array(lt_resp),
             }
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(result, ensure_ascii=False))
@@ -487,7 +527,7 @@ class SessionExecutor(BaseAgentExecutor):
                     ])
             result = {
                 "step": "rental",
-                "local_transport": json.loads(lt_resp) if lt_resp and lt_resp.startswith("[") else lt_resp or [],
+                "local_transport": _parse_agent_json_array(lt_resp),
             }
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(result, ensure_ascii=False))

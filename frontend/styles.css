@@ -514,6 +514,24 @@ button.secondary:hover {
 .option-item .price { color: var(--accent); font-weight: 600; }
 
 /* 렌트카 카드 (상세 정보 + 사진) */
+.rental-select-hint {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.rental-empty {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.rental-card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .rental-card {
   display: grid;
   grid-template-columns: 140px 1fr;
