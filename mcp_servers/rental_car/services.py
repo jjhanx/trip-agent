@@ -9,6 +9,9 @@ from mcp_servers.rental_car.economybookings_hint import (
     fetch_lowest_daily_eur,
 )
 from mcp_servers.rental_car.economybookings_links import build_airport_landing_url
+from mcp_servers.rental_car.travelpayouts_economybookings import (
+    merge_economybookings_affiliate_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -427,15 +430,31 @@ def search_rentals_combined(
             "Use Travelpayouts dashboard → Cars (렌트카) deep link."
         )
         tp_rental = ""
+    if tp_rental:
+        eb_booking_url = merge_economybookings_affiliate_query(eb_landing_url, tp_rental)
+    affiliate_tracking_merged = bool(tp_rental) and eb_booking_url != eb_landing_url
+
     tp_card = {
         "rental_id": "TP-AFFILIATE",
         "offer_kind": "affiliate",
         "provider": "Travelpayouts 제휴 렌트카",
         "car_type": "다양",
         "seats": 9,
-        "vehicle_name": "제휴 파트너 검색",
-        "description": "대시보드에서 생성한 제휴 링크입니다. 픽업·날짜·실시간 가격은 해당 사이트에서 확인하세요.",
-        "features": ["제휴 링크", "실시간 가격"],
+        "vehicle_name": "Travelpayouts 제휴 진입",
+        "description": (
+            "EconomyBookings 제휴 숏링크입니다. 위 EconomyBookings·차급 카드 예약 링크에 "
+            "동일 제휴 추적(btag·tpo_uid)이 붙어 있습니다."
+            if affiliate_tracking_merged
+            else (
+                "Travelpayouts에서 받은 제휴 링크입니다. "
+                "일정이 반영된 예약 링크는 위 EconomyBookings·차급 카드를 사용하세요."
+            )
+        ),
+        "features": (
+            ["제휴 홈·일반 검색", "일정 반영은 위 카드 권장"]
+            if affiliate_tracking_merged
+            else ["제휴 링크", "실시간 가격"]
+        ),
         "luggage_capacity": "차종별 상이",
         "image_url": "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=400&h=260&fit=crop",
         "pickup_location": pickup,
@@ -445,6 +464,22 @@ def search_rentals_combined(
         "recommended": False,
         "booking_url": tp_rental,
     }
+
+    econ_features = [
+        "공항·날짜·시각 쿼리",
+        "600+ 업체",
+        "차급·좌석 필터",
+    ]
+    if affiliate_tracking_merged:
+        econ_features.insert(0, "Travelpayouts 제휴 추적 포함 링크")
+
+    _econ_extra = ""
+    if affiliate_tracking_merged:
+        _econ_extra = (
+            " economybookings.tpk.ro 제휴 진입 URL에서 추출한 btag·tpo_uid를 이 링크에 병합했습니다."
+        )
+    elif tp_rental:
+        _econ_extra = " Travelpayouts 렌트 제휴 링크가 설정되어 있습니다."
 
     economy_card = {
         "rental_id": "EB-COMPARE",
@@ -456,12 +491,9 @@ def search_rentals_combined(
         "description": (
             f"픽업 {start_d} ~ 반납 {end_d} · 공항 전용 페이지로 연결됩니다. "
             "URL에 픽업·반납 날짜와 시각이 붙어 있으면 사이트에서 입력이 일부 채워질 수 있습니다."
+            + _econ_extra
         ),
-        "features": [
-            "공항·날짜·시각 쿼리",
-            "600+ 업체",
-            "차급·좌석 필터",
-        ],
+        "features": econ_features,
         "luggage_capacity": "차급별 상이",
         "image_url": "https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=400&h=260&fit=crop",
         "pickup_location": pickup,
@@ -471,7 +503,8 @@ def search_rentals_combined(
         "price_basis": "",
         "recommended": False,
         "booking_url": eb_booking_url,
-        "source_label": "EconomyBookings",
+        "source_label": "EconomyBookings"
+        + (" · Travelpayouts" if affiliate_tracking_merged else ""),
     }
 
     results: list[dict] = []

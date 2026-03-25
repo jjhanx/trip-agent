@@ -208,6 +208,8 @@ https://www.aviasales.com/search/{ORIGIN}/{DESTINATION}/{DEPART}/{RETURN}?marker
 
 공개 Data API는 없습니다. 대시보드에서 **프로그램별 링크 도구**를 사용해 검색/예약용 URL을 받아 프로젝트에 삽입합니다.
 
+**EconomyBookings** 제휴 진입 URL이 `economybookings.tpk.ro/…` 형태이면, 서버가 **HEAD/GET(리다이렉트 1회)** 로 `www.economybookings.com?btag=…&tpo_uid=…` 에서 쿼리를 읽어, 앱이 만드는 **공항·일정 랜딩 URL**(`…/car-rental/…/공항?pickup_date…`)에 같은 파라미터를 **병합**합니다. 그래서 사용자가 «EconomyBookings 열기»·차급 카드 버튼을 눌러도 제휴 추적이 유지됩니다. 목록 **맨 아래**의 제휴 카드는 대시보드에서 받은 **숏링크 그대로** 둡니다.
+
 ---
 
 ## 7. 프로젝트 연동 (구현됨)
@@ -220,7 +222,8 @@ trip-agent/
 │   │   ├── api_clients.py             # SerpApi (1순위)
 │   │   └── services.py                # SerpApi → Amadeus(429) → Travelpayouts 참고 → Mock
 │   └── rental_car/
-│       └── services.py                # TRAVELPAYOUTS_RENTAL_BOOKING_URL 시 최상단 카드
+│       ├── travelpayouts_economybookings.py  # tpk.ro → btag/tpo_uid를 EB 일정 URL에 병합
+│       └── services.py                # TRAVELPAYOUTS_RENTAL_BOOKING_URL 시 하단 제휴 카드 + EB 링크 병합
 ├── config.py                          # TRAVELPAYOUTS_* + SERPAPI_*
 └── .env.example
 ```
@@ -237,7 +240,7 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=
 ### 7.2 동작 요약
 
 1. **항공**: SerpApi·Amadeus에 결과가 없을 때 `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(직항 보강 `/v1/prices/direct`)로 캐시 참고. `TRAVELPAYOUTS_MARKER`로 카드에 Aviasales `booking_url` 생성.
-2. **렌트카**: Data API 없음. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`에 대시보드에서 받은 링크를 넣으면 검색 결과 맨 위에 제휴 카드가 붙고, 이어서 EconomyBookings 비교 카드·참고 차종이 표시됨.
+2. **렌트카**: Data API 없음. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`에 대시보드에서 받은 링크를 넣으면 검색 결과 **하단**에 제휴 카드가 붙습니다. 링크가 `economybookings.tpk.ro` 게이트웨이이면 EconomyBookings **비교·차급 카드**의 예약 URL에도 동일 추적 쿼리를 병합합니다.
 3. **숙소(Hotellook)**: 본 문서 §4 참고 — 코드 연동은 별도 확장 시 진행.
 
 ---
