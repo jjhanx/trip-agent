@@ -574,6 +574,25 @@ button.secondary:hover {
   line-height: 1.35;
   font-weight: 500;
 }
+
+.rental-price-headline {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0.25rem 0 0 !important;
+  line-height: 1.35;
+}
+
+.btn-eb-live {
+  background: transparent !important;
+  color: var(--accent) !important;
+  border: 2px solid var(--accent);
+}
+
+.btn-eb-live:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--accent-hover) !important;
+}
 .rental-footer {
   margin-top: auto;
   padding-top: 0.5rem;

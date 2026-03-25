@@ -1,6 +1,7 @@
 """EconomyBookings 공항 랜딩 URL 빌더.
 
-`build_cars_results_url` 등은 사이트 동작 변경으로 빈 결과가 나올 수 있어, 앱에서는 랜딩 URL만 사용합니다.
+`build_cars_results_url` 은 공항 HTML의 `mergedLocationId`로 검색 결과 화면을 엽니다.
+빈 결과가 나올 수 있어 공항 랜딩 URL과 함께 제공합니다.
 """
 
 from __future__ import annotations

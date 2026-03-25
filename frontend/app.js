@@ -1553,6 +1553,12 @@ function renderRentalOptions(items) {
       const bookingBtn = safeBooking
         ? `<a href="${safeBooking.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>`
         : '';
+      const liveEb = kind === 'self_drive_compare' && typeof opt.eb_cars_results_url === 'string' && /^https?:\/\//i.test(opt.eb_cars_results_url)
+        ? opt.eb_cars_results_url
+        : '';
+      const liveEbBtn = liveEb
+        ? `<a href="${liveEb.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking btn-eb-live" onclick="event.stopPropagation()">실시간 차량·가격 (EB)</a>`
+        : '';
       const orig = (opt.price_original_amount && opt.price_original_currency)
         ? ` <span class="rental-original-price">(${escapeHtml(String(opt.price_original_amount))} ${escapeHtml(String(opt.price_original_currency))})</span>`
         : '';
@@ -1566,6 +1572,7 @@ function renderRentalOptions(items) {
           <div class="rental-card-media">${imgHtml}</div>
           <div class="rental-card-body">
             <h3>${title} ${kindBadge} ${recommendedBadge}</h3>
+            ${opt.price_label_ko ? `<p class="rental-price-headline">${escapeHtml(opt.price_label_ko)}</p>` : ''}
             ${detailHtml}
             ${features ? `<p class="rental-features">${features}</p>` : ''}
             ${srcLine}
@@ -1574,7 +1581,7 @@ function renderRentalOptions(items) {
             <p class="rental-location">${locLine}</p>
             <div class="rental-footer">
               ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}
-              ${bookingBtn}
+              ${bookingBtn}${liveEbBtn}
             </div>
             ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}
           </div>

@@ -28,6 +28,11 @@ _PAT_EUR_DAY_ALT = re.compile(
     r"(?:€|&euro;)\s*([\d.,]+)\s*/\s*day",
     re.I,
 )
+# 일반 금액(일당 문구 없음) — 카드·위젯에 산재한 €만 모아 최저 후보로 사용
+_PAT_EUR_TOKEN = re.compile(
+    r"(?:€|&euro;)\s*([\d.,]+)|([\d.,]+)\s*(?:€|&euro;)",
+    re.I,
+)
 
 
 def _parse_lowest_daily_eur(html: str) -> float | None:
@@ -43,7 +48,21 @@ def _parse_lowest_daily_eur(html: str) -> float | None:
                     vals.append(v)
             except ValueError:
                 continue
-    return min(vals) if vals else None
+    if vals:
+        return min(vals)
+    # 폴백: 렌트 카테고리·랜딩 페이지에서 흔한 € 표기만 수집(총액이 섞일 수 있어 상한 보수적)
+    loose: list[float] = []
+    for m in _PAT_EUR_TOKEN.finditer(html):
+        raw = m.group(1) or m.group(2)
+        if not raw:
+            continue
+        try:
+            v = float(raw.replace(",", "."))
+            if 3.0 <= v <= 400.0:
+                loose.append(v)
+        except ValueError:
+            continue
+    return min(loose) if loose else None
 
 
 def fetch_lowest_daily_eur(url: str, timeout: float = 12.0) -> float | None:
@@ -51,7 +70,7 @@ def fetch_lowest_daily_eur(url: str, timeout: float = 12.0) -> float | None:
     if not u.startswith("http"):
         return None
     try:
-        with httpx.Client(timeout=timeout, headers={"User-Agent": _USER_AGENT}) as client:
+        with httpx.Client(timeout=timeout, headers={"User-Agent": _USER_AGENT, "Accept-Language": "en"}) as client:
             r = client.get(u, follow_redirects=True)
     except Exception as e:
         logger.debug("EconomyBookings fetch failed: %s", e)

@@ -8,7 +8,11 @@ from mcp_servers.rental_car.economybookings_hint import (
     daily_to_total_krw_hint,
     fetch_lowest_daily_eur,
 )
-from mcp_servers.rental_car.economybookings_links import build_airport_landing_url
+from mcp_servers.rental_car.economybookings_links import (
+    build_airport_landing_url,
+    build_cars_results_url,
+    fetch_merged_location_id_for_airport_url,
+)
 from mcp_servers.rental_car.travelpayouts_economybookings import (
     apply_economybookings_tracking_to_url,
     fetch_economybookings_tracking_params,
@@ -22,6 +26,14 @@ _CAR_SEATS = {"compact": 4, "sedan": 5, "suv": 7, "van": 8, "minivan": 8}
 
 # 여행 가방 고려: 일행 x 1.5 좌석 → "추천" 배지. 최소 seats >= passengers 인 차량은 모두 표시
 _CAPACITY_MULTIPLIER = 1.5
+
+# 차급 페이지 일당 미확보 시 공항 랜딩 최저 일당에 곱하는 대략 계수(비교용)
+_TIER_PRICE_FLOOR_MULT: dict[str, float] = {
+    "compact": 1.0,
+    "sedan": 1.06,
+    "suv": 1.15,
+    "van": 1.22,
+}
 
 # Travelpayouts 렌트 제휴 URL이 항공 검색으로 잘못 설정된 경우 목록에서 제외
 _TP_FLIGHT_URL_MARKERS = (
@@ -266,6 +278,43 @@ def _min_serp_price_krw(serp_cards: list[dict]) -> int | None:
     return min(vals) if vals else None
 
 
+def _rentals_display_sort(cards: list[dict]) -> list[dict]:
+    """SerpApi(실검색) → 차급 카드(가격순) → 공항 비교 → 제휴."""
+
+    def _k(c: dict) -> tuple:
+        kind = c.get("offer_kind") or ""
+        tier = {"serpapi_self_drive": 0, "vehicle_class_guide": 1, "self_drive_compare": 2}.get(kind, 3)
+        pk = c.get("price_total_krw")
+        no_price = 1 if pk is None else 0
+        pv = int(pk) if pk is not None else 2**48
+        return (tier, no_price, pv)
+
+    return sorted(cards, key=_k)
+
+
+def _attach_rental_price_labels(cards: list[dict], days: int) -> None:
+    d = max(1, days)
+    for c in cards:
+        krw = c.get("price_total_krw")
+        kind = c.get("offer_kind") or ""
+        if krw is not None:
+            c["price_label_ko"] = f"추정 총액 약 {int(krw):,}원 ({d}일·비교용 힌트, 결제액과 다를 수 있음)"
+        elif kind == "serpapi_self_drive" and c.get("price_snippet_raw"):
+            c["price_label_ko"] = f"스니펫: {c['price_snippet_raw']} — 원화 환산 실패, 링크에서 확인"
+        elif kind == "self_drive_compare":
+            c["price_label_ko"] = (
+                "‘실시간 차량·가격 목록’으로 이동하면 날짜·시간이 반영된 차종별 확정 후보를 볼 수 있습니다."
+            )
+        elif kind == "vehicle_class_guide":
+            c["price_label_ko"] = (
+                "이 차급 EB 페이지에서 일당을 읽지 못했습니다. 위 SerpApi 후보·공항 비교 카드·실시간 EB 목록을 참고하세요."
+            )
+        elif kind == "affiliate":
+            c["price_label_ko"] = "제휴 사이트에서 일정 입력 후 실시간 요금을 확인하세요."
+        else:
+            c["price_label_ko"] = "가격은 링크에서 확인하세요."
+
+
 def _vehicle_class_guide_cards(
     eb_user_booking_url: str,
     pickup: str,
@@ -279,6 +328,7 @@ def _vehicle_class_guide_cards(
     eb_path: tuple[str, str, str, str] | None,
     daily_eur_cache: dict[str, float | None] | None = None,
     eb_tracking_params: dict[str, str] | None = None,
+    airport_fallback_daily_eur: float | None = None,
 ) -> list[dict]:
     """일행·짐(×1.5) 범위에 맞는 차급만. 공항 매핑이 있으면 차급별 EB URL(날짜·시각 쿼리)로 버튼을 구분. 가격 힌트는 차급 소개 페이지 스크레이프."""
     pax = max(1, passengers)
@@ -398,8 +448,16 @@ def _vehicle_class_guide_cards(
                 f"EconomyBookings 해당 차급 페이지에 표시된 From 일당(€) 중 최저 {daily_eur:.2f}€ × "
                 f"{days}일 × 고정 환율로 추정한 총액 힌트입니다. 보험·옵션·실제 차종에 따라 달라집니다."
             )
+        elif airport_fallback_daily_eur is not None:
+            mult = _TIER_PRICE_FLOOR_MULT.get(str(t["car_type"]), 1.0)
+            fd = airport_fallback_daily_eur * mult
+            price_krw = daily_to_total_krw_hint(fd, days)
+            price_basis = (
+                f"차급 페이지에서 일당을 읽지 못해, 공항 랜딩에서 본 최저 일당 {airport_fallback_daily_eur:.2f}€ × "
+                f"차급 계수 {mult:.2f} × {days}일로 추정한 비교용 총액입니다. 실제 차급 최저가와 다를 수 있습니다."
+            )
         else:
-            price_basis += " 가격 숫자는 페이지 로드 후 확인하거나 SerpApi 후보를 참고하세요."
+            price_basis += " 가격 숫자는 페이지 로드 후 확인하거나 SerpApi 후보·실시간 EB 목록을 참고하세요."
 
         feats = list(t["features"])
         feats.insert(0, f"일행 {pax}명 · 짐·여유 좌석 기준 약 {need_bags}인승급 권장")
@@ -476,7 +534,6 @@ def search_rentals_combined(
         pickup_datetime,
         dropoff_datetime,
     )
-    # cars/results?plc&py… 딥링크는 EB 쪽에서 빈 결과로 이어지는 사례가 있어, 사용자 링크는 공항 랜딩만 사용합니다.
     eb_booking_url = eb_landing_url
     eb_path = _AIRPORT_TO_ECONOMYBOOKINGS.get(pickup_code)
 
@@ -492,6 +549,15 @@ def search_rentals_combined(
         tp_track = fetch_economybookings_tracking_params(tp_rental)
     eb_booking_url = apply_economybookings_tracking_to_url(eb_landing_url, tp_track)
     affiliate_tracking_merged = bool(tp_track)
+
+    eb_cars_results_url: str | None = None
+    if eb_path and len(start_d) >= 10 and len(end_d) >= 10:
+        lid = fetch_merged_location_id_for_airport_url(eb_landing_url)
+        if lid:
+            pt = _hhmm_from_iso(pickup_datetime)
+            dt = _hhmm_from_iso(dropoff_datetime)
+            cru = build_cars_results_url(lid, start_d, end_d, pt, dt)
+            eb_cars_results_url = apply_economybookings_tracking_to_url(cru, tp_track)
 
     tp_card = {
         "rental_id": "TP-AFFILIATE",
@@ -539,6 +605,11 @@ def search_rentals_combined(
         )
     elif tp_rental:
         _econ_extra = " Travelpayouts 렌트 제휴 링크가 설정되어 있습니다."
+    _eb_live = ""
+    if eb_cars_results_url:
+        _eb_live = (
+            " ‘실시간 차량·가격 목록’ 링크로 픽업·반납 날짜·시각이 반영된 EB 검색 결과(차종·금액)를 볼 수 있습니다."
+        )
 
     economy_card = {
         "rental_id": "EB-COMPARE",
@@ -551,6 +622,7 @@ def search_rentals_combined(
             f"픽업 {start_d} ~ 반납 {end_d} · 공항 전용 페이지로 연결됩니다. "
             "URL에 픽업·반납 날짜와 시각이 붙어 있으면 사이트에서 입력이 일부 채워질 수 있습니다."
             + _econ_extra
+            + _eb_live
         ),
         "features": econ_features,
         "luggage_capacity": "차급별 상이",
@@ -562,6 +634,7 @@ def search_rentals_combined(
         "price_basis": "",
         "recommended": False,
         "booking_url": eb_booking_url,
+        "eb_cars_results_url": eb_cars_results_url,
         "source_label": "EconomyBookings · 공항 전체 비교(일정·시각)"
         + (" · Travelpayouts" if affiliate_tracking_merged else ""),
     }
@@ -633,6 +706,7 @@ def search_rentals_combined(
         eb_path,
         eb_daily_cache,
         eb_tracking_params=tp_track,
+        airport_fallback_daily_eur=eb_daily_airport,
     )
 
     results.extend(serpapi_cards)
@@ -640,6 +714,9 @@ def search_rentals_combined(
     results.append(economy_card)
     if tp_rental:
         results.append(tp_card)
+
+    results = _rentals_display_sort(results)
+    _attach_rental_price_labels(results, d_days)
 
     sched = _rental_schedule_payload(
         pickup_datetime,

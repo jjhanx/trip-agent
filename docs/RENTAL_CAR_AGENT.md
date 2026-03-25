@@ -25,7 +25,7 @@
 
 - **SerpApi Google Search** (`SERPAPI_API_KEY`, 항공과 동일): 공항·일정·일행을 반영한 영문 검색에 더해, 국가별 현지어 키워드로 **보조 검색**한 뒤 도메인 기준 병합. `booking_url` = 실제 사이트 링크. 스니펫에서 EUR/USD/원 등을 파싱해 **추정** `price_total_krw`(`price_is_estimate`)를 붙일 수 있음.
 - **차급 스펙 카드** (`offer_kind`: `vehicle_class_guide`): 일행~ceil(일행×1.5) 좌석 범위에 맞는 티어만. 링크는 `en/car-types/{slug}/{country}/{city}` + 날짜·시각 쿼리. `economybookings_hint.py`로 해당 페이지 **From 일당** 최저×일수→원화 힌트.
-- **EconomyBookings**: 공항 비교 카드는 **`/en/car-rental/.../공항?pickup_date&…`** 랜딩. 차급 카드는 **차급별** `/en/car-types/{slug}/…?pickup_date&…` 로 버튼 URL을 구분(동일 공항 링크 3번 중복 방지). `cars/results` 딥링크는 빈 결과 이슈로 미사용. 검색 응답 전 카드에 `rental_schedule_line`·`rental_party_passengers` 등 일정 메타 포함. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`이 `economybookings.tpk.ro`이면 **검색당 1회** 추출한 **btag·tpo_uid**를 공항·차급 EB URL에 병합. 항공 URL로 보이면 제휴 카드 생략. SerpApi는 항공 전용 스니펫 제외.
+- **EconomyBookings**: 공항 비교 카드는 **`/en/car-rental/…/공항?pickup_date&…`** + (가능 시) **`/en/cars/results?plc=mergedLocationId&…`** 실시간 차종·금액 목록(`eb_cars_results_url`). 차급 카드는 `/en/car-types/…` 스크레이프 일당 + 미확보 시 **공항 랜딩 최저 일당×차급 계수** 폴백. 응답에 **`price_label_ko`**(한 줄 요약)·**가격순 정렬**(SerpApi→차급→비교). `SERPAPI_API_KEY` 있으면 Google 스니펫 기반 **원화 추정** 후보도 카드에 표시. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`(tpk.ro) 시 **btag·tpo_uid** 병합. 항공 URL로 보이면 제휴 카드 생략.
 - **Travelpayouts 제휴 URL** (선택): 목록 하단 제휴 카드.
 
 구현: `search_rentals_combined`, `serpapi_rental.py`. (`amadeus_transfer.py`는 코드에 남아 있으나 렌트 통합 검색에서는 호출하지 않음.)
