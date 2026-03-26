@@ -210,8 +210,6 @@ https://www.aviasales.com/search/{ORIGIN}/{DESTINATION}/{DEPART}/{RETURN}?marker
 
 **EconomyBookings** 제휴 진입 URL이 `economybookings.tpk.ro/…` 형태이면, 서버가 **HEAD/GET(리다이렉트 1회)** 로 `www.economybookings.com?btag=…&tpo_uid=…` 에서 쿼리를 읽어, 앱이 만드는 **공항·일정 랜딩 URL**(`…/car-rental/…/공항?pickup_date…`)에 같은 파라미터를 **병합**합니다. 그래서 사용자가 «EconomyBookings 열기»·차급 카드 버튼을 눌러도 제휴 추적이 유지됩니다. 목록 **맨 아래**의 제휴 카드는 대시보드에서 받은 **숏링크 그대로** 둡니다.
 
-**Rental Cars Search Form(위젯)** 은 대시보드에서 `<script async src="https://tpemd.com/content?trs=…&shmarker=…&promo_id=…&campaign_id=…">` 형태로 발급됩니다. 공개 API로 **앱의 픽업·반납·공항 값을 위젯에 주입**하는 스펙은 문서화되어 있지 않아, 일반적으로는 **위젯을 페이지에 삽입**해 사용자가 폼에서 검색하는 방식입니다. 본 프로젝트는 `TRAVELPAYOUTS_RENTAL_WIDGET_SCRIPT_URL`에 그 **스크립트 `src` 전체 URL**을 넣으면 렌트 단계 UI에 위젯을 띄웁니다(앱 상단 일정 폼과의 자동 동기화는 보장하지 않음).
-
 ---
 
 ## 7. 프로젝트 연동 (구현됨)
@@ -242,7 +240,7 @@ TRAVELPAYOUTS_RENTAL_BOOKING_URL=
 ### 7.2 동작 요약
 
 1. **항공**: SerpApi·Amadeus에 결과가 없을 때 `TRAVELPAYOUTS_API_TOKEN`이 있으면 `/v1/prices/cheap`(직항 보강 `/v1/prices/direct`)로 캐시 참고. `TRAVELPAYOUTS_MARKER`로 카드에 Aviasales `booking_url` 생성.
-2. **렌트카**: Data API 없음. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`에 대시보드에서 받은 링크를 넣으면 검색 결과 **하단**에 제휴 카드가 붙습니다. 링크가 `economybookings.tpk.ro` 게이트웨이이면 EconomyBookings **비교·차급 카드**의 예약 URL에도 동일 추적 쿼리를 병합합니다. `TRAVELPAYOUTS_RENTAL_WIDGET_SCRIPT_URL`에는 EconomyBookings **검색 위젯** 스크립트 URL 전체를 넣을 수 있으며, 세션 응답에 `travelpayouts_rental_widget_script_url`로 전달되어 프론트가 위젯을 로드합니다.
+2. **렌트카**: Data API 없음. `TRAVELPAYOUTS_RENTAL_BOOKING_URL`에 대시보드에서 받은 링크를 넣으면 검색 결과 **하단**에 제휴 카드가 붙습니다. 링크가 `economybookings.tpk.ro` 게이트웨이이면 EconomyBookings **비교·차급 카드**의 예약 URL에도 동일 추적 쿼리를 병합합니다.
 3. **숙소(Hotellook)**: 본 문서 §4 참고 — 코드 연동은 별도 확장 시 진행.
 
 ---

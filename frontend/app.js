@@ -385,7 +385,6 @@ let state = {
   selectedAccommodation: null,
   localTransport: [],
   selectedLocalTransport: null,
-  travelpayoutsRentalWidgetScriptUrl: null,
   currentPlanId: null,
   currentPlanName: null,
 };
@@ -436,11 +435,6 @@ function show(id, fromStepClick = false) {
       const isRentalCar = state.travelInput?.local_transport === 'rental_car';
       panel.classList.toggle('hidden', !isRentalCar);
       if (isRentalCar) fillRentalSearchFormFromFlight(false);
-    }
-    if (state.travelInput?.local_transport === 'rental_car' && state.travelpayoutsRentalWidgetScriptUrl) {
-      mountTravelpayoutsRentalWidget(state.travelpayoutsRentalWidgetScriptUrl);
-    } else {
-      mountTravelpayoutsRentalWidget('');
     }
   }
 }
@@ -506,9 +500,6 @@ function refreshStepView(step) {
       const isRentalCar = state.travelInput?.local_transport === 'rental_car';
       panel.classList.toggle('hidden', !isRentalCar);
       if (isRentalCar) fillRentalSearchFormFromFlight(false);
-    }
-    if (state.travelInput?.local_transport === 'rental_car') {
-      mountTravelpayoutsRentalWidget(state.travelpayoutsRentalWidgetScriptUrl || '');
     }
     renderRentalOptions(state.localTransport);
   }
@@ -1135,33 +1126,6 @@ function isLocalTransportSelectionComplete() {
   return false;
 }
 
-/** Travelpayouts 대시보드에서 발급한 EconomyBookings 위젯 스크립트 URL (세션 `TRAVELPAYOUTS_RENTAL_WIDGET_SCRIPT_URL`). */
-function mountTravelpayoutsRentalWidget(url) {
-  const wrap = $('#rental-tp-widget-wrap');
-  const host = $('#rental-tp-widget');
-  if (!wrap || !host) return;
-  const prev = document.getElementById('tp-rental-widget-script');
-  if (prev) prev.remove();
-  host.innerHTML = '';
-  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
-    wrap.classList.add('hidden');
-    return;
-  }
-  wrap.classList.remove('hidden');
-  const s = document.createElement('script');
-  s.async = true;
-  s.charset = 'utf-8';
-  s.id = 'tp-rental-widget-script';
-  s.src = url.trim();
-  host.appendChild(s);
-}
-
-function applyRentalWidgetFromResponse(data) {
-  const u = data?.travelpayouts_rental_widget_script_url;
-  state.travelpayoutsRentalWidgetScriptUrl = typeof u === 'string' && /^https?:\/\//i.test(u.trim()) ? u.trim() : null;
-  mountTravelpayoutsRentalWidget(state.travelpayoutsRentalWidgetScriptUrl);
-}
-
 /** 항공 확정 후 세션에 렌트카/대중교통 검색 요청 → step-rental 등. */
 async function advanceToLocalTransportStep() {
   state.travelInput = buildTravelInput();
@@ -1178,7 +1142,6 @@ async function advanceToLocalTransportStep() {
 
     if (data?.step === 'rental') {
       state.localTransport = normalizeLocalTransport(data?.local_transport);
-      applyRentalWidgetFromResponse(data);
       renderRentalOptions(state.localTransport);
       show('step-rental');
       fillRentalSearchFormFromFlight(true);
@@ -1190,7 +1153,6 @@ async function advanceToLocalTransportStep() {
         const retryData = await callAgent(payload);
         if (retryData?.step === 'rental') {
           state.localTransport = normalizeLocalTransport(retryData?.local_transport);
-          applyRentalWidgetFromResponse(retryData);
           renderRentalOptions(state.localTransport);
           show('step-rental');
           fillRentalSearchFormFromFlight(true);
@@ -1730,7 +1692,6 @@ if (btnRentalRefresh) btnRentalRefresh.addEventListener('click', async () => {
     if (data?.error) throw new Error(data.error);
     if (data?.step !== 'rental') throw new Error('렌트카 검색 응답이 올바르지 않습니다.');
     state.localTransport = normalizeLocalTransport(data?.local_transport);
-    applyRentalWidgetFromResponse(data);
     state.selectedLocalTransport = null;
     renderRentalOptions(state.localTransport);
     show('step-rental');
