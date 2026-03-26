@@ -445,8 +445,9 @@ def _vehicle_class_guide_cards(
         if daily_eur is not None:
             price_krw = daily_to_total_krw_hint(daily_eur, days)
             price_basis = (
-                f"EconomyBookings 해당 차급 페이지에 표시된 From 일당(€) 중 최저 {daily_eur:.2f}€ × "
-                f"{days}일 × 고정 환율로 추정한 총액 힌트입니다. 보험·옵션·실제 차종에 따라 달라집니다."
+                f"EconomyBookings 차급 페이지에서 읽은 일당(€) 추정치(마케팅 극저가·15€ 미만 단독 문구는 제외, "
+                f"여러 후보는 중앙값) 약 {daily_eur:.2f}€ × {days}일 × 고정 환율로 총액 힌트입니다. "
+                "실제 검색(차종·좌석·보험)과 다를 수 있으므로 ‘실시간 차량·가격(EB)’ 링크로 확인하세요."
             )
         elif airport_fallback_daily_eur is not None:
             mult = _TIER_PRICE_FLOOR_MULT.get(str(t["car_type"]), 1.0)
@@ -679,8 +680,9 @@ def search_rentals_combined(
         basis_parts: list[str] = []
         if eb_airport_krw is not None and eb_daily_airport is not None:
             basis_parts.append(
-                f"EconomyBookings(결과·랜딩 페이지) From 일당 중 최저 약 {eb_daily_airport:.2f}€ × {d_days}일 "
-                f"→ 표시용 환율로 총액 힌트 약 {eb_airport_krw:,}원 (보험·옵션 제외 가능)."
+                f"EconomyBookings 랜딩 페이지에서 읽은 일당 추정 약 {eb_daily_airport:.2f}€ × {d_days}일 "
+                f"(극저가 배너 제외·중앙값) → 표시용 환율 총액 힌트 약 {eb_airport_krw:,}원. "
+                "‘실시간 차량·가격(EB)’이 더 정확합니다."
             )
         if serp_min_krw is not None:
             basis_parts.append(
