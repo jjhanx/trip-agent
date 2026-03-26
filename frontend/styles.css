@@ -655,6 +655,15 @@ button.secondary:hover {
 .rental-field { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; color: var(--muted); }
 .rental-field input { font-size: 1rem; padding: 0.45rem 0.5rem; border-radius: 6px; border: 1px solid var(--border, #2a2f3a); background: var(--bg); color: inherit; }
 #btn-rental-refresh { margin-top: 0.25rem; }
+.rental-tp-widget-wrap {
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2a2f3a);
+  background: var(--surface-2, rgba(0,0,0,0.12));
+}
+.rental-tp-widget-host { min-height: 2rem; }
+
 a.btn-primary {
   display: inline-flex;
   align-items: center;

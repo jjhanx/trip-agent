@@ -380,6 +380,10 @@ class SessionExecutor(BaseAgentExecutor):
 
         flight_complete = _is_flight_complete(selected_flight)
 
+        def _rental_widget_fields() -> dict:
+            u = (self.settings.travelpayouts_rental_widget_script_url or "").strip()
+            return {"travelpayouts_rental_widget_script_url": u} if u else {}
+
         if (
             flight_complete
             and rental_search
@@ -395,18 +399,11 @@ class SessionExecutor(BaseAgentExecutor):
             lt_resp = await self._call_agent("rental_car", lt_payload)
             if not lt_resp:
                 lt_resp = self._rental_car_fallback_json(lt_payload)
-            parsed_lt = (
-                json.loads(lt_resp)
-                if lt_resp and isinstance(lt_resp, str) and lt_resp.strip().startswith("[")
-                else lt_resp or []
-            )
+            parsed_lt = _parse_agent_json_array(lt_resp)
+            payload = {"step": "rental", "local_transport": parsed_lt}
+            payload.update(_rental_widget_fields())
             await event_queue.enqueue_event(
-                new_agent_text_message(
-                    json.dumps(
-                        {"step": "rental", "local_transport": parsed_lt},
-                        ensure_ascii=False,
-                    )
-                )
+                new_agent_text_message(json.dumps(payload, ensure_ascii=False))
             )
             return
 
@@ -529,6 +526,7 @@ class SessionExecutor(BaseAgentExecutor):
                 "step": "rental",
                 "local_transport": _parse_agent_json_array(lt_resp),
             }
+            result.update(_rental_widget_fields())
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(result, ensure_ascii=False))
             )

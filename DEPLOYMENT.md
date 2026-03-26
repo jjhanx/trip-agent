@@ -218,6 +218,12 @@ TRAVELPAYOUTS_MARKER=제휴_마커
 TRAVELPAYOUTS_RENTAL_BOOKING_URL=https://...
 ```
 
+선택: **EconomyBookings Rental Cars Search Form**(Travelpayouts 위젯)을 렌트 단계에 표시하려면 대시보드에서 받은 스크립트 URL 전체를 넣습니다.
+
+```env
+TRAVELPAYOUTS_RENTAL_WIDGET_SCRIPT_URL=https://tpemd.com/content?trs=...&shmarker=...&locale=en&...
+```
+
 상세는 [docs/TRAVELPAYOUTS_API_GUIDE.md](docs/TRAVELPAYOUTS_API_GUIDE.md), [docs/RENTAL_CAR_AGENT.md](docs/RENTAL_CAR_AGENT.md), 항공 흐름은 [FLIGHT_API_SETUP.md](FLIGHT_API_SETUP.md) 참고.
 
 ### SerpApi (항공 1순위, 실시간 Google Flights)

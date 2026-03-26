@@ -14,10 +14,11 @@
     - A2AClient로 HTTP 호출
     - MCP `search_rentals` 또는 `search_rentals_combined` 폴백
     ↓
-[Session Agent] → { step: "rental", local_transport: [...] } 반환
+[Session Agent] → { step: "rental", local_transport: [...], travelpayouts_rental_widget_script_url? } 반환
     ↓
 [프론트엔드] (frontend/app.js)
     - data.step === 'rental' → step-rental 표시
+    - `TRAVELPAYOUTS_RENTAL_WIDGET_SCRIPT_URL` 설정 시 위 필드로 EconomyBookings **검색 위젯** 스크립트(tpemd) 마운트
     - renderRentalOptions(state.localTransport)
 ```
 

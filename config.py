@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     travelpayouts_marker: str = ""
     # 렌트카: Travelpayouts 대시보드 Link Generator로 만든 제휴 URL (선택, 설정 시 검색 결과 최상단)
     travelpayouts_rental_booking_url: str = ""
+    # 렌트 단계에 EconomyBookings 검색 위젯(tpemd.com/content?...) 스크립트 URL 전체 (선택)
+    travelpayouts_rental_widget_script_url: str = ""
 
     # Flight API - SerpApi (Google Flights, Travelpayouts 결과 없을 때)
     serpapi_api_key: str = ""
