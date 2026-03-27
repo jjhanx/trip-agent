@@ -534,6 +534,7 @@ button.secondary:hover {
   text-align: left;
   overflow: hidden;
   padding: 0 !important;
+  flex-shrink: 0;
 }
 
 .attraction-card.option-item:has(.attr-pick:checked) {
