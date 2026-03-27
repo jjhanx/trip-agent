@@ -1013,7 +1013,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
             n_attr = min(trip_days * 3, 42)
             
             # 구글 Places API가 존재하면, 하드코딩된 mock 대신 해당 지역의 평점 4.3 이상 명소를 동적으로 검색해 교체합니다.
-            if self.settings.google_places_api_key:
+            # 단, 돌로미티(Dolomites) 지역은 고품질의 42개 전용 DB가 이미 존재하므로 동적 검색으로 덮어쓰지 않습니다.
+            if self.settings.google_places_api_key and not _looks_like_dolomites(destination):
                 google_spots = await _fetch_top_attractions_from_google(
                     destination, self.settings.google_places_api_key, max_count=n_attr
                 )
