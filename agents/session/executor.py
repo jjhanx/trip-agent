@@ -519,6 +519,7 @@ class SessionExecutor(BaseAgentExecutor):
                         travel.destination,
                         serpapi_key=self.settings.serpapi_api_key or "",
                         use_serpapi=self.settings.place_images_use_serpapi,
+                        google_places_api_key=self.settings.google_places_api_key or "",
                     )
                 await event_queue.enqueue_event(
                     new_agent_text_message(json.dumps(fallback, ensure_ascii=False))

@@ -285,6 +285,51 @@ async def fetch_serpapi_google_image_unique(
     return None
 
 
+async def fetch_google_places_unique(
+    client: httpx.AsyncClient,
+    query: str,
+    api_key: str,
+    exclude_url_keys: set[str],
+) -> dict[str, str] | None:
+    if not api_key.strip():
+        return None
+    q = query.strip()[:200]
+    if len(q) < 2:
+        return None
+    params = {
+        "query": q,
+        "key": api_key,
+    }
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
+    try:
+        r = await client.get(url)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.debug("google places textsearch failed: %s", e)
+        return None
+    results = data.get("results") or []
+    for res in results:
+        photos = res.get("photos") or []
+        if not photos:
+            continue
+        pref = photos[0].get("photo_reference")
+        if not pref:
+            continue
+        title = (res.get("name") or q)[:80]
+        # redirect를 피하기 위해 maxwidth를 지정하여 이미지 URL 생성
+        photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
+        key = normalize_url_key(photo_url)
+        if key in exclude_url_keys:
+            continue
+        return {
+            "image_url": photo_url,
+            "image_credit": f"Google Maps · {title}",
+            "image_source": "google_places",
+        }
+    return None
+
+
 def _empty_result() -> dict[str, str]:
     return {
         "image_url": "",
@@ -300,6 +345,7 @@ async def resolve_place_image(
     exclude_url_keys: set[str] | None = None,
     serpapi_key: str = "",
     use_serpapi: bool = False,
+    google_places_api_key: str = "",
 ) -> dict[str, str]:
     """배치 내 이미지 URL 중복(exclude_url_keys)을 피해 한 장만 고른다. 실패 시 빈 URL."""
     exclude_url_keys = exclude_url_keys or set()
@@ -311,6 +357,15 @@ async def resolve_place_image(
 
     headers = {"User-Agent": USER_AGENT}
     async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        # 1. Google Places API (가장 정확하고 무료 크레딧 활용 가능)
+        if google_places_api_key:
+            r = await fetch_google_places_unique(client, q_full, google_places_api_key, exclude_url_keys)
+            if not r and q_short != q_full:
+                r = await fetch_google_places_unique(client, q_short, google_places_api_key, exclude_url_keys)
+            if r:
+                return r
+
+        # 2. Wikipedia Thumbnail
         for api, lang in ((ENWIKI_API, "en"), (ITWIKI_API, "it")):
             r = await fetch_wikipedia_unique_thumbnail(
                 client, api, q_full, lang, attraction_name, exclude_url_keys
@@ -344,6 +399,7 @@ async def enrich_attractions_images(
     *,
     serpapi_key: str = "",
     use_serpapi: bool = False,
+    google_places_api_key: str = "",
 ) -> list[dict[str, Any]]:
     """순차 처리로 이미지 URL 중복 제거. 부정확한 일반 풍경(Unsplash) 폴백 없음."""
     if not attractions:
@@ -361,6 +417,7 @@ async def enrich_attractions_images(
                 exclude_url_keys=used_keys,
                 serpapi_key=serpapi_key or "",
                 use_serpapi=use_serpapi,
+                google_places_api_key=google_places_api_key or "",
             )
             u = (res.get("image_url") or "").strip()
             if u.startswith("https://"):
