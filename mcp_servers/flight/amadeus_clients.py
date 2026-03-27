@@ -391,7 +391,8 @@ async def search_amadeus_with_preferred(
         )
 
     if len(date_pairs) > 1:
-        supplement_pairs = date_pairs[:2]
+        # 메인 검색과 동일하게 최대 5쌍까지 KE/OZ 전용 보강 (기존 2쌍만 보던 한계 완화)
+        supplement_pairs = date_pairs[:5]
     elif date_pairs:
         supplement_pairs = [date_pairs[0]]
     else:

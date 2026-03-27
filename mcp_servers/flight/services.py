@@ -196,6 +196,35 @@ def _date_pairs_with_flexibility(
     return pairs[:15] if pairs else [(start_date, end_date)]
 
 
+def _one_way_departure_date_pairs_for_amadeus(
+    departure_date: str,
+    return_date_anchor: str,
+    date_flexibility_days: int,
+) -> list[tuple[str, str]]:
+    """편도(출국 등) Amadeus fallback용: 출발일만 ±N일 이동한 (departureDate, 귀환일 자리) 쌍.
+
+    SerpApi 편도 검색은 `_date_pairs_with_flexibility`로 (출발±, 귀환±) 조합을 쓰지만,
+    Amadeus `one_way`는 `departureDate`만 사용하므로 기존 폴백이 `[(출발, 귀환)]` 1쌍만 넣어
+    **날짜 유연성이 반영되지 않던 문제**를 이 함수로 보완한다.
+    귀환일 앵커는 `search_amadeus` 편도 시 무시되지만 `search_amadeus_with_preferred` 시그니처와 맞춘다.
+    """
+    if not date_flexibility_days or date_flexibility_days <= 0:
+        return [(departure_date, return_date_anchor)]
+    try:
+        sd = datetime.strptime(departure_date[:10], "%Y-%m-%d").date()
+        ed = datetime.strptime(return_date_anchor[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return [(departure_date, return_date_anchor)]
+    flex = min(int(date_flexibility_days), 7)
+    offsets = [-flex, -1, 0, 1, flex] if flex >= 2 else [-1, 0, 1]
+    pairs: list[tuple[str, str]] = []
+    for o in offsets:
+        d_dep = sd + timedelta(days=o)
+        if d_dep <= ed:
+            pairs.append((d_dep.strftime("%Y-%m-%d"), return_date_anchor[:10]))
+    return pairs[:15] if pairs else [(departure_date, return_date_anchor)]
+
+
 def _get_preferred_airlines(mileage_program: str | None) -> frozenset[str]:
     """마일리지 프로그램 → 마일리지 적립 항공사명/코드 집합."""
     if not mileage_program or not str(mileage_program).strip():
@@ -950,11 +979,14 @@ def multi_source_search_flights(
 
             def _run_amadeus():
                 async def _do():
-                    date_pairs = (
-                        _date_pairs_with_flexibility(start_date, end_date, flex)
-                        if flex >= 1 and not one_way
-                        else [(start_date, end_date)]
-                    )
+                    if flex >= 1 and not one_way:
+                        date_pairs = _date_pairs_with_flexibility(start_date, end_date, flex)
+                    elif flex >= 1 and one_way:
+                        date_pairs = _one_way_departure_date_pairs_for_amadeus(
+                            start_date, end_date, flex
+                        )
+                    else:
+                        date_pairs = [(start_date, end_date)]
                     amadeus_flights, amadeus_warnings = await search_amadeus_with_preferred(
                         origin,
                         destination,
