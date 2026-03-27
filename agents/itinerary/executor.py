@@ -824,6 +824,27 @@ async def _fetch_top_attractions_from_google(
     import asyncio
     from urllib.parse import urlencode
     
+    # 1. 목적지 Geocoding (좌표 획득)
+    location_param = ""
+    target_radius = "50000"  # 50km
+    try:
+        geo_url = "https://maps.googleapis.com/maps/api/geocode/json?" + urlencode({
+            "address": destination,
+            "key": api_key
+        })
+        async with httpx.AsyncClient(timeout=10) as client:
+            geo_r = await client.get(geo_url)
+            if geo_r.status_code == 200:
+                geo_data = geo_r.json()
+                results = geo_data.get("results", [])
+                if results:
+                    loc = results[0].get("geometry", {}).get("location", {})
+                    lat, lng = loc.get("lat"), loc.get("lng")
+                    if lat and lng:
+                        location_param = f"{lat},{lng}"
+    except Exception:
+        pass
+
     queries = [
         f"Top rated tourist attractions in {destination}",
         f"Best nature spots and landmarks in {destination}",
@@ -834,10 +855,15 @@ async def _fetch_top_attractions_from_google(
     seen_places = set()
     
     async def fetch_query(q: str) -> list[dict[str, Any]]:
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode({
+        params = {
             "query": q,
             "key": api_key
-        })
+        }
+        if location_param:
+            params["location"] = location_param
+            params["radius"] = target_radius
+            
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.get(url)
