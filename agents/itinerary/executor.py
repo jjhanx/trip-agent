@@ -32,6 +32,343 @@ def _date_list(start_date: str, end_date: str) -> list[str]:
     return out
 
 
+PRACTICAL_DETAIL_KEYS: tuple[str, ...] = (
+    "parking",
+    "cable_car_lift",
+    "walking_hiking",
+    "fees_other",
+    "reservation_note",
+    "tips",
+)
+
+
+def _looks_like_dolomites(destination: str) -> bool:
+    d = (destination or "").lower()
+    keys = (
+        "dolomit",
+        "dolomiti",
+        "dolomiten",
+        "tre cime",
+        "braies",
+        "siusi",
+        "seceda",
+        "ortisei",
+        "cortina",
+        "bolzano",
+        "불차노",
+        "도로미티",
+        "돌로미티",
+        "라고 디 브라이에스",
+        "브라이에스",
+    )
+    return any(k in d for k in keys)
+
+
+def _merge_practical_details(raw: Any) -> dict[str, str]:
+    base = {k: "" for k in PRACTICAL_DETAIL_KEYS}
+    if isinstance(raw, dict):
+        for k in PRACTICAL_DETAIL_KEYS:
+            v = raw.get(k)
+            if v is not None and str(v).strip():
+                base[k] = str(v).strip()
+    return base
+
+
+def _default_practical_block() -> dict[str, str]:
+    return {
+        "parking": "주차장 위치·요금·예약 필요 여부는 방문 시즌마다 바뀌므로 현지 공식 안내·내비를 확인하세요.",
+        "cable_car_lift": "케이블카·리프트가 없거나 미이용 시 도보·셔틀만 해당됩니다. 있을 경우 공식 요금표로 확인하세요.",
+        "walking_hiking": "예상 도보·트레일 시간과 난이도는 코스 선택에 따라 다릅니다. 지도·현지 표지를 기준으로 하세요.",
+        "fees_other": "입장료·환경세·톨게이트 등은 연도별로 달라질 수 있습니다.",
+        "reservation_note": "성수기·주말에는 주차·입장·보트 등 사전 예약이 필요할 수 있습니다.",
+        "tips": "날씨·일몰 시각·개장 시간을 출발 전에 확인하세요.",
+    }
+
+
+def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> dict[str, Any]:
+    out = dict(a)
+    out.setdefault("id", f"attr_{idx + 1:03d}")
+    out.setdefault("name", f"{destination} 명소 {idx + 1}")
+    out.setdefault("category", "관광")
+    out.setdefault("description", "")
+    out.setdefault("image_url", "")
+    out.setdefault("image_credit", "")
+    pr = _merge_practical_details(out.get("practical_details"))
+    defaults = _default_practical_block()
+    for k in PRACTICAL_DETAIL_KEYS:
+        if not pr[k]:
+            pr[k] = defaults[k]
+    out["practical_details"] = pr
+    return out
+
+
+def _dolomites_attraction_templates() -> list[dict[str, Any]]:
+    """실제 관광지명·실무 정보 예시(한국어). 이미지는 Wikimedia Commons 대표 썸네일 URL."""
+    w = "Wikimedia Commons"
+    return [
+        {
+            "name": "Tre Cime di Lavaredo (Drei Zinnen)",
+            "category": "하이킹·전망",
+            "description": "돌로미티 상징 봉우리 세 개를 도보로 돌아보는 대표 코스. 오비스터리 산장·라바레도 산장 방향 루프가 유명합니다.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Drei_Zinnen_2010.jpg/800px-Drei_Zinnen_2010.jpg",
+            "image_credit": f"{w} · Drei Zinnen",
+            "practical_details": {
+                "parking": "아우론조(Auronzo) 유료 주차장 이용. 성수기(여름·주말)에는 온라인 사전 예약이 사실상 필수인 경우가 많고, 일당 대략 €30~45 전후(연도·시즌·시간대별 상이).",
+                "cable_car_lift": "차량으로 아우론조 주차장까지 진입 후 도보(해당 구간은 유료 도로·입장 개념이 붙는 시즌이 있음—현지 표지 확인).",
+                "walking_hiking": "오비스터리(Refugio Auronzo) 방향으로 이어지는 루프 왕복 보통 3~4시간 안팎(체력·사진·휴식에 따라 더 길어질 수 있음).",
+                "fees_other": "유료 도로·환경 관련 요금이 붙는 구간이 있을 수 있음(시즌별).",
+                "reservation_note": "주차 예약·입장 제한은 공식 파르체지오/지자체 페이지를 출발 전에 확인.",
+                "tips": "이른 아침 출발, 방풍 재킷·물·간식, 날씨 급변 대비.",
+            },
+        },
+        {
+            "name": "Seceda 전망대 (Ortisei 케이블카)",
+            "category": "케이블카·전망",
+            "description": "오르티세이에서 케이블카로 올라 날카로운 초원 능선과 기암을 한눈에 보는 명소.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Seceda_Gruppe_von_St.Ulrich_aus.jpg/800px-Seceda_Gruppe_von_St.Ulrich_aus.jpg",
+            "image_credit": f"{w} · Seceda",
+            "practical_details": {
+                "parking": "오르티세이(Ortisei/St. Ulrich) 시내·외곽 유료 주차. 성수기에는 주차장 포화—셔틀·도보 접근 검토.",
+                "cable_car_lift": "Furnes–Seceda 등 구간 조합(리프트·케이블카) 성인 편도 대략 €10~25대(시즌·노선·요금제 변동). 공식 가격표로 확인.",
+                "walking_hiking": "정상부 전망 포인트까지 왕복 40분~1시간 30분(눈·진흙에 따라 더 걸릴 수 있음).",
+                "fees_other": "멀티데이 패스·그룹 할인 여부는 현지 리프트 사이트 확인.",
+                "reservation_note": "케이블카 시간대 예약이 필요한 성수기가 있음.",
+                "tips": "운동화/등산화, 기온 차 큼, 안개 낀 날 시야 확인.",
+            },
+        },
+        {
+            "name": "Alpe di Siusi (Seiser Alm)",
+            "category": "고원·가벼운 하이킹",
+            "description": "유럽 최대 고산 목초지 중 하나로 평탄한 둘레 산책과 사진 명소가 많습니다.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/Seiser_Alm_2010.jpg/800px-Seiser_Alm_2010.jpg",
+            "image_credit": f"{w} · Seiser Alm",
+            "practical_details": {
+                "parking": "Compatsch 등 접근 지점 주차는 성수기·환경 규제로 **일반 차량 진입 제한**이 있는 시간대가 많음. 지정 주차 후 셔틀·버스 또는 곤돌라 이용 안내를 따름.",
+                "cable_car_lift": "오르티세이 등에서 Alpe로 올라가는 곤돌라·리프트(편도 약 €10~20대, 시즌별 변동).",
+                "walking_hiking": "Compatsch 주변 평지 산책 1~2시간, 길게는 반나절 루프 가능.",
+                "fees_other": "호텔 투숙객 전용 도로·예외 규정이 있을 수 있음.",
+                "reservation_note": "고원 진입·셔틀은 사전 예약이 필요한 경우가 있음.",
+                "tips": "자전거·패밀리 동반 시 셔틀 시간표 필수 확인.",
+            },
+        },
+        {
+            "name": "Lago di Braies (Pragser Wildsee)",
+            "category": "호수·산책",
+            "description": "에메랄드빛 호수와 산 능선이 어우러진 돌로미티 대표 호수. 둘레 산책과 보트가 인기입니다.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Lago_di_Braies_panorama.jpg/800px-Lago_di_Braies_panorama.jpg",
+            "image_credit": f"{w} · Lago di Braies",
+            "practical_details": {
+                "parking": "호수 인근 주차장은 **매우 혼잡**. 이른 아침 도착 또는 지정 셔틀·버스 이용 권장. 주차 요금은 시간제 € 수준(현지 표지).",
+                "cable_car_lift": "해당 없음(호수 주변 도보).",
+                "walking_hiking": "호수 둘레 산책 약 1~1.5시간(평탄, 사진·휴식 제외).",
+                "fees_other": "보트 렌탈·일부 구간 입장료가 별도일 수 있음.",
+                "reservation_note": "성수기 보트·주차는 예약 또는 시간 제한이 붙는 경우가 있음.",
+                "tips": "일출·일몰 시간대 인파—안전·환경 규칙 준수.",
+            },
+        },
+        {
+            "name": "Val di Funes (푸네스 계곡)",
+            "category": "전망·드라이브",
+            "description": "산타 마달레나 교회 등으로 유명한 사진 명소가 많은 계곡.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg",
+            "image_credit": f"{w} · Val di Funes",
+            "practical_details": {
+                "parking": "뷰포인트·교회 인근 유료·시간제 주차. 성수기 혼잡.",
+                "cable_car_lift": "해당 없음.",
+                "walking_hiking": "교회·전망 포인트까지 짧은 산책 20~60분 코스 여러 개.",
+                "fees_other": "일부 사진 스팟은 사유지·입장 안내 준수.",
+                "reservation_note": "특별 행사 시 도로 통제 가능.",
+                "tips": "이른 시간 방문 권장, 망원 렌즈·삼각대 예절.",
+            },
+        },
+        {
+            "name": "Cortina d'Ampezzo & Passo Giau",
+            "category": "드라이브·전망",
+            "description": "코티나 주변 고개와 전망 도로. 겨울 스키·여름 드라이브 모두 인기.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cortina_d%27Ampezzo_view.jpg/800px-Cortina_d%27Ampezzo_view.jpg",
+            "image_credit": f"{w} · Cortina",
+            "practical_details": {
+                "parking": "코티나 시내·고개 주차장 유료. 겨울·성수기 포화.",
+                "cable_car_lift": "스키 시즌 리프트 요금 별도(여름 패스와 상이).",
+                "walking_hiking": "고개 주변 짧은 전망 산책 30분~2시간.",
+                "fees_other": "톨·환경 통행 제한 구간 확인.",
+                "reservation_note": "대회·이벤트 시 교통 통제.",
+                "tips": "고산 날씨·눈길 대비.",
+            },
+        },
+        {
+            "name": "Lago di Misurina",
+            "category": "호수",
+            "description": "트레 치메 근처 고산 호수. 산책과 카페가 있는 휴식 지점.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Misurina_2007.jpg/800px-Misurina_2007.jpg",
+            "image_credit": f"{w} · Misurina",
+            "practical_details": {
+                "parking": "호수 주변 유료 주차(시간·일당).",
+                "cable_car_lift": "해당 없음.",
+                "walking_hiking": "둘레 산책 30분~1시간.",
+                "fees_other": "인근 리조트 이용 시 주차 혜택 가능.",
+                "reservation_note": "성수기 주차 대기 가능.",
+                "tips": "트레 치메 일정과 묶기 좋음.",
+            },
+        },
+        {
+            "name": "Cadini di Misurina 전망 포인트",
+            "category": "짧은 하이킹",
+            "description": "짧은 오르막 후 드라마틱한 봉우리 전망을 보는 인기 포인트.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
+            "image_credit": f"{w}",
+            "practical_details": {
+                "parking": "미수리나 또는 근처 주차 후 도보 접근.",
+                "cable_car_lift": "해당 없음.",
+                "walking_hiking": "왕복 1~2시간(길·날씨에 따라 상이), 난이도 중간.",
+                "fees_other": "일부 구간 입장 제한 가능.",
+                "reservation_note": "위험 구간 표지 준수.",
+                "tips": "등산화 권장, 날씨 악화 시 중단.",
+            },
+        },
+        {
+            "name": "Ortisei 마을 산책",
+            "category": "마을·문화",
+            "description": "목조 장식과 숍·레스토랑이 있는 발가르데나 계곡 거점 마을.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Ortisei_St_Ulrich.jpg/800px-Ortisei_St_Ulrich.jpg",
+            "image_credit": f"{w} · Ortisei",
+            "practical_details": {
+                "parking": "시내 유료 주차장 다수, 시간제.",
+                "cable_car_lift": "Seceda 등 리프트는 별도.",
+                "walking_hiking": "마을 중심 산책 1~2시간.",
+                "fees_other": "박물관·교회 입장료 선택.",
+                "reservation_note": "숙소 주차 문의.",
+                "tips": "저녁 식사 예약 권장(성수기).",
+            },
+        },
+        {
+            "name": "Bolzano (볼차노) 시내",
+            "category": "도시",
+            "description": "남티롤의 중심 도시. Ötzi 박물관·시장·카페.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Bolzano_panorama.jpg/800px-Bolzano_panorama.jpg",
+            "image_credit": f"{w} · Bolzano",
+            "practical_details": {
+                "parking": "시내 지하·외곽 유료 주차, ZTL(차량 제한 구역) 주의.",
+                "cable_car_lift": "해당 없음.",
+                "walking_hiking": "구시가지 산책 반나절.",
+                "fees_other": "박물관 입장료.",
+                "reservation_note": "인기 박물관 사전 예약.",
+                "tips": "대중교통·도보 병행.",
+            },
+        },
+        {
+            "name": "Castelrotto (Kastelruth) & 알프 분위기 마을",
+            "category": "마을",
+            "description": "알페 디 시우시 접근 거점 마을 중 하나.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Kastelruth_-_panoramio.jpg/800px-Kastelruth_-_panoramio.jpg",
+            "image_credit": f"{w}",
+            "practical_details": {
+                "parking": "마을 외곽 주차 후 버스.",
+                "cable_car_lift": "Alpe 연결 셔틀·리프트와 연계.",
+                "walking_hiking": "마을·교회 주변 1시간 내외.",
+                "fees_other": "셔틀 요금.",
+                "reservation_note": "숙소별 셔틀 정보 확인.",
+                "tips": "시장일·축제 캘린더 확인.",
+            },
+        },
+        {
+            "name": "Lago di Carezza (Karersee)",
+            "category": "호수",
+            "description": "에메랄드 물과 라티마르 봉우리 배경의 짧은 산책 코스.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
+            "image_credit": f"{w} · Karersee",
+            "practical_details": {
+                "parking": "호수 인근 유료 주차, 짧은 체류.",
+                "cable_car_lift": "해당 없음.",
+                "walking_hiking": "둘레 산책 20~40분.",
+                "fees_other": "보호 구역 규칙 준수.",
+                "reservation_note": "성수기 주차 제한.",
+                "tips": "일출 시간 인기.",
+            },
+        },
+        {
+            "name": "Passo Gardena & 그란 라세타",
+            "category": "고개·드라이브",
+            "description": "Sella 루프와 연결되는 고개 드라이브·전망.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2b/Passo_Gardena.jpg/800px-Passo_Gardena.jpg",
+            "image_credit": f"{w}",
+            "practical_details": {
+                "parking": "고개 정상 인근 유료·시간 제한.",
+                "cable_car_lift": "겨울 스키 리프트 별도.",
+                "walking_hiking": "짧은 전망 산책 30분~1시간.",
+                "fees_other": "톨·겨울 장비 의무.",
+                "reservation_note": "눈길 통제.",
+                "tips": "날씨·도로 상황 실시간 확인.",
+            },
+        },
+        {
+            "name": "Canazei & Fassa 계곡",
+            "category": "베이스 타운",
+            "description": "셀라 루프·마무올 주변 등산·스키 거점.",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f0/Canazei.jpg/800px-Canazei.jpg",
+            "image_credit": f"{w}",
+            "practical_details": {
+                "parking": "리조트 주차·숙소 연계.",
+                "cable_car_lift": "스키/하이킹 리프트 패스.",
+                "walking_hiking": "계곡 트레일 다양.",
+                "fees_other": "멀티데이 패스.",
+                "reservation_note": "성수기 리프트 예약.",
+                "tips": "트레 치메·펠레 그룹 일정과 동선 연계.",
+            },
+        },
+        {
+            "name": "Marmolada 그룹 (펠레 지역)",
+            "category": "케이블카·빙하",
+            "description": "이탈리아 최고봉 일대 빙하·전망(리프트 이용).",
+            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/Marmolada_from_Canazei.jpg/800px-Marmolada_from_Canazei.jpg",
+            "image_credit": f"{w}",
+            "practical_details": {
+                "parking": "케이블카역 주차 유료.",
+                "cable_car_lift": "빙하 지대까지 복수 구간, 성인 왕복 수십 유로대(시즌별).",
+                "walking_hiking": "정상부 짧은 산책 + 리프트 이동.",
+                "fees_other": "고도·날씨로 운휴 가능.",
+                "reservation_note": "운행 시간·기상 확인.",
+                "tips": "추위·자외선 대비.",
+            },
+        },
+    ]
+
+
+def _generic_spot(destination: str, i: int) -> dict[str, Any]:
+    """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드."""
+    seed = abs(hash(f"{destination}:{i}")) % 10000
+    return {
+        "name": f"{destination} 주변 추천 스팟 {i + 1}",
+        "category": ["전망", "마을", "호수", "하이킹", "박물관"][i % 5],
+        "description": f"{destination}에서 이동 시간과 체력에 맞춰 고를 수 있는 후보입니다. 실제 명칭·요금은 최신 가이드와 지도로 확인하세요.",
+        "image_url": f"https://picsum.photos/seed/trip{seed}/800/500",
+        "image_credit": "picsum.photos (예시 이미지)",
+        "practical_details": {
+            "parking": "시내·관광지 주차장 위치와 요금(시간/일당)은 현지 표지와 앱으로 확인. 성수기에는 예약·제한 구역(ZTL) 주의.",
+            "cable_car_lift": "리프트·케이블카가 있으면 공식 사이트 요금·마지막 운행 시각 확인. 없으면 해당 없음.",
+            "walking_hiking": "왕복 예상 도보 시간은 코스마다 다름(1~4시간). 난이도·날씨를 고려해 여유 있게 잡을 것.",
+            "fees_other": "입장료·톨·환경세는 연도별로 변동.",
+            "reservation_note": "인기 명소·전시는 사전 예약 권장.",
+            "tips": "물·방풍·막바람에 대비. 일몰 전 하산.",
+        },
+    }
+
+
+def _build_mock_attraction_list(destination: str, n: int) -> list[dict[str, Any]]:
+    if _looks_like_dolomites(destination):
+        pool = _dolomites_attraction_templates()
+    else:
+        pool = [_generic_spot(destination, j) for j in range(max(n, 12))]
+    out: list[dict[str, Any]] = []
+    for i in range(n):
+        base = dict(pool[i % len(pool)])
+        base["id"] = f"attr_{i + 1:03d}"
+        if _looks_like_dolomites(destination) and i >= len(pool):
+            base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
+        out.append(_ensure_attraction_record(base, i, destination))
+    return out
+
+
 def _extract_json_object(text: str) -> dict[str, Any] | None:
     if not text:
         return None
@@ -52,17 +389,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 def _mock_attractions(destination: str, trip_days: int, preference: dict) -> dict[str, Any]:
     n = min(trip_days * 3, 42)
-    cats = ["문화·역사", "자연·전망", "체험·시장", "미술·건축", "야경·산책"]
-    attractions = []
-    for i in range(n):
-        attractions.append(
-            {
-                "id": f"attr_{i+1:03d}",
-                "name": f"{destination} 추천 명소 {i + 1}",
-                "description": f"{cats[i % len(cats)]} 성격의 방문지입니다. 동선과 체류 시간을 고려해 선택하세요.",
-                "category": cats[i % len(cats)],
-            }
-        )
+    attractions = _build_mock_attraction_list(destination, n)
     return {
         "itinerary_step": "select_attractions",
         "trip_days": trip_days,
@@ -72,8 +399,9 @@ def _mock_attractions(destination: str, trip_days: int, preference: dict) -> dic
         ),
         "attractions": attractions,
         "design_notes": (
-            f"{destination} 일정: 오전·오후로 하루 약 두 곳을 기준으로 명소를 고르고, "
-            "숙소에서 차로 1시간을 넘기는 경우 동선상 숙소 이동을 검토하되 한 곳 거점은 최대한 유지하세요."
+            f"{destination} 일정: 각 후보는 실제 방문지 이름·사진·주차·리프트·도보 시간 등을 함께 제시합니다. "
+            "표시된 요금(€ 등)은 참고용이며 연도·시즌·환율에 따라 달라지므로 출발 전 공식 사이트로 반드시 확인하세요. "
+            "오전·오후로 하루 약 두 곳을 기준으로 고르고, 숙소에서 차로 1시간을 넘기면 동선상 숙소 이동을 검토하되 한 거점 유지를 우선하세요."
         ),
     }
 
@@ -289,9 +617,11 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         api_key=self.settings.openai_api_key,
                         base_url=self.settings.openai_base_url,
                     )
+                    n_attr = min(trip_days * 3, 42)
                     prompt = f"""당신은 여행 일정 설계 전문가입니다.
-- 목적지 주변 명소 관광에 전체 체류의 대략 1/4를 할애한다고 가정하고, 하루는 오전·오후 두 번 방문으로 계획할 수 있게 후보를 낸다.
-- 공항↔목적지 이동과 현지 체류의 균형(이상적 비율 약 4:1)을 안내 문구에 반영한다.
+- 목적지 주변 **실제 방문 가능한 구체적 명소**만 나열한다(유형만이 아니라 정식 명칭: 예 Tre Cime, Seceda, Lago di Braies).
+- 각 명소는 사용자가 **비용·시간·예약**을 비교해 고를 수 있게 **실무 정보**를 반드시 채운다.
+- 공항↔목적지 이동과 현지 체류 균형(이상적 비율 약 4:1)을 time_ratio_note에 반영한다.
 
 목적지: {destination}
 여행 일수(포함): {trip_days}일
@@ -302,8 +632,22 @@ JSON 객체 하나만 출력:
 - itinerary_step: "select_attractions"
 - trip_days: {trip_days}
 - time_ratio_note: 한국어
-- attractions: 정확히 {min(trip_days * 3, 42)}개 배열. 각 항목: id(attr_001부터), name, description, category
-- design_notes: 한국어"""
+- design_notes: 한국어(요금은 참고용·현지 확인 필요 등 면책 한 줄 포함)
+- attractions: 정확히 {n_attr}개 배열. 각 항목 필수:
+  - id: attr_001부터 순번
+  - name: 공식에 가까운 명소명(한글 병기 가능)
+  - category: 짧은 분류
+  - description: 2~3문장, 왜 가볼 만한지
+  - image_url: 대표 사진 URL 1개(가능하면 Wikimedia Commons 등 공개 이미지 직접 링크, 없으면 빈 문자열)
+  - image_credit: 사진 출처(없으면 빈 문자열)
+  - practical_details: 객체(모두 한국어, 구체적 수치·절차):
+    - parking: 주차장명·유료 여부·대략 요금(€)·사전 예약 필요 여부
+    - cable_car_lift: 케이블카/리프트 구간·편도·왕복 대략 요금(€)·없으면 "해당 없음" 또는 차량 접근만
+    - walking_hiking: 대표 루프·왕복 예상 시간·난이도
+    - fees_other: 입장료·톨·보트 등 기타
+    - reservation_note: 예약 링크·성수기 제한 요약
+    - tips: 준비물·최적 시간대
+"""
                     resp = await client.chat.completions.create(
                         model=self.settings.llm_model,
                         messages=[{"role": "user", "content": prompt}],
@@ -313,6 +657,13 @@ JSON 객체 하나만 출력:
                     if parsed and parsed.get("itinerary_step") == "select_attractions":
                         ats = parsed.get("attractions")
                         if isinstance(ats, list) and len(ats) >= 3:
+                            merged: list[dict[str, Any]] = []
+                            for i, item in enumerate(ats):
+                                if isinstance(item, dict):
+                                    merged.append(
+                                        _ensure_attraction_record(item, i, destination)
+                                    )
+                            parsed["attractions"] = merged
                             out = parsed
                             out["trip_days"] = trip_days
                 except Exception:

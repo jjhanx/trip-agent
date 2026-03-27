@@ -1722,6 +1722,24 @@ function updateRentalBookingButton() {
   }
 }
 
+const PRACTICAL_DETAIL_LABELS = {
+  parking: '주차·도로 접근',
+  cable_car_lift: '케이블카·리프트',
+  walking_hiking: '도보·하이킹',
+  fees_other: '기타 요금·톨',
+  reservation_note: '예약·통제',
+  tips: '준비·팁',
+};
+
+function renderPracticalDetailsHtml(pd) {
+  if (!pd || typeof pd !== 'object') return '';
+  return Object.keys(PRACTICAL_DETAIL_LABELS).map((k) => {
+    const v = pd[k];
+    if (v == null || String(v).trim() === '') return '';
+    return `<dt>${escapeHtml(PRACTICAL_DETAIL_LABELS[k])}</dt><dd>${escapeHtml(String(v))}</dd>`;
+  }).join('');
+}
+
 function getRestaurantOptionsForDay(routeBundle, dateStr) {
   const ds = (routeBundle.route_plan?.daily_schedule || []).find(x => x.date === dateStr);
   if (!ds) return [];
@@ -1800,14 +1818,25 @@ function renderItineraryWorkflow(data) {
       <div class="itinerary-phase">
         <p class="muted">${escapeHtml(note)}</p>
         <p>${escapeHtml(design)}</p>
-        <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 (그중 원하는 곳을 고르세요)</p>
-        <div class="attraction-checklist" style="max-height: 22rem; overflow: auto; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 0.75rem;">
+        <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 — 사진·주차·리프트·도보 시간 등을 비교해 선택하세요.</p>
+        <div class="attraction-checklist">
           ${ats.map((a) => {
             const id = escapeHtml(a.id || '');
             const checked = state.selectedAttractionIds?.includes(a.id) ? 'checked' : '';
-            return `<label class="option-item" style="display:flex; gap:0.5rem; align-items:flex-start; cursor:pointer;">
-              <input type="checkbox" class="attr-pick" value="${id}" ${checked} />
-              <span><strong>${escapeHtml(a.name || '')}</strong> <span class="muted">(${escapeHtml(a.category || '')})</span><br/><span class="muted">${escapeHtml(a.description || '')}</span></span>
+            const img = (a.image_url && String(a.image_url).trim())
+              ? `<div class="attraction-card__media"><img src="${escapeHtml(a.image_url)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.attraction-card__media').classList.add('attraction-card__media--empty')" /></div>`
+              : '<div class="attraction-card__media attraction-card__media--empty" aria-hidden="true"></div>';
+            const credit = a.image_credit ? `<p class="attraction-card__credit muted">${escapeHtml(a.image_credit)}</p>` : '';
+            const pHtml = renderPracticalDetailsHtml(a.practical_details);
+            return `<label class="attraction-card option-item">
+              <div class="attraction-card__pick"><input type="checkbox" class="attr-pick" value="${id}" ${checked} /></div>
+              ${img}
+              <div class="attraction-card__body">
+                <h3 class="attraction-card__title">${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
+                <p class="attraction-card__desc">${escapeHtml(a.description || '')}</p>
+                ${credit}
+                ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
+              </div>
             </label>`;
           }).join('')}
         </div>
