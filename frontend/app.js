@@ -1819,7 +1819,7 @@ function renderItineraryWorkflow(data) {
         <p class="muted">${escapeHtml(note)}</p>
         <p>${escapeHtml(design)}</p>
         <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 — 사진·주차·리프트·도보 시간 등을 비교해 선택하세요.</p>
-        <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 <strong>Unsplash</strong>(<a href="https://unsplash.com/license" target="_blank" rel="noopener">라이선스</a>) 등 <strong>저작권 허용</strong> 출처의 풍경 예시입니다. <strong>구글맵</strong> 타일·스트리트뷰는 약관상 무단 재사용이 제한되어 넣지 않습니다. 실제 명소 사진은 <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>에서 검색해 보세요.</p>
+        <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 서버가 <strong>위키백과(영·이)</strong> 문서 썸네일·<strong>Wikimedia Commons</strong> 파일을 먼저 찾아 붙입니다(해당 명소를 담은 경우가 많음). 안 되면 Unsplash 예시·선택 시 검색 API를 씁니다. 구글맵의 <strong>사용자 리뷰 사진</strong>은 API·라이선스 이슈로 자동 수집하지 않습니다. 출처는 각 카드에 표기됩니다.</p>
         <div class="attraction-checklist">
           ${ats.map((a) => {
             const id = escapeHtml(a.id || '');
