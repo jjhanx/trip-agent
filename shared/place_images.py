@@ -1,21 +1,18 @@
-"""명소별 실제 장소 이미지: Wikipedia·Wikimedia Commons 우선, 선택 시 SerpApi 이미지 검색."""
+"""명소별 이미지: Wikipedia·Commons·선택 SerpApi. URL 중복·부정확 매칭 억제, 실패 시 사진 생략."""
 
 from __future__ import annotations
 
-import asyncio
 import html as html_mod
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 from urllib.parse import urlencode
 
 import httpx
 
-from shared.image_fallbacks import unsplash_scenic_pool
-
 logger = logging.getLogger(__name__)
 
-# https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy
 USER_AGENT = (
     "TripAgent/1.0 (https://github.com/jjhanx/trip-agent; "
     "itinerary place thumbnails; contact via repo)"
@@ -25,17 +22,65 @@ ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 ITWIKI_API = "https://it.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
+# 너무 흔한 조사·관사 (영·이·독 등)
+_STOP = frozenset({
+    "the", "and", "for", "with", "from", "near", "that", "this", "are", "was",
+    "de", "di", "da", "la", "le", "il", "lo", "gli", "del", "della", "delle", "degli",
+    "von", "und", "der", "die", "das", "des", "ein", "eine", "dem", "den",
+})
+
+NO_IMAGE_CREDIT_KO = (
+    "자동 검색으로 이 명소만의 사진을 확신할 수 없어 생략했습니다. "
+    "Wikimedia Commons에서 명소명으로 검색해 보세요."
+)
+
+
+def normalize_url_key(url: str) -> str:
+    """동일 자산의 다른 해상도 URL을 같은 것으로 본다."""
+    if not url or not isinstance(url, str):
+        return ""
+    u = url.strip().split("?")[0].rstrip("/")
+    try:
+        p = urlparse(u)
+        return (p.netloc + p.path).lower()
+    except Exception:
+        return u.lower()
+
+
+def _tokens(s: str) -> list[str]:
+    s = re.sub(r"[^\w\s]", " ", (s or "").lower())
+    return [w for w in s.split() if len(w) >= 3 and w not in _STOP]
+
+
+def _title_relevant_to_attraction(article_title: str, attraction_name: str) -> bool:
+    """문서/파일 제목이 명소 이름과 충분히 겹치는지(첫 검색 결과만 믿지 않음)."""
+    if not attraction_name or not article_title:
+        return False
+    nt = _tokens(attraction_name)
+    at = set(_tokens(article_title))
+    if not nt:
+        return True
+    hit = sum(1 for w in nt if w in at)
+    if len(nt) <= 2:
+        return hit >= 1
+    need = max(2, (len(nt) + 1) // 2)
+    return hit >= need
+
+
+def _commons_file_relevant(file_title: str, attraction_name: str) -> bool:
+    """File: 이름이 명소와 어느 정도 연관되는지."""
+    if not file_title or not attraction_name:
+        return False
+    base = file_title.replace("File:", "")
+    base = re.sub(r"\.(jpg|jpeg|png|webp|tif|tiff)$", "", base, flags=re.I)
+    base = base.replace("_", " ")
+    return _title_relevant_to_attraction(base, attraction_name)
+
 
 def _strip_html_credit(s: str) -> str:
     t = html_mod.unescape(s or "")
     t = re.sub(r"<[^>]+>", " ", t)
     return " ".join(t.split())[:220]
-
-
-def _unsplash_fallback(idx: int) -> dict[str, str]:
-    pool = unsplash_scenic_pool()
-    u, c = pool[idx % len(pool)]
-    return {"image_url": u, "image_credit": c, "image_source": "unsplash_fallback"}
 
 
 async def _get_json(client: httpx.AsyncClient, base: str, params: dict[str, Any]) -> dict[str, Any] | None:
@@ -48,36 +93,11 @@ async def _get_json(client: httpx.AsyncClient, base: str, params: dict[str, Any]
         return None
 
 
-async def fetch_wikipedia_article_thumbnail(
+async def _wiki_thumbnail_for_title(
     client: httpx.AsyncClient,
     api_root: str,
-    search_query: str,
-    lang_label: str,
-) -> dict[str, str] | None:
-    """위키백과 검색 → 첫 문서의 썸네일(해당 장소를 설명하는 사진인 경우가 많음)."""
-    q = search_query.strip()[:300]
-    if len(q) < 2:
-        return None
-    data = await _get_json(
-        client,
-        api_root,
-        {
-            "action": "query",
-            "format": "json",
-            "list": "search",
-            "srsearch": q,
-            "srlimit": 1,
-            "srnamespace": 0,
-        },
-    )
-    if not data:
-        return None
-    hits = (data.get("query") or {}).get("search") or []
-    if not hits:
-        return None
-    title = hits[0].get("title")
-    if not title:
-        return None
+    title: str,
+) -> str | None:
     data2 = await _get_json(
         client,
         api_root,
@@ -96,17 +116,63 @@ async def fetch_wikipedia_article_thumbnail(
     for _pid, page in pages.items():
         thumb = page.get("thumbnail") or {}
         src = thumb.get("source")
-        if src and src.startswith("https://"):
-            return {
-                "image_url": src,
-                "image_credit": f"Wikipedia ({lang_label}) · {title} · article thumbnail",
-                "image_source": "wikipedia_thumb",
-            }
+        if src and str(src).startswith("https://"):
+            return str(src)
     return None
 
 
-async def fetch_commons_file_thumbnail(client: httpx.AsyncClient, search_query: str) -> dict[str, str] | None:
-    """Commons 파일 검색 → 첫 이미지의 스케일된 URL + 라이선스 메타(가능 시)."""
+async def fetch_wikipedia_unique_thumbnail(
+    client: httpx.AsyncClient,
+    api_root: str,
+    search_query: str,
+    lang_label: str,
+    attraction_name: str,
+    exclude_url_keys: set[str],
+    srlimit: int = 12,
+) -> dict[str, str] | None:
+    q = search_query.strip()[:300]
+    if len(q) < 2:
+        return None
+    data = await _get_json(
+        client,
+        api_root,
+        {
+            "action": "query",
+            "format": "json",
+            "list": "search",
+            "srsearch": q,
+            "srlimit": srlimit,
+            "srnamespace": 0,
+        },
+    )
+    if not data:
+        return None
+    hits = (data.get("query") or {}).get("search") or []
+    for hit in hits:
+        title = hit.get("title")
+        if not title or not _title_relevant_to_attraction(title, attraction_name):
+            continue
+        src = await _wiki_thumbnail_for_title(client, api_root, title)
+        if not src:
+            continue
+        key = normalize_url_key(src)
+        if key in exclude_url_keys:
+            continue
+        return {
+            "image_url": src,
+            "image_credit": f"Wikipedia ({lang_label}) · {title} · article thumbnail",
+            "image_source": "wikipedia_thumb",
+        }
+    return None
+
+
+async def fetch_commons_unique_thumbnail(
+    client: httpx.AsyncClient,
+    search_query: str,
+    attraction_name: str,
+    exclude_url_keys: set[str],
+    srlimit: int = 15,
+) -> dict[str, str] | None:
     q = search_query.strip()[:300]
     if len(q) < 2:
         return None
@@ -119,7 +185,7 @@ async def fetch_commons_file_thumbnail(client: httpx.AsyncClient, search_query: 
             "list": "search",
             "srsearch": q,
             "srnamespace": 6,
-            "srlimit": 3,
+            "srlimit": srlimit,
         },
     )
     if not data:
@@ -128,6 +194,8 @@ async def fetch_commons_file_thumbnail(client: httpx.AsyncClient, search_query: 
     for h in hits:
         title = h.get("title")
         if not title or not title.startswith("File:"):
+            continue
+        if not _commons_file_relevant(title, attraction_name):
             continue
         data2 = await _get_json(
             client,
@@ -152,6 +220,9 @@ async def fetch_commons_file_thumbnail(client: httpx.AsyncClient, search_query: 
             thumburl = info.get("thumburl") or info.get("url")
             if not thumburl or not str(thumburl).startswith("https://"):
                 continue
+            key = normalize_url_key(str(thumburl))
+            if key in exclude_url_keys:
+                continue
             meta = info.get("extmetadata") or {}
             lic = (meta.get("LicenseShortName") or {}).get("value") or ""
             artist = (meta.get("Artist") or {}).get("value") or ""
@@ -169,11 +240,12 @@ async def fetch_commons_file_thumbnail(client: httpx.AsyncClient, search_query: 
     return None
 
 
-async def fetch_serpapi_google_image(
+async def fetch_serpapi_google_image_unique(
     query: str,
     api_key: str,
+    exclude_url_keys: set[str],
+    max_results: int = 10,
 ) -> dict[str, str] | None:
-    """SerpApi google_images — 키·옵션 있을 때만. 저작권은 원 게시자에게 있음(표시용)."""
     if not api_key.strip():
         return None
     q = query.strip()[:200]
@@ -183,12 +255,12 @@ async def fetch_serpapi_google_image(
         "engine": "google_images",
         "q": q,
         "api_key": api_key,
-        "num": 5,
+        "num": min(max_results, 10),
         "ijn": 0,
     }
     url = "https://serpapi.com/search.json?" + urlencode(params)
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=22) as client:
             client.headers["User-Agent"] = USER_AGENT
             r = await client.get(url)
             r.raise_for_status()
@@ -199,57 +271,71 @@ async def fetch_serpapi_google_image(
     imgs = data.get("images_results") or []
     for im in imgs:
         u = im.get("original") or im.get("thumbnail")
-        if u and str(u).startswith("https://"):
-            title = (im.get("title") or "")[:80]
-            return {
-                "image_url": str(u),
-                "image_credit": f"Google 이미지 검색 결과(저작권은 원 게시자) · {title}",
-                "image_source": "serpapi_google_images",
-            }
+        if not u or not str(u).startswith("https://"):
+            continue
+        key = normalize_url_key(str(u))
+        if key in exclude_url_keys:
+            continue
+        title = (im.get("title") or "")[:80]
+        return {
+            "image_url": str(u),
+            "image_credit": f"Google 이미지 검색 결과(저작권은 원 게시자) · {title}",
+            "image_source": "serpapi_google_images",
+        }
     return None
+
+
+def _empty_result() -> dict[str, str]:
+    return {
+        "image_url": "",
+        "image_credit": NO_IMAGE_CREDIT_KO,
+        "image_source": "none",
+    }
 
 
 async def resolve_place_image(
     name: str,
     destination: str,
     *,
+    exclude_url_keys: set[str] | None = None,
     serpapi_key: str = "",
     use_serpapi: bool = False,
-    idx: int = 0,
 ) -> dict[str, str]:
-    """이름·목적지로 실제 장소 이미지 URL을 찾는다. 실패 시 Unsplash 폴백."""
+    """배치 내 이미지 URL 중복(exclude_url_keys)을 피해 한 장만 고른다. 실패 시 빈 URL."""
+    exclude_url_keys = exclude_url_keys or set()
     name = (name or "").strip()
     dest = (destination or "").strip()
+    attraction_name = name
     q_full = f"{name} {dest}".strip() or name
     q_short = name or dest
 
     headers = {"User-Agent": USER_AGENT}
-    async with httpx.AsyncClient(timeout=18, headers=headers) as client:
-        for api, lang in (
-            (ENWIKI_API, "en"),
-            (ITWIKI_API, "it"),
-        ):
-            r = await fetch_wikipedia_article_thumbnail(client, api, q_full, lang)
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        for api, lang in ((ENWIKI_API, "en"), (ITWIKI_API, "it")):
+            r = await fetch_wikipedia_unique_thumbnail(
+                client, api, q_full, lang, attraction_name, exclude_url_keys
+            )
             if not r and q_short != q_full:
-                r = await fetch_wikipedia_article_thumbnail(client, api, q_short, lang)
+                r = await fetch_wikipedia_unique_thumbnail(
+                    client, api, q_short, lang, attraction_name, exclude_url_keys
+                )
             if r:
                 return r
 
-        r = await fetch_commons_file_thumbnail(client, q_full)
+        r = await fetch_commons_unique_thumbnail(client, q_full, attraction_name, exclude_url_keys)
         if not r and q_short != q_full:
-            r = await fetch_commons_file_thumbnail(client, q_short)
+            r = await fetch_commons_unique_thumbnail(client, q_short, attraction_name, exclude_url_keys)
         if r:
             return r
 
     if use_serpapi and serpapi_key:
-        r = await fetch_serpapi_google_image(q_full, serpapi_key)
+        r = await fetch_serpapi_google_image_unique(q_full, serpapi_key, exclude_url_keys)
         if not r and q_short != q_full:
-            r = await fetch_serpapi_google_image(q_short, serpapi_key)
+            r = await fetch_serpapi_google_image_unique(q_short, serpapi_key, exclude_url_keys)
         if r:
             return r
 
-    fb = _unsplash_fallback(idx)
-    return fb
+    return _empty_result()
 
 
 async def enrich_attractions_images(
@@ -258,32 +344,45 @@ async def enrich_attractions_images(
     *,
     serpapi_key: str = "",
     use_serpapi: bool = False,
-    max_concurrent: int = 4,
 ) -> list[dict[str, Any]]:
-    """각 명소에 대해 위키·커먼스(및 선택 SerpApi)로 이미지 보강."""
+    """순차 처리로 이미지 URL 중복 제거. 부정확한 일반 풍경(Unsplash) 폴백 없음."""
     if not attractions:
         return attractions
-    sem = asyncio.Semaphore(max_concurrent)
+    used_keys: set[str] = set()
+    out: list[dict[str, Any]] = []
 
-    async def one(i: int, a: dict[str, Any]) -> dict[str, Any]:
-        out = dict(a)
-        name = out.get("name") or ""
+    for a in attractions:
+        item = dict(a)
+        name = item.get("name") or ""
         try:
-            async with sem:
-                res = await resolve_place_image(
-                    name,
-                    destination,
-                    serpapi_key=serpapi_key,
-                    use_serpapi=use_serpapi,
-                    idx=i,
-                )
-            out["image_url"] = res.get("image_url", out.get("image_url", ""))
-            out["image_credit"] = res.get("image_credit", out.get("image_credit", ""))
-            src = res.get("image_source", "")
-            if src:
-                out["image_source"] = src
+            res = await resolve_place_image(
+                name,
+                destination,
+                exclude_url_keys=used_keys,
+                serpapi_key=serpapi_key or "",
+                use_serpapi=use_serpapi,
+            )
+            u = (res.get("image_url") or "").strip()
+            if u.startswith("https://"):
+                k = normalize_url_key(u)
+                if k and k not in used_keys:
+                    used_keys.add(k)
+                    item["image_url"] = u
+                    item["image_credit"] = res.get("image_credit", "")
+                    item["image_source"] = res.get("image_source", "")
+                else:
+                    item["image_url"] = ""
+                    item["image_credit"] = NO_IMAGE_CREDIT_KO
+                    item["image_source"] = "duplicate_skipped"
+            else:
+                item["image_url"] = ""
+                item["image_credit"] = res.get("image_credit", NO_IMAGE_CREDIT_KO)
+                item["image_source"] = res.get("image_source", "none")
         except Exception as e:
             logger.warning("enrich attraction image failed: %s", e)
-        return out
+            item["image_url"] = ""
+            item["image_credit"] = NO_IMAGE_CREDIT_KO
+            item["image_source"] = "error"
+        out.append(item)
 
-    return await asyncio.gather(*[one(i, a) for i, a in enumerate(attractions)])
+    return out

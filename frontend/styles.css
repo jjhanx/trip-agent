@@ -562,7 +562,18 @@ button.secondary:hover {
 }
 
 .attraction-card__media--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem;
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(0, 0, 0, 0.3));
+}
+
+.attraction-card__media-placeholder {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.35;
 }
 
 .attraction-card__body {

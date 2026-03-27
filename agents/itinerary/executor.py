@@ -12,7 +12,6 @@ from a2a.server.events import EventQueue
 
 from agents.base_agent import BaseAgentExecutor
 from config import Settings
-from shared.image_fallbacks import license_safe_image_for_index
 from shared.place_images import enrich_attractions_images
 from shared.utils import new_agent_text_message
 
@@ -102,16 +101,13 @@ def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> 
             pr[k] = defaults[k]
     out["practical_details"] = pr
     url = str(out.get("image_url") or "").strip()
-    if not url.startswith("https://"):
-        u, c = license_safe_image_for_index(idx)
-        out["image_url"] = u
-        if not str(out.get("image_credit") or "").strip():
-            out["image_credit"] = c
+    if url and not url.startswith("https://"):
+        out["image_url"] = ""
     return out
 
 
 def _dolomites_attraction_templates() -> list[dict[str, Any]]:
-    """실제 관광지명·실무 정보 예시(한국어). 이미지는 Unsplash(unsplash.com/license) 풍경 예시로 통일해 표시 안정성 확보."""
+    """실제 관광지명·실무 정보 예시(한국어). 이미지는 Wikimedia Commons 링크 예시(서버 enrich로 검증·중복 제거)."""
     w = "Wikimedia Commons"
     result = [
         {
@@ -344,14 +340,13 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
 
 
 def _generic_spot(destination: str, i: int) -> dict[str, Any]:
-    """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드."""
-    u, c = license_safe_image_for_index(i)
+    """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드. 사진은 enrich에서만 붙이거나 비움."""
     return {
         "name": f"{destination} 주변 추천 스팟 {i + 1}",
         "category": ["전망", "마을", "호수", "하이킹", "박물관"][i % 5],
         "description": f"{destination}에서 이동 시간과 체력에 맞춰 고를 수 있는 후보입니다. 실제 명칭·요금은 최신 가이드와 지도로 확인하세요.",
-        "image_url": u,
-        "image_credit": c + " · 풍경 예시(해당 장소와 다를 수 있음)",
+        "image_url": "",
+        "image_credit": "",
         "practical_details": {
             "parking": "시내·관광지 주차장 위치와 요금(시간/일당)은 현지 표지와 앱으로 확인. 성수기에는 예약·제한 구역(ZTL) 주의.",
             "cable_car_lift": "리프트·케이블카가 있으면 공식 사이트 요금·마지막 운행 시각 확인. 없으면 해당 없음.",

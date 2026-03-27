@@ -1819,15 +1819,14 @@ function renderItineraryWorkflow(data) {
         <p class="muted">${escapeHtml(note)}</p>
         <p>${escapeHtml(design)}</p>
         <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 — 사진·주차·리프트·도보 시간 등을 비교해 선택하세요.</p>
-        <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 서버가 <strong>위키백과(영·이)</strong> 문서 썸네일·<strong>Wikimedia Commons</strong> 파일을 먼저 찾아 붙입니다(해당 명소를 담은 경우가 많음). 안 되면 Unsplash 예시·선택 시 검색 API를 씁니다. 구글맵의 <strong>사용자 리뷰 사진</strong>은 API·라이선스 이슈로 자동 수집하지 않습니다. 출처는 각 카드에 표기됩니다.</p>
+        <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 서버가 <strong>위키백과(영·이)</strong> 문서 썸네일·<strong>Wikimedia Commons</strong>를 검색해, 명소명과 맞는 후보만 붙입니다. 카드마다 다른 사진을 쓰도록 중복도 줄입니다. 매칭이 어려우면 사진을 비우고 안내 문구만 둡니다(잘못된 풍경 사진 대신). 선택 시 <strong>SerpApi</strong> Google 이미지 보강이 켜져 있으면 추가로 시도합니다. 구글맵 <strong>사용자 리뷰 사진</strong>은 API·라이선스 이슈로 자동 수집하지 않습니다.</p>
         <div class="attraction-checklist">
           ${ats.map((a) => {
             const id = escapeHtml(a.id || '');
             const checked = state.selectedAttractionIds?.includes(a.id) ? 'checked' : '';
-            const fallbackImg = 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=800&q=80';
             const img = (a.image_url && String(a.image_url).trim())
-              ? `<div class="attraction-card__media"><img src="${escapeHtml(a.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(fallbackImg)}" onerror="var m=this.closest('.attraction-card__media');if(m){m.classList.add('attraction-card__media--empty');} var fb=this.getAttribute('data-fallback'); if(fb && this.src!==fb){this.onerror=null;this.src=fb;} else { this.style.display='none'; }" /></div>`
-              : `<div class="attraction-card__media"><img src="${escapeHtml(fallbackImg)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.attraction-card__media').classList.add('attraction-card__media--empty');this.style.display='none';" /></div>`;
+              ? `<div class="attraction-card__media"><img src="${escapeHtml(a.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="var m=this.closest('.attraction-card__media');if(m){m.classList.add('attraction-card__media--empty');}this.style.display='none';" /></div>`
+              : `<div class="attraction-card__media attraction-card__media--empty" role="img" aria-label="대표 사진 없음"><span class="attraction-card__media-placeholder">대표 사진 없음</span></div>`;
             const credit = a.image_credit ? `<p class="attraction-card__credit muted">${escapeHtml(a.image_credit)}</p>` : '';
             const pHtml = renderPracticalDetailsHtml(a.practical_details);
             return `<label class="attraction-card option-item">
