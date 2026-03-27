@@ -511,6 +511,15 @@ class SessionExecutor(BaseAgentExecutor):
                 fallback = _mock_attractions(
                     travel.destination, trip_days, travel.preference.model_dump()
                 )
+                if phase == "attractions":
+                    from shared.place_images import enrich_attractions_images
+
+                    fallback["attractions"] = await enrich_attractions_images(
+                        fallback["attractions"],
+                        travel.destination,
+                        serpapi_key=self.settings.serpapi_api_key or "",
+                        use_serpapi=self.settings.place_images_use_serpapi,
+                    )
                 await event_queue.enqueue_event(
                     new_agent_text_message(json.dumps(fallback, ensure_ascii=False))
                 )
