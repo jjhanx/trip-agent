@@ -816,6 +816,95 @@ def _resolve_restaurant_name(
     return rid
 
 
+async def _fetch_top_attractions_from_google(
+    destination: str, api_key: str, min_rating: float = 4.3, max_count: int = 42
+) -> list[dict[str, Any]]:
+    """Google Places API (Text Search)를 사용해 목적지의 평점이 좋은 명소 목록을 동적으로 가져옵니다."""
+    import httpx
+    import asyncio
+    from urllib.parse import urlencode
+    
+    queries = [
+        f"Top attractions in {destination}",
+        f"Best places to visit in {destination}",
+        f"Top landmarks in {destination}",
+    ]
+    
+    results: list[dict[str, Any]] = []
+    seen_places = set()
+    
+    async def fetch_query(q: str) -> list[dict[str, Any]]:
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode({
+            "query": q,
+            "key": api_key
+        })
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    data = r.json()
+                    return data.get("results", [])
+        except Exception:
+            return []
+        return []
+
+    tasks = [fetch_query(q) for q in queries]
+    responses = await asyncio.gather(*tasks)
+    
+    for resp in responses:
+        for p in resp:
+            pid = p.get("place_id")
+            if not pid or pid in seen_places:
+                continue
+            seen_places.add(pid)
+            
+            rating = p.get("rating", 0.0)
+            if rating < min_rating:
+                continue
+                
+            results.append(p)
+            
+    results.sort(key=lambda x: x.get("user_ratings_total", 0), reverse=True)
+    
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(results[:max_count]):
+        name = p.get("name", f"추천 스팟 {i+1}")
+        address = p.get("formatted_address", "")
+        types = p.get("types", [])
+        category = "명소"
+        if "natural_feature" in types or "park" in types:
+            category = "자연·공원"
+        elif "museum" in types:
+            category = "박물관"
+        elif "church" in types or "place_of_worship" in types:
+            category = "종교·유적"
+            
+        r_val = p.get("rating", 0.0)
+        rc_val = p.get("user_ratings_total", 0)
+        desc = f"구글맵 평점 {r_val}★ ({rc_val}개 리뷰). {address}"
+        
+        image_url = ""
+        photos = p.get("photos", [])
+        if photos:
+            pref = photos[0].get("photo_reference")
+            if pref:
+                image_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
+                
+        out.append({
+            "id": f"attr_{i+1:03d}",
+            "name": name,
+            "category": category,
+            "description": desc,
+            "image_url": image_url,
+            "image_credit": "Google Maps",
+            "practical_details": {
+                "tips": "구글맵 공식 리뷰와 평점을 기반으로 자동 추천된 명소입니다.",
+            }
+        })
+        
+    return out
+
+
 def _finalize_merge(
     destination: str,
     route_bundle: dict[str, Any],
@@ -921,6 +1010,17 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
         if phase == "attractions":
             out = _mock_attractions(destination, trip_days, preference)
+            n_attr = min(trip_days * 3, 42)
+            
+            # 구글 Places API가 존재하면, 하드코딩된 mock 대신 해당 지역의 평점 4.3 이상 명소를 동적으로 검색해 교체합니다.
+            if self.settings.google_places_api_key:
+                google_spots = await _fetch_top_attractions_from_google(
+                    destination, self.settings.google_places_api_key, max_count=n_attr
+                )
+                if google_spots:
+                    out["attractions"] = google_spots
+                    out["design_notes"] = f"{destination} 일정: 구글맵 기반 평점 4.3 이상의 검증된 우수 명소들을 동적으로 분석해 추천합니다. 사진과 사용자 평가를 참고해 방문할 곳을 고르세요."
+
             if self.settings.openai_api_key:
                 try:
                     from openai import AsyncOpenAI

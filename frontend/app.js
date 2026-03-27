@@ -1820,8 +1820,11 @@ function renderItineraryWorkflow(data) {
         <p>${escapeHtml(design)}</p>
         <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 — 사진·주차·리프트·도보 시간 등을 비교해 선택하세요.</p>
         <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 서버가 <strong>위키백과(영·이)</strong> 문서 썸네일·<strong>Wikimedia Commons</strong>를 검색해, 명소명과 맞는 후보만 붙입니다. 카드마다 다른 사진을 쓰도록 중복도 줄입니다. 매칭이 어려우면 사진을 비우고 안내 문구만 둡니다(잘못된 풍경 사진 대신). 선택 시 <strong>SerpApi</strong> Google 이미지 보강이 켜져 있으면 추가로 시도합니다. 구글맵 <strong>사용자 리뷰 사진</strong>은 API·라이선스 이슈로 자동 수집하지 않습니다.</p>
+        <div style="margin: 0.5rem 0; text-align: right;">
+          <button type="button" id="btn-select-all-attrs" class="secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; margin: 0;">전체 선택 / 해제</button>
+        </div>
         <div class="attraction-checklist">
-          ${ats.map((a) => {
+          ${ats.map((a, index) => {
             const id = escapeHtml(a.id || '');
             const checked = state.selectedAttractionIds?.includes(a.id) ? 'checked' : '';
             const img = (a.image_url && String(a.image_url).trim())
@@ -1833,7 +1836,7 @@ function renderItineraryWorkflow(data) {
               <div class="attraction-card__pick"><input type="checkbox" class="attr-pick" value="${id}" ${checked} /></div>
               ${img}
               <div class="attraction-card__body">
-                <h3 class="attraction-card__title">${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
+                <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
                 <p class="attraction-card__desc">${escapeHtml(a.description || '')}</p>
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
@@ -1847,6 +1850,13 @@ function renderItineraryWorkflow(data) {
         state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
         updateItineraryNextButton();
       });
+    });
+    root.querySelector('#btn-select-all-attrs')?.addEventListener('click', () => {
+      const cbs = Array.from(root.querySelectorAll('.attr-pick'));
+      const allChecked = cbs.every(cb => cb.checked);
+      cbs.forEach(cb => cb.checked = !allChecked);
+      state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
+      updateItineraryNextButton();
     });
     state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
     updateItineraryNextButton();
