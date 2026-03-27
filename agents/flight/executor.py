@@ -1,6 +1,7 @@
 """Flight Search Agent - 항공편 검색 및 가격순 정렬."""
 
 import json
+import re
 
 from a2a.server.agent_execution import RequestContext
 from a2a.server.events import EventQueue
@@ -58,21 +59,22 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     start_date = travel.start_date.isoformat()
                     end_date = travel.end_date.isoformat()
                     one_way = True
-            elif flight_leg == "return" and trip_type != "round_trip":
-                # 귀국편 (편도·다구간만: 왕복은 한 번에 검색)
+            elif flight_leg == "return":
+                # 귀국편: 목적지→출발지, 편도 (출국편과 동일 항공사 우선)
                 origin = travel.destination_airport_code or travel.destination
                 dest = travel.origin_airport_code or travel.origin
                 start_date = travel.end_date.isoformat()
                 end_date = travel.end_date.isoformat()
                 one_way = True
             else:
-                # 가는 편, 편도, 또는 왕복(한 번에 검색)
+                # 가는 편: 왕복도 편도로만 검색(출국 선택 후 귀국 별도)
                 origin = travel.origin_airport_code or travel.origin
                 dest = travel.destination_airport_code or travel.destination
                 start_date = travel.start_date.isoformat()
                 end_date = travel.end_date.isoformat()
-                # 왕복: one_way=False → SerpApi가 출발+귀환 포함 총 왕복 가격 반환
-                one_way = trip_type != "round_trip"
+                one_way = trip_type == "one_way" or flight_leg == "outbound" or (
+                    trip_type == "round_trip" and not flight_leg
+                )
 
             params = {
                 "origin": origin,
@@ -83,6 +85,11 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 "use_miles": travel.use_miles,
                 "one_way": one_way,
             }
+            ob_sel = getattr(travel, "selected_outbound_flight", None) or data.get("selected_outbound_flight")
+            if flight_leg == "return" and ob_sel:
+                code = _carrier_code_from_flight_dict(ob_sel)
+                if code:
+                    params["preferred_return_airline_code"] = code
             if travel.mileage_program:
                 params["mileage_program"] = travel.mileage_program
             if travel.destination_airports and flight_leg != "return" and not (isinstance(flight_leg, str) and flight_leg.startswith("multi_city_")):
@@ -137,7 +144,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     dest = travel.destination_airport_code or travel.destination
                     start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
                     one_way = True
-            elif flight_leg == "return" and data.get("trip_type") != "round_trip":
+            elif flight_leg == "return":
                 origin = travel.destination_airport_code or travel.destination
                 dest = travel.origin_airport_code or travel.origin
                 start_d, end_d = travel.end_date.isoformat(), travel.end_date.isoformat()
@@ -146,7 +153,14 @@ class FlightSearchExecutor(BaseAgentExecutor):
                 origin = travel.origin_airport_code or travel.origin
                 dest = travel.destination_airport_code or travel.destination
                 start_d, end_d = travel.start_date.isoformat(), travel.end_date.isoformat()
-                one_way = data.get("trip_type") != "round_trip"
+                tt = data.get("trip_type", "round_trip")
+                one_way = tt == "one_way" or flight_leg == "outbound" or (
+                    tt == "round_trip" and not flight_leg
+                )
+
+            pref_ret = None
+            if flight_leg == "return" and data.get("selected_outbound_flight"):
+                pref_ret = _carrier_code_from_flight_dict(data.get("selected_outbound_flight"))
 
             if travel.destination_airports and flight_leg != "return" and not (isinstance(flight_leg, str) and flight_leg.startswith("multi_city_")):
                 flights, warnings, flight_search_api = multi_source_search_flights_multi_dest(
@@ -181,6 +195,7 @@ class FlightSearchExecutor(BaseAgentExecutor):
                     amadeus_client_secret=s.amadeus_client_secret,
                     date_flexibility_days=flex,
                     one_way=one_way,
+                    preferred_return_airline_code=pref_ret,
                 )
             # multi_source_search가 추천순으로 이미 정렬 반환
             out = {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api}

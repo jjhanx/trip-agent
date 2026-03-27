@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from datetime import datetime, timedelta
 
 from a2a.server.agent_execution import RequestContext
@@ -13,6 +14,14 @@ from agents.base_agent import BaseAgentExecutor
 from config import Settings
 from shared.models import TravelInput, LocalTransportType
 from shared.utils import A2AClient, new_agent_text_message
+
+
+def _carrier_code_from_outbound_flight(f: dict | None) -> str | None:
+    if not f or not isinstance(f, dict):
+        return None
+    fn = (f.get("flight_number") or "").strip().upper().replace(" ", "")
+    m = re.match(r"^([A-Z]{2,3})\d", fn)
+    return m.group(1)[:2] if m else None
 
 
 def _parse_agent_json_array(raw: str | list | None) -> list:
@@ -555,6 +564,11 @@ class SessionExecutor(BaseAgentExecutor):
             s = Settings()
             flex = travel.date_flexibility_days if travel.date_flexibility_days and travel.date_flexibility_days > 0 else None
             leg = flight_payload.get("flight_leg")
+            pref_ret = (
+                _carrier_code_from_outbound_flight(selected_outbound_flight)
+                if leg == "return" and selected_outbound_flight
+                else None
+            )
 
             if leg == "return":
                 origin = travel.destination_airport_code or travel.destination
@@ -617,6 +631,7 @@ class SessionExecutor(BaseAgentExecutor):
                     amadeus_client_secret=s.amadeus_client_secret,
                     date_flexibility_days=flex,
                     one_way=one_way,
+                    preferred_return_airline_code=pref_ret,
                 )
             out = {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api}
             await event_queue.enqueue_event(

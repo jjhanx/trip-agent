@@ -1,6 +1,7 @@
 """Flight search logic — SerpApi → Amadeus(429 등) → Travelpayouts(캐시 참고) → Mock."""
 
 import asyncio
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -18,6 +19,17 @@ FLIGHT_SEARCH_API_MOCK = "내부 Mock (예시 항공편 데이터)"
 
 # 마일리지(스카이패스·아시아나 클럽 등) 계획용 — 결과에 반드시 반영할 대한항공·아시아나(IATA)
 MILEAGE_PLANNING_CARRIER_CODES = ("KE", "OZ")
+
+
+def _carrier_code_from_flight_dict(f: dict | None) -> str | None:
+    """편명에서 IATA 항공사 코드(2자리) 추출."""
+    if not f or not isinstance(f, dict):
+        return None
+    fn = (f.get("flight_number") or "").strip().upper().replace(" ", "")
+    m = re.match(r"^([A-Z]{2,3})\d", fn)
+    if not m:
+        return None
+    return m.group(1)[:2]
 
 
 def _flight_key(f: dict) -> tuple:
@@ -628,19 +640,37 @@ async def _search_serpapi_only(
     config: dict,
     one_way: bool = False,
     skip_ke_oz_supplement: bool = False,
+    preferred_return_airline_code: str | None = None,
 ) -> tuple[list[dict], list[str], bool]:
     """SerpApi Google Flights 호출. 마일리지 계획용 KE/OZ가 없으면 include_airlines 보강 병합.
     skip_ke_oz_supplement=True: 날짜 다건 병렬 검색 등에서 호출 후 상위에서 한 번만 보강.
     one_way=True 시 편도 검색.
+    preferred_return_airline_code: 귀국편에서 해당 항공사 우선(SerpApi include_airlines 후 0건이면 전체 재검색).
     Returns (flights, warnings, api_responded_ok)."""
     api_key = config.get("serpapi_api_key", "")
     if not api_key:
         return [], ["SerpApi API 키가 설정되지 않았습니다. .env에 SERPAPI_API_KEY 추가."], False
 
+    raw_pref = (preferred_return_airline_code or "").strip().upper()
+    pref = raw_pref[:2] if len(raw_pref) >= 2 else ""
+    if pref and not pref.isalpha():
+        pref = ""
+    extra_pref_w: list[str] = []
+
     try:
         flights, warnings = await search_serpapi(
-            origin, destination, start_date, end_date, api_key, seat_class, one_way=one_way
+            origin, destination, start_date, end_date, api_key, seat_class, one_way=one_way,
+            include_airlines=pref if (one_way and pref) else None,
         )
+        if one_way and pref and not flights:
+            flights, warnings = await search_serpapi(
+                origin, destination, start_date, end_date, api_key, seat_class, one_way=one_way
+            )
+            extra_pref_w.append(
+                f"출국편 동일 항공사({pref}) 귀국편이 없어 전체 항공사로 다시 검색했습니다."
+            )
+        elif one_way and pref and flights:
+            extra_pref_w.append(f"출국편과 동일 항공사({pref}) 귀국편을 우선 표시합니다.")
         api_responded_ok = True
     except Exception as e:
         return [], [f"SerpApi 오류: {e}"], False
@@ -677,7 +707,17 @@ async def _search_serpapi_only(
     for f in unique:
         f["mileage_eligible"] = _mileage_eligible_for_flight(f, preferred_airlines)
     sort_fn = lambda x: _recommend_sort_key(x, preferred_airlines, use_miles)
-    unique.sort(key=sort_fn)
+    if one_way and pref:
+        unique.sort(
+            key=lambda x: (
+                0 if (_carrier_code_from_flight_dict(x) or "").upper() == pref else 1,
+                _recommend_sort_key(x, preferred_airlines, use_miles),
+            )
+        )
+    else:
+        unique.sort(key=sort_fn)
+    if extra_pref_w:
+        warnings = list(warnings) + extra_pref_w
 
     return unique, warnings, api_responded_ok
 
@@ -770,6 +810,7 @@ def multi_source_search_flights(
     amadeus_client_secret: str = "",
     date_flexibility_days: int | None = None,
     one_way: bool = False,
+    preferred_return_airline_code: str | None = None,
 ) -> tuple[list[dict], list[str], str]:
     """
     SerpApi Google Flights 우선 → Amadeus(429 등) → Travelpayouts 캐시(참고) → Mock.
@@ -811,6 +852,7 @@ def multi_source_search_flights(
             fl, wa, ok = await _search_serpapi_only(
                 origin, destination, date_pairs[0][0], date_pairs[0][1],
                 seat_class, use_miles, mileage_program, config, one_way=one_way,
+                preferred_return_airline_code=preferred_return_airline_code,
             )
             if fl and ok:
                 fl, ew = await _enrich_direct_first_and_cheapest(
@@ -824,6 +866,7 @@ def multi_source_search_flights(
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
                 mileage_program, config, one_way=one_way, skip_ke_oz_supplement=True,
+                preferred_return_airline_code=preferred_return_airline_code,
             )
             for ds, de in date_pairs
         ]

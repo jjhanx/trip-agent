@@ -35,6 +35,7 @@ def search_flights(
     destination_airports: list[str] | None = None,
     date_flexibility_days: int | None = None,
     one_way: bool = False,
+    preferred_return_airline_code: str | None = None,
 ) -> str:
     """Search for flights between origin and destination for the given dates.
     SerpApi(Google Flights) 우선. 결과에 대한항공(KE)·아시아나(OZ)가 없으면 SerpApi include_airlines로 보강 병합.
@@ -54,6 +55,7 @@ def search_flights(
         destination_airports: [MXP, MUC, VCE, ...] 마일리지 직항 우선순. 있으면 다중 공항 검색 후 병합 (최대 4개)
         date_flexibility_days: 날짜 유연성 (±일). 0/None이면 해당 날짜만 검색
         one_way: 편도 검색 (왕복 시 가는 편/오는 편 각각 검색 시 True)
+        preferred_return_airline_code: 귀국편(one_way) 검색 시 출국편과 동일 항공사(IATA 2자) 우선
 
     Returns:
         JSON object with "flights", "warnings", "flight_search_api" (이번 검색에 쓰인 API 설명)
@@ -87,6 +89,7 @@ def search_flights(
             amadeus_client_secret=cfg["amadeus_client_secret"],
             date_flexibility_days=flex,
             one_way=one_way,
+            preferred_return_airline_code=preferred_return_airline_code,
         )
     return json.dumps(
         {"flights": flights, "warnings": warnings, "flight_search_api": flight_search_api},

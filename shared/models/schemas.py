@@ -57,8 +57,9 @@ class TravelPreference(BaseModel):
 class TravelInput(BaseModel):
     """사용자 여행 입력.
 
-    - origin/destination: 공항 코드 또는 도시/관광지 이름. 8시간 이상 거리 시
-      origin_airport_code, destination_airport_code로 선택된 공항 사용.
+    - origin/destination: 공항 코드 또는 도시/관광지 이름. 도시명일 때 UI에서
+      국제선은 차량 8시간 이내·같은 나라 공항 우선, 국내선은 차량 3시간 이상 거리 공항 우선(완화 가능)으로
+      origin_airport_code, destination_airport_code를 선택합니다.
     - end_date: '귀국일'이 아닌 '귀환일' (국내 여행 등 포함).
     - date_flexibility_days: +/- 허용 일수 (최저가 검색 등).
     - accommodation_priority: 선호 숙소 형태 3순위 (혼합 후보 제시).
@@ -76,7 +77,7 @@ class TravelInput(BaseModel):
         None, description="날짜 유연성: +/- 허용 일수 (최저가 검색 등)"
     )
     origin_airport_code: str | None = Field(
-        None, description="선택된 출발 공항 코드 (8시간 이내 접근 가능 공항 중 선택)"
+        None, description="선택된 출발 공항 코드 (도시명일 때 도시·국내외 규칙에 따라 제시된 목록 중 선택)"
     )
     destination_airport_code: str | None = Field(
         None, description="선택된 도착 공항 코드"
@@ -107,6 +108,10 @@ class TravelInput(BaseModel):
     multi_cities: list[dict] | None = Field(
         None,
         description="다구간 여정: [{origin, destination, date}, ...]",
+    )
+    selected_outbound_flight: dict | None = Field(
+        None,
+        description="왕복 귀국편 검색 시 출국편 선택 분(동일 항공사 우선 검색용)",
     )
 
 

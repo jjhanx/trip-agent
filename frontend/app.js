@@ -689,9 +689,22 @@ function buildTravelInput() {
   const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(form.mileage_program?.value) : '';
   if (mileageKey && needDestAirport()) {
     const originCode = state.origin_airport_code || form.origin?.value?.trim() || '';
+    const routeContext = {
+      originInput: form.origin?.value?.trim() || '',
+      destInput: form.destination?.value?.trim() || '',
+      originAirportCode: state.origin_airport_code,
+      destAirportCode: state.destination_airport_code,
+      domesticRoute: typeof isDomesticRoute === 'function' && isDomesticRoute(
+        form.origin?.value?.trim() || '',
+        form.destination?.value?.trim() || '',
+        state.origin_airport_code,
+        state.destination_airport_code,
+      ),
+    };
     const airports = getDestAirportsForOrigin(originCode, form.destination?.value?.trim(), {
       useMiles: form.use_miles?.checked,
       mileageProgram: form.mileage_program?.value,
+      routeContext,
     });
     if (airports && airports.length > 1)
       input.destination_airports = airports.map(a => a.code);
@@ -724,13 +737,26 @@ function needDestAirport() {
 }
 
 function renderOriginAirports() {
-  const origin = $('#travel-form').origin?.value?.trim() || '';
-  const airports = getAirportsForCity(origin) || [];
+  const form = $('#travel-form');
+  const origin = form.origin?.value?.trim() || '';
+  const dest = form.destination?.value?.trim() || '';
+  const routeContext = {
+    originInput: origin,
+    destInput: dest,
+    originAirportCode: state.origin_airport_code,
+    destAirportCode: state.destination_airport_code,
+    domesticRoute: typeof isDomesticRoute === 'function' && isDomesticRoute(
+      origin, dest, state.origin_airport_code, state.destination_airport_code,
+    ),
+  };
+  const airports = (typeof getAirportsForPlaceWithGroundRules === 'function'
+    ? getAirportsForPlaceWithGroundRules(origin, 'origin', { routeContext })
+    : getAirportsForCity(origin)) || [];
   const list = $('#origin-airports-list');
   list.innerHTML = airports.map(a => `
     <div class="airport-item" data-code="${a.code}">
       <span><span class="code">${a.code}</span> <span class="name">${a.name}</span></span>
-      <span>접근 ${a.drive_hours}h 이내</span>
+      <span>차량 약 ${a.drive_hours}h</span>
     </div>
   `).join('');
   list.querySelectorAll('.airport-item').forEach(el => {
@@ -747,11 +773,28 @@ function renderDestAirports() {
   const form = $('#travel-form');
   const dest = form.destination?.value?.trim() || '';
   const originCode = state.origin_airport_code || form.origin?.value?.trim() || '';
+  const routeContext = {
+    originInput: form.origin?.value?.trim() || '',
+    destInput: dest,
+    originAirportCode: state.origin_airport_code,
+    destAirportCode: state.destination_airport_code,
+    domesticRoute: typeof isDomesticRoute === 'function' && isDomesticRoute(
+      form.origin?.value?.trim() || '',
+      dest,
+      state.origin_airport_code,
+      state.destination_airport_code,
+    ),
+  };
   const options = {
     useMiles: form.use_miles?.checked ?? false,
     mileageProgram: form.mileage_program?.value?.trim() || '',
+    routeContext,
   };
-  const airports = getDestAirportsForOrigin(originCode, dest, options) || getAirportsForCity(dest) || [];
+  const airports = getDestAirportsForOrigin(originCode, dest, options)
+    || (typeof getAirportsForPlaceWithGroundRules === 'function'
+      ? getAirportsForPlaceWithGroundRules(dest, 'destination', { routeContext })
+      : getAirportsForCity(dest))
+    || [];
   const info = (typeof FLIGHT_INFO !== 'undefined' && FLIGHT_INFO[originCode]) || {};
   const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(options.mileageProgram) : '';
   const list = $('#destination-airports-list');
