@@ -825,9 +825,9 @@ async def _fetch_top_attractions_from_google(
     from urllib.parse import urlencode
     
     queries = [
-        f"Top attractions in {destination}",
-        f"Best places to visit in {destination}",
-        f"Top landmarks in {destination}",
+        f"Top rated tourist attractions in {destination}",
+        f"Best nature spots and landmarks in {destination}",
+        f"Famous places to visit in {destination}",
     ]
     
     results: list[dict[str, Any]] = []
@@ -859,12 +859,14 @@ async def _fetch_top_attractions_from_google(
             seen_places.add(pid)
             
             rating = p.get("rating", 0.0)
-            if rating < min_rating:
+            reviews = p.get("user_ratings_total", 0)
+            if rating < min_rating or reviews < 50:
                 continue
                 
             results.append(p)
             
-    results.sort(key=lambda x: x.get("user_ratings_total", 0), reverse=True)
+    # 리뷰 최소 50개 이상인 곳들만, 평점(내림차순) 우선 정렬 후 리뷰 수(내림차순)로 정렬
+    results.sort(key=lambda x: (x.get("rating", 0.0), x.get("user_ratings_total", 0)), reverse=True)
     
     out: list[dict[str, Any]] = []
     for i, p in enumerate(results[:max_count]):
@@ -1012,9 +1014,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
             out = _mock_attractions(destination, trip_days, preference)
             n_attr = min(trip_days * 3, 42)
             
-            # 구글 Places API가 존재하면, 하드코딩된 mock 대신 해당 지역의 평점 4.3 이상 명소를 동적으로 검색해 교체합니다.
-            # 단, 돌로미티(Dolomites) 지역은 고품질의 42개 전용 DB가 이미 존재하므로 동적 검색으로 덮어쓰지 않습니다.
-            if self.settings.google_places_api_key and not _looks_like_dolomites(destination):
+            # 구글 Places API가 존재하면, 목적지와 무관하게 해당 지역의 평점 높은 명소를 구글맵에서 동적으로 검색해 교체합니다.
+            if self.settings.google_places_api_key:
                 google_spots = await _fetch_top_attractions_from_google(
                     destination, self.settings.google_places_api_key, max_count=n_attr
                 )
