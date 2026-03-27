@@ -39,12 +39,28 @@ def normalize_url_key(url: str) -> str:
     """동일 자산의 다른 해상도 URL을 같은 것으로 본다."""
     if not url or not isinstance(url, str):
         return ""
-    u = url.strip().split("?")[0].rstrip("/")
+        
+    u = url.strip()
+    
+    # Google Places API 예외 처리 (쿼리의 photoreference 자체가 고유 키)
+    if "maps.googleapis.com/maps/api/place/photo" in u:
+        try:
+            from urllib.parse import parse_qs
+            p = urlparse(u)
+            qs = parse_qs(p.query)
+            refs = qs.get("photoreference")
+            if refs:
+                return f"google_places_{refs[0]}"
+        except Exception:
+            pass
+        return u
+
+    base_u = u.split("?")[0].rstrip("/")
     try:
-        p = urlparse(u)
+        p = urlparse(base_u)
         return (p.netloc + p.path).lower()
     except Exception:
-        return u.lower()
+        return base_u.lower()
 
 
 def _tokens(s: str) -> list[str]:
