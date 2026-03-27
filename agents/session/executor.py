@@ -489,21 +489,30 @@ class SessionExecutor(BaseAgentExecutor):
                 "preference": travel.preference.model_dump(),
                 "selected_flight": selected_flight,
             }
+            phase = (data.get("itinerary_phase") or "attractions").strip().lower()
+            it_payload["itinerary_phase"] = phase
+            if phase == "route_restaurants":
+                it_payload["selected_attraction_ids"] = data.get("selected_attraction_ids") or []
+                cat = data.get("itinerary_attraction_catalog")
+                it_payload["itinerary_attraction_catalog"] = cat if isinstance(cat, list) else []
+            elif phase == "finalize":
+                it_payload["meal_choices"] = data.get("meal_choices") or {}
+                bundle = data.get("route_plan_bundle")
+                it_payload["route_plan_bundle"] = bundle if isinstance(bundle, dict) else {}
             resp = await self._call_agent("itinerary", it_payload)
             if resp:
                 await event_queue.enqueue_event(new_agent_text_message(resp))
             else:
-                from agents.itinerary.executor import _mock_itineraries
-                from datetime import datetime
+                from agents.itinerary.executor import _mock_attractions, _trip_inclusive_days
 
-                d1 = datetime.strptime(travel.start_date.isoformat(), "%Y-%m-%d")
-                d2 = datetime.strptime(travel.end_date.isoformat(), "%Y-%m-%d")
-                days = max(1, (d2 - d1).days)
-                itineraries = _mock_itineraries(
-                    travel.destination, days, travel.preference.model_dump()
+                trip_days = _trip_inclusive_days(
+                    travel.start_date.isoformat(), travel.end_date.isoformat()
+                )
+                fallback = _mock_attractions(
+                    travel.destination, trip_days, travel.preference.model_dump()
                 )
                 await event_queue.enqueue_event(
-                    new_agent_text_message(json.dumps(itineraries, ensure_ascii=False))
+                    new_agent_text_message(json.dumps(fallback, ensure_ascii=False))
                 )
             return
 

@@ -192,6 +192,11 @@ function getFullPlanState() {
     flightLeg: state.flightLeg,
     itineraries: state.itineraries,
     selectedItinerary: state.selectedItinerary,
+    itineraryWorkflowStep: state.itineraryWorkflowStep,
+    itineraryAttractionCatalog: state.itineraryAttractionCatalog,
+    itineraryRouteBundle: state.itineraryRouteBundle,
+    selectedAttractionIds: state.selectedAttractionIds,
+    mealChoices: state.mealChoices,
     accommodations: state.accommodations,
     selectedAccommodation: state.selectedAccommodation,
     localTransport: state.localTransport,
@@ -219,6 +224,17 @@ function loadPlanIntoState(data) {
   state.flightLeg = data.flightLeg ?? 'outbound';
   state.itineraries = Array.isArray(data.itineraries) ? data.itineraries : [];
   state.selectedItinerary = data.selectedItinerary ?? null;
+  state.itineraryWorkflowStep = data.itineraryWorkflowStep ?? null;
+  state.itineraryAttractionCatalog = Array.isArray(data.itineraryAttractionCatalog) ? data.itineraryAttractionCatalog : [];
+  state.itineraryRouteBundle = data.itineraryRouteBundle && typeof data.itineraryRouteBundle === 'object' ? data.itineraryRouteBundle : null;
+  state.selectedAttractionIds = Array.isArray(data.selectedAttractionIds) ? data.selectedAttractionIds : [];
+  state.mealChoices = data.mealChoices && typeof data.mealChoices === 'object' ? data.mealChoices : {};
+  if (state.selectedItinerary && !state.itineraryWorkflowStep) {
+    const si = state.selectedItinerary;
+    if (si && typeof si === 'object' && !si.option_id && (si.daily_plan || si.summary || si.title)) {
+      state.itineraryWorkflowStep = 'complete';
+    }
+  }
   state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
   state.selectedAccommodation = data.selectedAccommodation ?? null;
   state.localTransport = normalizeLocalTransport(data.localTransport);
@@ -309,7 +325,7 @@ function resolveCurrentStep() {
   if (state.selectedAccommodation) return 'confirm';
   if (state.accommodations?.length) return 'accommodation';
   if (state.selectedItinerary && !state.accommodations?.length) return 'itineraries';
-  if (state.itineraries?.length) return 'itineraries';
+  if (state.itineraryWorkflowStep || state.itineraries?.length) return 'itineraries';
   if (state.selectedLocalTransport || state.localTransport?.length) return 'rental';
   if (buildSelectedFlight()) return state.localTransport?.length ? 'rental' : 'rental';
   if (state.flights?.length || (state.flightsByLeg && Object.keys(state.flightsByLeg).length)) return 'flights';
@@ -346,6 +362,11 @@ function newPlan() {
   state.flightLeg = 'outbound';
   state.itineraries = [];
   state.selectedItinerary = null;
+  state.itineraryWorkflowStep = null;
+  state.itineraryAttractionCatalog = [];
+  state.itineraryRouteBundle = null;
+  state.selectedAttractionIds = [];
+  state.mealChoices = {};
   state.accommodations = [];
   state.selectedAccommodation = null;
   state.localTransport = [];
@@ -381,6 +402,11 @@ let state = {
   flightLeg: 'outbound',
   itineraries: [],
   selectedItinerary: null,
+  itineraryWorkflowStep: null,
+  itineraryAttractionCatalog: [],
+  itineraryRouteBundle: null,
+  selectedAttractionIds: [],
+  mealChoices: {},
   accommodations: [],
   selectedAccommodation: null,
   localTransport: [],
@@ -448,7 +474,7 @@ function updateStepCompletedState() {
     const hasData = s === 'input' && state.travelInput
       || s === 'flights' && buildSelectedFlight()
       || s === 'rental' && (state.localTransport?.length > 0 || state.selectedLocalTransport)
-      || s === 'itineraries' && (state.itineraries?.length > 0 || state.selectedItinerary)
+      || s === 'itineraries' && (state.itineraries?.length > 0 || state.selectedItinerary || state.itineraryWorkflowStep)
       || s === 'accommodation' && (state.accommodations?.length > 0 || state.selectedAccommodation)
       || (s === 'confirm' || s === 'booking') && state.selectedAccommodation;
     if (hasData && !node.classList.contains('active')) {
@@ -503,8 +529,22 @@ function refreshStepView(step) {
     }
     renderRentalOptions(state.localTransport);
   }
-  if (step === 'itineraries' && state.itineraries?.length) {
-    renderItineraries(state.itineraries);
+  if (step === 'itineraries') {
+    if (state.itineraryWorkflowStep === 'complete' && state.selectedItinerary) {
+      renderItineraryWorkflow({ itinerary_step: 'complete', final_itinerary: state.selectedItinerary });
+    } else if (state.itineraryWorkflowStep === 'meals' && state.itineraryRouteBundle) {
+      renderItineraryWorkflow(state.itineraryRouteBundle);
+    } else if (state.itineraryWorkflowStep === 'attractions' && state.itineraryAttractionCatalog?.length) {
+      renderItineraryWorkflow({
+        itinerary_step: 'select_attractions',
+        attractions: state.itineraryAttractionCatalog,
+        design_notes: '',
+        time_ratio_note: '',
+        trip_days: state.itineraryAttractionCatalog?.length ? Math.ceil(state.itineraryAttractionCatalog.length / 3) : 1,
+      });
+    } else if (state.itineraries?.length) {
+      renderItineraries(state.itineraries);
+    }
   }
   if (step === 'accommodation' && state.accommodations?.length) {
     renderAccommodations(state.accommodations);
@@ -1229,11 +1269,7 @@ async function advanceToLocalTransportStep() {
       return true;
     }
 
-    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
-    if (!Array.isArray(itin)) itin = [itin];
-    state.itineraries = itin;
-    renderItineraries(state.itineraries);
-    show('step-itineraries');
+    applyItineraryResponse(data);
     return true;
   } catch (err) {
     showError(err.message);
@@ -1686,21 +1722,247 @@ function updateRentalBookingButton() {
   }
 }
 
+function getRestaurantOptionsForDay(routeBundle, dateStr) {
+  const ds = (routeBundle.route_plan?.daily_schedule || []).find(x => x.date === dateStr);
+  if (!ds) return [];
+  const am = ds.morning_attraction_id;
+  const pm = ds.afternoon_attraction_id;
+  const rba = routeBundle.restaurants_by_attraction || {};
+  const list = [];
+  [am, pm].filter(Boolean).forEach((aid) => {
+    (rba[aid] || []).forEach((r) => {
+      if (r && r.id && !list.find(x => x.id === r.id)) list.push(r);
+    });
+  });
+  return list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
+}
+
+function collectAndValidateMealChoices() {
+  const bundle = state.itineraryRouteBundle;
+  const dates = bundle?.trip_dates || [];
+  const root = $('#itinerary-workflow-root');
+  const mc = {};
+  for (const d of dates) {
+    const lf = root?.querySelector(`select[data-date="${d}"][data-meal="lunch"][data-rank="first"]`)?.value;
+    const ls = root?.querySelector(`select[data-date="${d}"][data-meal="lunch"][data-rank="second"]`)?.value;
+    const df = root?.querySelector(`select[data-date="${d}"][data-meal="dinner"][data-rank="first"]`)?.value;
+    const ds = root?.querySelector(`select[data-date="${d}"][data-meal="dinner"][data-rank="second"]`)?.value;
+    if (!lf || !ls || !df || !ds) {
+      alert(`${d} 날짜의 점심·저녁 1순위·2순위를 모두 선택해 주세요.`);
+      return false;
+    }
+    if (lf === ls || df === ds) {
+      alert(`${d}: 1순위와 2순위는 서로 다른 곳을 선택해 주세요.`);
+      return false;
+    }
+    mc[d] = {
+      lunch: { first: lf, second: ls },
+      dinner: { first: df, second: ds },
+    };
+  }
+  state.mealChoices = mc;
+  return true;
+}
+
+function updateItineraryNextButton() {
+  const btn = $('#btn-next-itineraries');
+  if (!btn) return;
+  const ws = state.itineraryWorkflowStep;
+  if (ws === 'attractions') {
+    btn.textContent = '경로·맛집 계획 받기';
+    btn.disabled = !(state.selectedAttractionIds?.length > 0);
+  } else if (ws === 'meals') {
+    btn.textContent = '일정 확정';
+    btn.disabled = false;
+  } else if (ws === 'complete') {
+    btn.textContent = '다음 (숙소 선택)';
+    btn.disabled = false;
+  } else if (ws === 'legacy') {
+    btn.textContent = '다음 (숙소 선택)';
+    btn.disabled = !state.selectedItinerary;
+  } else {
+    btn.textContent = '다음';
+    btn.disabled = true;
+  }
+}
+
+function renderItineraryWorkflow(data) {
+  const root = $('#itinerary-workflow-root');
+  if (!root) return;
+  const step = data?.itinerary_step;
+  if (step === 'select_attractions') {
+    state.itineraryWorkflowStep = 'attractions';
+    const ats = data.attractions || [];
+    const note = data.time_ratio_note || '';
+    const design = data.design_notes || '';
+    const tripDays = data.trip_days || '';
+    root.innerHTML = `
+      <div class="itinerary-phase">
+        <p class="muted">${escapeHtml(note)}</p>
+        <p>${escapeHtml(design)}</p>
+        <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 (그중 원하는 곳을 고르세요)</p>
+        <div class="attraction-checklist" style="max-height: 22rem; overflow: auto; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 0.75rem;">
+          ${ats.map((a) => {
+            const id = escapeHtml(a.id || '');
+            const checked = state.selectedAttractionIds?.includes(a.id) ? 'checked' : '';
+            return `<label class="option-item" style="display:flex; gap:0.5rem; align-items:flex-start; cursor:pointer;">
+              <input type="checkbox" class="attr-pick" value="${id}" ${checked} />
+              <span><strong>${escapeHtml(a.name || '')}</strong> <span class="muted">(${escapeHtml(a.category || '')})</span><br/><span class="muted">${escapeHtml(a.description || '')}</span></span>
+            </label>`;
+          }).join('')}
+        </div>
+      </div>`;
+    root.querySelectorAll('.attr-pick').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
+        updateItineraryNextButton();
+      });
+    });
+    state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
+    updateItineraryNextButton();
+    return;
+  }
+  if (step === 'select_meals') {
+    state.itineraryWorkflowStep = 'meals';
+    const rb = data;
+    const dates = rb.trip_dates || [];
+    const rp = rb.route_plan || {};
+    const neigh = rb.neighborhoods || [];
+    const legs = rp.transit_legs || [];
+    const daily = rp.daily_schedule || [];
+    const lodging = rp.lodging_strategy || '';
+    let html = `<div class="itinerary-phase"><h3>동선·추천 동네</h3>`;
+    if (lodging) html += `<p>${escapeHtml(lodging)}</p>`;
+    if (legs.length) {
+      html += '<h4>공항 이동 구간</h4><ul>';
+      legs.forEach((leg) => {
+        html += `<li><strong>${escapeHtml(leg.leg || '')}</strong>: ${escapeHtml(leg.notes || '')}`;
+        if (leg.suggested_overnight) html += ` (숙박 제안: ${escapeHtml(leg.suggested_overnight)})`;
+        html += '</li>';
+      });
+      html += '</ul>';
+    }
+    if (neigh.length) {
+      html += '<h4>숙소 후보 동네</h4>';
+      neigh.forEach((n) => {
+        html += `<div class="option-item" style="margin-bottom:0.75rem;">
+          <strong>${escapeHtml(n.name || '')}</strong> <span class="muted">${escapeHtml(n.area_id || '')}</span>
+          <p class="muted">${escapeHtml(n.description || '')}</p>
+          <p class="muted">${escapeHtml(n.lodging_notes || '')}</p>
+        </div>`;
+      });
+    }
+    if (daily.length) {
+      html += '<h4>일자별 명소 배정</h4><ul>';
+      daily.forEach((row) => {
+        html += `<li>${escapeHtml(row.date || '')}: 오전 ${escapeHtml(row.morning_attraction_id || '')} · 오후 ${escapeHtml(row.afternoon_attraction_id || '')} · ${escapeHtml(row.overnight_area_hint || '')}</li>`;
+      });
+      html += '</ul>';
+    }
+    html += '<h3>맛집 (명소당 3곳, 평점순) — 날짜별 점심·저녁 1·2순위</h3>';
+    const mealOptsHtml = (opts, selectedId) =>
+      opts.map((o) =>
+        `<option value="${escapeHtml(o.id)}"${o.id === selectedId ? ' selected' : ''}>${escapeHtml(o.name || '')} (${Number(o.rating).toFixed(1)})</option>`
+      ).join('');
+    dates.forEach((d) => {
+      const opts = getRestaurantOptionsForDay(rb, d);
+      const mc = state.mealChoices?.[d] || {};
+      if (!opts.length) {
+        html += `<p class="muted">${escapeHtml(d)}: 해당 날짜 맛집 후보가 없습니다.</p>`;
+        return;
+      }
+      html += `<div class="option-item" style="margin-bottom:1rem;"><h4>${escapeHtml(d)}</h4>
+        <p class="muted">점심 (당일 방문 명소 인근)</p>
+        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" style="min-width:14rem;">
+            <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.first)}</select>
+          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" style="min-width:14rem;">
+            <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.second)}</select>
+        </div>
+        <p class="muted">저녁</p>
+        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" style="min-width:14rem;">
+            <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.first)}</select>
+          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="second" style="min-width:14rem;">
+            <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.second)}</select>
+        </div></div>`;
+    });
+    html += '</div>';
+    root.innerHTML = html;
+    updateItineraryNextButton();
+    return;
+  }
+  if (step === 'complete') {
+    state.itineraryWorkflowStep = 'complete';
+    const fi = data.final_itinerary || {};
+    root.innerHTML = `<div class="itinerary-phase">
+      <h3>${escapeHtml(fi.title || '확정 일정')}</h3>
+      <p>${escapeHtml(fi.summary || '')}</p>
+      <h4>일자별 요약</h4>
+      <pre style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(JSON.stringify(fi.daily_plan || fi, null, 2))}</pre>
+    </div>`;
+    updateItineraryNextButton();
+    return;
+  }
+  if (state.itineraries?.length) {
+    renderItineraries(state.itineraries);
+  }
+}
+
+function applyItineraryResponse(data) {
+  if (data?.error) throw new Error(data.error);
+  if (data?.itinerary_step === 'select_attractions') {
+    state.itineraryAttractionCatalog = data.attractions || [];
+    state.itineraryRouteBundle = null;
+    state.mealChoices = {};
+    state.selectedItinerary = null;
+    state.itineraries = [];
+    renderItineraryWorkflow(data);
+    show('step-itineraries');
+    return true;
+  }
+  if (data?.itinerary_step === 'select_meals') {
+    state.itineraryRouteBundle = data;
+    state.selectedItinerary = null;
+    renderItineraryWorkflow(data);
+    show('step-itineraries');
+    return true;
+  }
+  if (data?.itinerary_step === 'complete') {
+    state.selectedItinerary = data.final_itinerary;
+    renderItineraryWorkflow(data);
+    show('step-itineraries');
+    return true;
+  }
+  let itin = Array.isArray(data) ? data : (data?.itineraries || data);
+  if (!Array.isArray(itin)) itin = [itin];
+  state.itineraries = itin;
+  state.itineraryWorkflowStep = 'legacy';
+  state.selectedItinerary = null;
+  renderItineraries(state.itineraries);
+  show('step-itineraries');
+  return true;
+}
+
 function renderItineraries(items) {
-  const list = $('#itineraries-list');
+  const list = $('#itinerary-workflow-root');
+  if (!list) return;
+  state.itineraryWorkflowStep = 'legacy';
   list.innerHTML = items.map((it, i) => `
     <div class="option-item" data-idx="${i}">
-      <h3>${it.title || `일정 ${i + 1}`}</h3>
-      <p>${it.summary || ''}</p>
+      <h3>${escapeHtml(it.title || `일정 ${i + 1}`)}</h3>
+      <p>${escapeHtml(it.summary || '')}</p>
     </div>
   `).join('');
   list.querySelectorAll('.option-item').forEach(el => {
     el.addEventListener('click', () => {
       list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
-      state.selectedItinerary = items[parseInt(el.dataset.idx)];
+      state.selectedItinerary = items[parseInt(el.dataset.idx, 10)];
+      updateItineraryNextButton();
     });
   });
+  updateItineraryNextButton();
 }
 
 $('#btn-back-rental').addEventListener('click', () => show('step-flights'));
@@ -1760,11 +2022,7 @@ $('#btn-next-rental').addEventListener('click', async () => {
     };
     const data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
-    let itin = Array.isArray(data) ? data : (data?.itineraries || data);
-    if (!Array.isArray(itin)) itin = [itin];
-    state.itineraries = itin;
-    renderItineraries(state.itineraries);
-    show('step-itineraries');
+    applyItineraryResponse(data);
   } catch (err) {
     showError(err.message);
   }
@@ -1773,28 +2031,107 @@ $('#btn-next-rental').addEventListener('click', async () => {
 $('#btn-back-itineraries').addEventListener('click', () => show('step-rental'));
 
 $('#btn-next-itineraries').addEventListener('click', async () => {
-  if (!state.selectedItinerary) { alert('일정을 선택해 주세요.'); return; }
-  show('loading');
-  try {
-    const payload = {
-      ...state.travelInput,
-      selected_flight: state.selectedFlight,
-      selected_itinerary: state.selectedItinerary,
-    };
-    const data = await callAgent(payload);
-    if (data?.error) throw new Error(data.error);
-    const acc = data?.accommodations || [];
-    const lt = data?.local_transport || [];
-    state.accommodations = Array.isArray(acc) ? acc : [];
-    state.localTransport = normalizeLocalTransport(lt);
-    renderAccommodations(state.accommodations);
-    $('#local-transport-info').innerHTML = state.localTransport.length
-      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
-      : '';
-    show('step-accommodation');
-  } catch (err) {
-    showError(err.message);
+  const ws = state.itineraryWorkflowStep;
+  if (ws === 'attractions') {
+    if (!state.selectedAttractionIds?.length) {
+      alert('명소를 한 곳 이상 선택해 주세요.');
+      return;
+    }
+    show('loading');
+    try {
+      const payload = {
+        ...state.travelInput,
+        selected_flight: state.selectedFlight,
+        selected_local_transport: state.selectedLocalTransport,
+        itinerary_phase: 'route_restaurants',
+        selected_attraction_ids: state.selectedAttractionIds,
+        itinerary_attraction_catalog: state.itineraryAttractionCatalog,
+      };
+      const data = await callAgent(payload);
+      if (data?.error) throw new Error(data.error);
+      applyItineraryResponse(data);
+    } catch (err) {
+      showError(err.message);
+    }
+    return;
   }
+  if (ws === 'meals') {
+    if (!collectAndValidateMealChoices()) return;
+    show('loading');
+    try {
+      const payload = {
+        ...state.travelInput,
+        selected_flight: state.selectedFlight,
+        selected_local_transport: state.selectedLocalTransport,
+        itinerary_phase: 'finalize',
+        meal_choices: state.mealChoices,
+        route_plan_bundle: state.itineraryRouteBundle,
+      };
+      const data = await callAgent(payload);
+      if (data?.error) throw new Error(data.error);
+      applyItineraryResponse(data);
+    } catch (err) {
+      showError(err.message);
+    }
+    return;
+  }
+  if (ws === 'complete') {
+    if (!state.selectedItinerary) {
+      alert('일정이 없습니다.');
+      return;
+    }
+    show('loading');
+    try {
+      const payload = {
+        ...state.travelInput,
+        selected_flight: state.selectedFlight,
+        selected_itinerary: state.selectedItinerary,
+      };
+      const data = await callAgent(payload);
+      if (data?.error) throw new Error(data.error);
+      const acc = data?.accommodations || [];
+      const lt = data?.local_transport || [];
+      state.accommodations = Array.isArray(acc) ? acc : [];
+      state.localTransport = normalizeLocalTransport(lt);
+      renderAccommodations(state.accommodations);
+      $('#local-transport-info').innerHTML = state.localTransport.length
+        ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+        : '';
+      show('step-accommodation');
+    } catch (err) {
+      showError(err.message);
+    }
+    return;
+  }
+  if (ws === 'legacy') {
+    if (!state.selectedItinerary) {
+      alert('일정을 선택해 주세요.');
+      return;
+    }
+    show('loading');
+    try {
+      const payload = {
+        ...state.travelInput,
+        selected_flight: state.selectedFlight,
+        selected_itinerary: state.selectedItinerary,
+      };
+      const data = await callAgent(payload);
+      if (data?.error) throw new Error(data.error);
+      const acc = data?.accommodations || [];
+      const lt = data?.local_transport || [];
+      state.accommodations = Array.isArray(acc) ? acc : [];
+      state.localTransport = normalizeLocalTransport(lt);
+      renderAccommodations(state.accommodations);
+      $('#local-transport-info').innerHTML = state.localTransport.length
+        ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+        : '';
+      show('step-accommodation');
+    } catch (err) {
+      showError(err.message);
+    }
+    return;
+  }
+  alert('일정 단계를 진행해 주세요.');
 });
 
 function renderAccommodations(items) {
