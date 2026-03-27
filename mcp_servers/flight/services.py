@@ -666,11 +666,16 @@ async def _search_serpapi_only(
             flights, warnings = await search_serpapi(
                 origin, destination, start_date, end_date, api_key, seat_class, one_way=one_way
             )
+            # SerpApi include_airlines 필터 1차 결과가 0건일 때의 안내(Amadeus·Travelpayouts와 무관)
             extra_pref_w.append(
-                f"출국편 동일 항공사({pref}) 귀국편이 없어 전체 항공사로 다시 검색했습니다."
+                f"[SerpApi·Google Flights] 귀환일({start_date[:10]})에 항공사 필터({pref})만 적용한 검색이 0건이어서, "
+                f"항공사 제한 없이 같은 날짜로 다시 검색했습니다. (Amadeus 단계 아님. "
+                f"날짜 유연성은 여행 정보에서 ±일을 넣은 경우에만 여러 귀환일을 병렬 검색합니다.)"
             )
         elif one_way and pref and flights:
-            extra_pref_w.append(f"출국편과 동일 항공사({pref}) 귀국편을 우선 표시합니다.")
+            extra_pref_w.append(
+                f"[SerpApi] 출국과 동일 항공사({pref}) 귀국편을 우선 표시합니다."
+            )
         api_responded_ok = True
     except Exception as e:
         return [], [f"SerpApi 오류: {e}"], False
@@ -861,7 +866,7 @@ def multi_source_search_flights(
                     preferred, "serpapi",
                 )
                 wa.extend(ew)
-            return fl, wa, ok, "", "", (FLIGHT_SEARCH_API_SERPAPI if fl else "")
+            return fl, list(dict.fromkeys(wa)), ok, "", "", (FLIGHT_SEARCH_API_SERPAPI if fl else "")
         tasks = [
             _search_serpapi_only(
                 origin, destination, ds, de, seat_class, use_miles,
