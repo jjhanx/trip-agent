@@ -85,6 +85,83 @@ def _default_practical_block() -> dict[str, str]:
     }
 
 
+def _unsplash_scenic_pool() -> list[tuple[str, str]]:
+    """Unsplash CDN: https://unsplash.com/license (무료 사용·유사 CC0, 표기 권장).
+    구글맵 타일/스트리트뷰는 약관상 무단 캡처·재배포가 제한되므로 사용하지 않음."""
+    q = "auto=format&fit=crop&w=800&q=80"
+    return [
+        (
+            f"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?{q}",
+            "Unsplash License · 산악 풍경(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?{q}",
+            "Unsplash License · 산 능선(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1501785888041-af3ef285d470?{q}",
+            "Unsplash License · 호수(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1476514525535-07fb3ef4e5c1?{q}",
+            "Unsplash License · 호수·산(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1519681393784-d120267933ba?{q}",
+            "Unsplash License · 별·산(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1469474968028-56623f02e42e?{q}",
+            "Unsplash License · 자연(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1508672019048-805c876b667e?{q}",
+            "Unsplash License · 일출(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1519904981063-b0cf448d479e?{q}",
+            "Unsplash License · 설산(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1511593357081-8d676c8d0502?{q}",
+            "Unsplash License · 하이킹(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1441974231531-c6227db76b6e?{q}",
+            "Unsplash License · 숲(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1506377295352-b31509f512aa?{q}",
+            "Unsplash License · 마을·산(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1493246507139-91e005fad0d3?{q}",
+            "Unsplash License · 도시·야경(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1502602898657-3e471fb7d0d5?{q}",
+            "Unsplash License · 랜드마크(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1516483638261-f4dbaf036963?{q}",
+            "Unsplash License · 해안(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1507525428034-b723cf961d3e?{q}",
+            "Unsplash License · 해변(예시)",
+        ),
+        (
+            f"https://images.unsplash.com/photo-1506929562872-bb421503ef21?{q}",
+            "Unsplash License · 호수 반영(예시)",
+        ),
+    ]
+
+
+def _license_safe_image_for_index(idx: int) -> tuple[str, str]:
+    pool = _unsplash_scenic_pool()
+    return pool[idx % len(pool)]
+
+
 def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> dict[str, Any]:
     out = dict(a)
     out.setdefault("id", f"attr_{idx + 1:03d}")
@@ -99,13 +176,19 @@ def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> 
         if not pr[k]:
             pr[k] = defaults[k]
     out["practical_details"] = pr
+    url = str(out.get("image_url") or "").strip()
+    if not url.startswith("https://"):
+        u, c = _license_safe_image_for_index(idx)
+        out["image_url"] = u
+        if not str(out.get("image_credit") or "").strip():
+            out["image_credit"] = c
     return out
 
 
 def _dolomites_attraction_templates() -> list[dict[str, Any]]:
-    """실제 관광지명·실무 정보 예시(한국어). 이미지는 Wikimedia Commons 대표 썸네일 URL."""
+    """실제 관광지명·실무 정보 예시(한국어). 이미지는 Unsplash(unsplash.com/license) 풍경 예시로 통일해 표시 안정성 확보."""
     w = "Wikimedia Commons"
-    return [
+    result = [
         {
             "name": "Tre Cime di Lavaredo (Drei Zinnen)",
             "category": "하이킹·전망",
@@ -332,17 +415,25 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             },
         },
     ]
+    pool = _unsplash_scenic_pool()
+    for i, it in enumerate(result):
+        it["image_url"] = pool[i % len(pool)][0]
+        it["image_credit"] = (
+            pool[i % len(pool)][1]
+            + " · 실제 해당 명소 사진은 Wikimedia Commons에서 검색·확인 권장"
+        )
+    return result
 
 
 def _generic_spot(destination: str, i: int) -> dict[str, Any]:
     """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드."""
-    seed = abs(hash(f"{destination}:{i}")) % 10000
+    u, c = _license_safe_image_for_index(i)
     return {
         "name": f"{destination} 주변 추천 스팟 {i + 1}",
         "category": ["전망", "마을", "호수", "하이킹", "박물관"][i % 5],
         "description": f"{destination}에서 이동 시간과 체력에 맞춰 고를 수 있는 후보입니다. 실제 명칭·요금은 최신 가이드와 지도로 확인하세요.",
-        "image_url": f"https://picsum.photos/seed/trip{seed}/800/500",
-        "image_credit": "picsum.photos (예시 이미지)",
+        "image_url": u,
+        "image_credit": c + " · 풍경 예시(해당 장소와 다를 수 있음)",
         "practical_details": {
             "parking": "시내·관광지 주차장 위치와 요금(시간/일당)은 현지 표지와 앱으로 확인. 성수기에는 예약·제한 구역(ZTL) 주의.",
             "cable_car_lift": "리프트·케이블카가 있으면 공식 사이트 요금·마지막 운행 시각 확인. 없으면 해당 없음.",
@@ -638,8 +729,8 @@ JSON 객체 하나만 출력:
   - name: 공식에 가까운 명소명(한글 병기 가능)
   - category: 짧은 분류
   - description: 2~3문장, 왜 가볼 만한지
-  - image_url: 대표 사진 URL 1개(가능하면 Wikimedia Commons 등 공개 이미지 직접 링크, 없으면 빈 문자열)
-  - image_credit: 사진 출처(없으면 빈 문자열)
+  - image_url: https 대표 사진 1개. **가능하면 Wikimedia Commons 공개 이미지 직링크**. 불확실하면 **빈 문자열**(서버가 Unsplash 예시 할당). 구글맵 캡처 URL 금지.
+  - image_credit: 출처(photographer·라이선스). 없으면 빈 문자열
   - practical_details: 객체(모두 한국어, 구체적 수치·절차):
     - parking: 주차장명·유료 여부·대략 요금(€)·사전 예약 필요 여부
     - cable_car_lift: 케이블카/리프트 구간·편도·왕복 대략 요금(€)·없으면 "해당 없음" 또는 차량 접근만

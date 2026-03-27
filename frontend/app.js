@@ -1819,13 +1819,15 @@ function renderItineraryWorkflow(data) {
         <p class="muted">${escapeHtml(note)}</p>
         <p>${escapeHtml(design)}</p>
         <p><strong>여행 일수(포함): ${escapeHtml(String(tripDays))}일</strong> · 후보 명소 약 ${ats.length}곳 — 사진·주차·리프트·도보 시간 등을 비교해 선택하세요.</p>
+        <p class="muted" style="font-size:0.88rem;line-height:1.45;">사진은 <strong>Unsplash</strong>(<a href="https://unsplash.com/license" target="_blank" rel="noopener">라이선스</a>) 등 <strong>저작권 허용</strong> 출처의 풍경 예시입니다. <strong>구글맵</strong> 타일·스트리트뷰는 약관상 무단 재사용이 제한되어 넣지 않습니다. 실제 명소 사진은 <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a>에서 검색해 보세요.</p>
         <div class="attraction-checklist">
           ${ats.map((a) => {
             const id = escapeHtml(a.id || '');
             const checked = state.selectedAttractionIds?.includes(a.id) ? 'checked' : '';
+            const fallbackImg = 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=800&q=80';
             const img = (a.image_url && String(a.image_url).trim())
-              ? `<div class="attraction-card__media"><img src="${escapeHtml(a.image_url)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.attraction-card__media').classList.add('attraction-card__media--empty')" /></div>`
-              : '<div class="attraction-card__media attraction-card__media--empty" aria-hidden="true"></div>';
+              ? `<div class="attraction-card__media"><img src="${escapeHtml(a.image_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback="${escapeHtml(fallbackImg)}" onerror="var m=this.closest('.attraction-card__media');if(m){m.classList.add('attraction-card__media--empty');} var fb=this.getAttribute('data-fallback'); if(fb && this.src!==fb){this.onerror=null;this.src=fb;} else { this.style.display='none'; }" /></div>`
+              : `<div class="attraction-card__media"><img src="${escapeHtml(fallbackImg)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.attraction-card__media').classList.add('attraction-card__media--empty');this.style.display='none';" /></div>`;
             const credit = a.image_credit ? `<p class="attraction-card__credit muted">${escapeHtml(a.image_credit)}</p>` : '';
             const pHtml = renderPracticalDetailsHtml(a.practical_details);
             return `<label class="attraction-card option-item">
