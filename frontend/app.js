@@ -2523,22 +2523,49 @@ async function onOpenPlanClick() {
   await renderPlanListInModal();
 }
 
-function exportPlanToFile() {
+async function exportPlanToFile() {
   try {
     const planState = getFullPlanState();
     const planName = state.currentPlanName || getDefaultPlanName();
     const dataStr = JSON.stringify({ name: planName, data: planState }, null, 2);
+    const fileName = `${planName}.json`;
+
+    // 최신 브라우저(크롬/엣지)의 경우 '다른 이름으로 저장' 다이얼로그 강제 호출
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{
+            description: '여행 계획 파일 (.json)',
+            accept: { 'application/json': ['.json'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(dataStr);
+        await writable.close();
+        alert(`저장 완료: ${fileName} 파일이 선택하신 위치에 안전하게 저장되었습니다!`);
+        return;
+      } catch (e) {
+        // 사용자가 취소(Cancel)를 누른 경우
+        if (e.name === 'AbortError') return; 
+        console.warn('showSaveFilePicker failed, falling back to basic download:', e);
+      }
+    }
+
+    // 구형 브라우저 또는 파일 픽커를 지원하지 않는 경우 (기본 다운로드 동작)
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${planName}.json`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 0);
+    
+    alert(`파일이 브라우저의 기본 [다운로드] 폴더에 '${fileName}' 이름으로 저장되었습니다.\n(브라우저 우측 상단이나 하단의 다운로드 내역을 확인해 주세요)`);
   } catch (err) {
     console.error(err);
     alert('파일 내보내기에 실패했습니다.');
