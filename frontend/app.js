@@ -2455,10 +2455,21 @@ function initPlanToolbar() {
   const btnSave = $('#btn-save-plan');
   const btnSaveAs = $('#btn-save-as-plan');
   const btnOpen = $('#btn-open-plan');
+  const btnExport = $('#btn-export-plan');
+  const btnImport = $('#btn-import-plan');
+  const fileImportInput = $('#file-import-input');
+
   if (btnNew) btnNew.addEventListener('click', onNewPlanClick);
   if (btnSave) btnSave.addEventListener('click', onSavePlanClick);
   if (btnSaveAs) btnSaveAs.addEventListener('click', onSaveAsPlanClick);
   if (btnOpen) btnOpen.addEventListener('click', onOpenPlanClick);
+  
+  if (btnExport) btnExport.addEventListener('click', exportPlanToFile);
+  if (btnImport && fileImportInput) {
+    btnImport.addEventListener('click', () => fileImportInput.click());
+    fileImportInput.addEventListener('change', importPlanFromFile);
+  }
+
   $('#btn-close-plan-modal')?.addEventListener('click', closePlanModal);
   $('#plan-open-modal .modal-backdrop')?.addEventListener('click', closePlanModal);
   $('#btn-copy-code')?.addEventListener('click', () => {
@@ -2511,6 +2522,59 @@ async function onOpenPlanClick() {
   updateUserCodeDisplay();
   await renderPlanListInModal();
 }
+
+function exportPlanToFile() {
+  try {
+    const planState = getFullPlanState();
+    const planName = state.currentPlanName || getDefaultPlanName();
+    const dataStr = JSON.stringify({ name: planName, data: planState }, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${planName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  } catch (err) {
+    console.error(err);
+    alert('파일 내보내기에 실패했습니다.');
+  }
+}
+
+function importPlanFromFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const content = e.target.result;
+      const plan = JSON.parse(content);
+      if (!plan || !plan.data) {
+        alert('올바른 계획 파일(.json)이 아닙니다.');
+        return;
+      }
+      loadPlanIntoState(plan.data);
+      state.currentPlanId = null;
+      state.currentPlanName = plan.name || '불러온 계획';
+      saveFormToStorage();
+      renderPlanUI();
+      const step = resolveCurrentStep();
+      const sectionId = STEP_TO_SECTION[step] || 'step-input';
+      show(sectionId, true);
+    } catch (err) {
+      console.error(err);
+      alert('파일을 읽는 중 오류가 발생했습니다.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+}
+
 function updateUserCodeDisplay() {
   const el = $('#user-code-display');
   if (el) el.textContent = getUserId() || '-';

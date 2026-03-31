@@ -1,0 +1,16 @@
+.venv
+venv
+env
+.env
+Lib
+Scripts
+Include
+__pycache__
+*.pyc
+*.pyo
+.git
+.cursor
+data
+.vscode
+.cache
+.pytest_cache
