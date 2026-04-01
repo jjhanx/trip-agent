@@ -256,11 +256,25 @@ async def fetch_commons_unique_thumbnail(
     return None
 
 
+def _serpapi_title_likely_wrong_region(title: str, attraction_name: str) -> bool:
+    """한국 소매·배달 등 엉뚱한 썸네일 제외."""
+    t = (title or "").lower()
+    if any(x in t for x in ("마트", "창동", "하나로", "hanaro", "emart", "이마트", "쿠팡", "배달")):
+        return True
+    if any(x in t for x in ("korea", "seoul", "busan", "incheon")) and not _title_relevant_to_attraction(
+        title, attraction_name
+    ):
+        return True
+    return False
+
+
 async def fetch_serpapi_google_image_unique(
     query: str,
     api_key: str,
     exclude_url_keys: set[str],
     max_results: int = 10,
+    *,
+    attraction_name: str = "",
 ) -> dict[str, str] | None:
     if not api_key.strip():
         return None
@@ -273,6 +287,8 @@ async def fetch_serpapi_google_image_unique(
         "api_key": api_key,
         "num": min(max_results, 10),
         "ijn": 0,
+        "hl": "en",
+        "gl": "it",
     }
     url = "https://serpapi.com/search.json?" + urlencode(params)
     try:
@@ -292,10 +308,12 @@ async def fetch_serpapi_google_image_unique(
         key = normalize_url_key(str(u))
         if key in exclude_url_keys:
             continue
-        title = (im.get("title") or "")[:80]
+        title = (im.get("title") or "")[:200]
+        if _serpapi_title_likely_wrong_region(title, attraction_name):
+            continue
         return {
             "image_url": str(u),
-            "image_credit": f"Google 이미지 검색 결과(저작권은 원 게시자) · {title}",
+            "image_credit": f"Google 이미지 검색 결과(저작권은 원 게시자) · {title[:80]}",
             "image_source": "serpapi_google_images",
         }
     return None
@@ -306,16 +324,23 @@ async def fetch_google_places_unique(
     query: str,
     api_key: str,
     exclude_url_keys: set[str],
+    *,
+    attraction_name: str = "",
+    location_bias: str | None = None,
+    radius_m: int = 85000,
 ) -> dict[str, str] | None:
     if not api_key.strip():
         return None
     q = query.strip()[:200]
     if len(q) < 2:
         return None
-    params = {
+    params: dict[str, Any] = {
         "query": q,
         "key": api_key,
     }
+    if location_bias and "," in location_bias:
+        params["location"] = location_bias.strip()
+        params["radius"] = str(min(max(radius_m, 1000), 50000))
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
     try:
         r = await client.get(url)
@@ -325,14 +350,18 @@ async def fetch_google_places_unique(
         logger.debug("google places textsearch failed: %s", e)
         return None
     results = data.get("results") or []
+    an = (attraction_name or "").strip()
     for res in results:
+        pname = (res.get("name") or "").strip()
+        if an and pname and not _title_relevant_to_attraction(pname, an):
+            continue
         photos = res.get("photos") or []
         if not photos:
             continue
         pref = photos[0].get("photo_reference")
         if not pref:
             continue
-        title = (res.get("name") or q)[:80]
+        title = (pname or q)[:80]
         place_id = res.get("place_id") or ""
         # redirect를 피하기 위해 maxwidth를 지정하여 이미지 URL 생성
         photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
@@ -364,6 +393,7 @@ async def resolve_place_image(
     serpapi_key: str = "",
     use_serpapi: bool = False,
     google_places_api_key: str = "",
+    location_bias: str | None = None,
 ) -> dict[str, str]:
     """배치 내 이미지 URL 중복(exclude_url_keys)을 피해 한 장만 고른다. 실패 시 빈 URL."""
     exclude_url_keys = exclude_url_keys or set()
@@ -377,9 +407,23 @@ async def resolve_place_image(
     async with httpx.AsyncClient(timeout=20, headers=headers) as client:
         # 1. Google Places API (가장 정확하고 무료 크레딧 활용 가능)
         if google_places_api_key:
-            r = await fetch_google_places_unique(client, q_full, google_places_api_key, exclude_url_keys)
+            r = await fetch_google_places_unique(
+                client,
+                q_full,
+                google_places_api_key,
+                exclude_url_keys,
+                attraction_name=attraction_name,
+                location_bias=location_bias,
+            )
             if not r and q_short != q_full:
-                r = await fetch_google_places_unique(client, q_short, google_places_api_key, exclude_url_keys)
+                r = await fetch_google_places_unique(
+                    client,
+                    q_short,
+                    google_places_api_key,
+                    exclude_url_keys,
+                    attraction_name=attraction_name,
+                    location_bias=location_bias,
+                )
             if r:
                 return r
 
@@ -402,9 +446,13 @@ async def resolve_place_image(
             return r
 
     if use_serpapi and serpapi_key:
-        r = await fetch_serpapi_google_image_unique(q_full, serpapi_key, exclude_url_keys)
+        r = await fetch_serpapi_google_image_unique(
+            q_full, serpapi_key, exclude_url_keys, attraction_name=attraction_name
+        )
         if not r and q_short != q_full:
-            r = await fetch_serpapi_google_image_unique(q_short, serpapi_key, exclude_url_keys)
+            r = await fetch_serpapi_google_image_unique(
+                q_short, serpapi_key, exclude_url_keys, attraction_name=attraction_name
+            )
         if r:
             return r
 
@@ -418,14 +466,13 @@ async def enrich_attractions_images(
     serpapi_key: str = "",
     use_serpapi: bool = False,
     google_places_api_key: str = "",
+    location_bias: str | None = None,
 ) -> list[dict[str, Any]]:
     """순차 처리로 이미지 URL 중복 제거. 부정확한 일반 풍경(Unsplash) 폴백 없음."""
     if not attractions:
         return attractions
     used_keys: set[str] = set()
     out: list[dict[str, Any]] = []
-
-    used_place_ids: set[str] = set()
 
     for a in attractions:
         item = dict(a)
@@ -446,14 +493,9 @@ async def enrich_attractions_images(
                     serpapi_key=serpapi_key or "",
                     use_serpapi=use_serpapi,
                     google_places_api_key=google_places_api_key or "",
+                    location_bias=location_bias,
                 )
-            
-            pid = res.get("place_id")
-            if pid:
-                if pid in used_place_ids:
-                    continue  # 완벽히 같은 장소이므로 생략 (중복 제거)
-                used_place_ids.add(pid)
-                
+
             u = (res.get("image_url") or "").strip()
             if u.startswith("https://"):
                 k = normalize_url_key(u)
