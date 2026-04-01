@@ -820,28 +820,27 @@ async def _fetch_top_attractions_from_google(
     origin: str, destination: str, local_transport: str, multi_cities: list,
     api_key: str, min_rating: float = 4.3, max_count: int = 42
 ) -> list[dict[str, Any]]:
-    """Google Places API (Text Search)를 사용해 경로 및 다중 거점 기반으로 평점이 좋은 명소 오직 탐색하고 place_id 중복방지 지원."""
+    """Google Places API (Text Search)를 사용해 경로 1 : 목적지 4 비율로 명소를 탐색합니다."""
     import httpx
     import asyncio
     from urllib.parse import urlencode
-    
-    # 1. 목적지 Geocoding (좌표 획득) : 렌트카(경로)일 경우, 출발지와 도착지의 세부 거점들 파악
-    places_to_geocode = []
-    if local_transport == "rental_car":
-        if origin and origin not in places_to_geocode:
-            places_to_geocode.append(origin)
-        for pt in destination.replace(" 및 ", ",").replace(" 등", "").split(","):
-            if pt.strip() and pt.strip() not in places_to_geocode:
-                places_to_geocode.append(pt.strip())
-    else:
-        places_to_geocode.append(destination)
-        
+
+    # 목적지 주소들
+    dest_places = []
+    for pt in destination.replace(" 및 ", ",").replace(" 등", "").split(","):
+        if pt.strip() and pt.strip() not in dest_places:
+            dest_places.append(pt.strip())
+            
     for mc in multi_cities:
         for pt in mc.get("destination", "").replace(" 및 ", ",").split(","):
-            if pt.strip() and pt.strip() not in places_to_geocode:
-                places_to_geocode.append(pt.strip())
+            if pt.strip() and pt.strip() not in dest_places:
+                dest_places.append(pt.strip())
+    
+    if not dest_places:
+        dest_places = [destination]
 
-    places_to_geocode = [p for p in places_to_geocode if p] or [destination]
+    route_points = []
+    dest_points = []
 
     async def get_lat_lng(client, addr):
         try:
@@ -851,8 +850,7 @@ async def _fetch_top_attractions_from_google(
             })
             r = await client.get(url, timeout=10)
             if r.status_code == 200:
-                geo_data = r.json()
-                results = geo_data.get("results", [])
+                results = r.json().get("results", [])
                 if results:
                     loc = results[0].get("geometry", {}).get("location", {})
                     lat, lng = loc.get("lat"), loc.get("lng")
@@ -862,19 +860,61 @@ async def _fetch_top_attractions_from_google(
             pass
         return None
 
-    locations = []
-    async with httpx.AsyncClient(timeout=10) as client:
-        locs = await asyncio.gather(*(get_lat_lng(client, p) for p in places_to_geocode))
-        locations = [L for L in locs if L]
+    async def get_route_waypoints(client, o, d):
+        try:
+            url = "https://maps.googleapis.com/maps/api/directions/json?" + urlencode({
+                "origin": o,
+                "destination": d,
+                "key": api_key
+            })
+            r = await client.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("routes"):
+                    steps = data["routes"][0]["legs"][0]["steps"]
+                    pts = [f"{s['end_location']['lat']},{s['end_location']['lng']}" for s in steps]
+                    if len(pts) > 4:
+                        indices = [int(i * len(pts) / 4) for i in range(4)]
+                        return [pts[i] for i in indices]
+                    return pts
+        except Exception:
+            pass
+        return []
 
-    results: list[dict[str, Any]] = []
-    seen_places = set()
-    
-    async def fetch_query(client, q: str, loc: str | None) -> list[dict[str, Any]]:
-        params = {"query": q, "key": api_key}
+    async with httpx.AsyncClient(timeout=15) as client:
+        # 1. 목적지 Geocoding
+        d_locs = await asyncio.gather(*(get_lat_lng(client, p) for p in dest_places))
+        for loc in d_locs:
+            if loc:
+                dest_points.append(loc)
+
+        # 2. 렌터카일 경우 경로 Waypoint 계산
+        if local_transport == "rental_car" and origin:
+            # 첫번째 목적지까지의 경로만 간단히 확인.
+            wpts = await get_route_waypoints(client, origin, dest_places[0])
+            route_points.extend(wpts)
+            
+    if not dest_points:
+        return []
+
+    # 비율 계산 & 할당
+    # 5개의 구간: route에 1, dest에 4를 할당. (총 max_count개)
+    route_target = max_count // 5 if route_points else 0
+    dest_target = max_count - route_target
+
+    async def fetch_places(client, loc, is_route: bool, place_name: str) -> list[dict[str, Any]]:
+        # 경로 포인트인 경우 정확한 이름이 없으므로 주변 명소 탐색, 목적지는 이름 명시
+        q = "최고 평점 관광 명소" if is_route else f"{place_name} 관광 명소"
+        
+        params = {
+            "query": q,
+            "key": api_key,
+            "language": "ko"
+        }
         if loc:
             params["location"] = loc
-            params["radius"] = "40000"  # 각 거점 기준 40km 반경 내에서 검색 (동선 1시간 이내 커버)
+            # 1시간 거리 반경 제한 (약 45km 제한)
+            params["radius"] = "45000"
             
         url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
         try:
@@ -885,36 +925,76 @@ async def _fetch_top_attractions_from_google(
             pass
         return []
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        tasks = []
-        queries = ["Top rated tourist attractions", "Must see places", "Best nature spots and parks", "Historical and famous landmarks"]
-        for loc in locations or [None]:
-            for q in queries:
-                q_text = f"{q} in {places_to_geocode[0]}" if not loc else q
-                tasks.append(fetch_query(client, q_text, loc))
+    async with httpx.AsyncClient(timeout=20) as client:
+        # 경로 수집
+        route_tasks = []
+        for loc in route_points:
+            route_tasks.append(fetch_places(client, loc, True, ""))
+        route_res = await asyncio.gather(*route_tasks) if route_tasks else []
+
+        # 목적지 수집
+        dest_tasks = []
+        for idx, loc in enumerate(dest_points):
+            dest_tasks.append(fetch_places(client, loc, False, dest_places[idx]))
+        dest_res = await asyncio.gather(*dest_tasks) if dest_tasks else []
+
+    # 병원, 치과, 숙박 등 불필요 장소 필터링
+    bad_types = {"hospital", "health", "dentist", "doctor", "lodging", "real_estate_agency", "gym", "spa", "hair_care", "laundry", "car_repair", "pharmacy", "bank", "atm"}
+
+    def filter_and_sort(lists: list[list[dict]], target_cnt: int) -> list[dict]:
+        combined = []
+        seen = set()
+        for lst in lists:
+            for p in lst:
+                pid = p.get("place_id")
+                if not pid or pid in seen:
+                    continue
+                rating = p.get("rating", 0.0)
+                reviews = p.get("user_ratings_total", 0)
+                if rating < min_rating or reviews < 50:
+                    continue
+                # 타입 필터
+                ptypes = set(p.get("types", []))
+                if ptypes.intersection(bad_types):
+                    continue
                 
-        responses = await asyncio.gather(*tasks)
+                seen.add(pid)
+                combined.append(p)
+                
+        # 평점, 리뷰수로 정렬
+        combined.sort(key=lambda x: (x.get("rating", 0.0), x.get("user_ratings_total", 0)), reverse=True)
+        return combined[:target_cnt]
+
+    route_spots = filter_and_sort(route_res, route_target)
+    # 이미 선택된 `route_spots`에 포함된 ID는 `dest_spots`에서 제거하기 위해 `seen_places` 활용
+    route_ids = {s.get("place_id") for s in route_spots}
     
-    for resp in responses:
-        for p in resp:
+    # dest_spots 처리 (route_spots 중복 방지 필요)
+    dest_combined = []
+    dest_seen = set(route_ids)
+    for lst in dest_res:
+        for p in lst:
             pid = p.get("place_id")
-            # place_id 로 철저히 중복 제거
-            if not pid or pid in seen_places:
+            if not pid or pid in dest_seen:
                 continue
-                
             rating = p.get("rating", 0.0)
             reviews = p.get("user_ratings_total", 0)
             if rating < min_rating or reviews < 50:
                 continue
-                
-            seen_places.add(pid)
-            results.append(p)
+            ptypes = set(p.get("types", []))
+            if ptypes.intersection(bad_types):
+                continue
             
-    # 리뷰 최소 50개 이상인 곳들만, 평점(내림차순) 우선 정렬 후 리뷰 수(내림차순)로 정렬
-    results.sort(key=lambda x: (x.get("rating", 0.0), x.get("user_ratings_total", 0)), reverse=True)
-    
+            dest_seen.add(pid)
+            dest_combined.append(p)
+            
+    dest_combined.sort(key=lambda x: (x.get("rating", 0.0), x.get("user_ratings_total", 0)), reverse=True)
+    dest_spots = dest_combined[:dest_target]
+
+    results = route_spots + dest_spots
+
     out: list[dict[str, Any]] = []
-    for i, p in enumerate(results[:max_count]):
+    for i, p in enumerate(results):
         name = p.get("name", f"추천 스팟 {i+1}")
         address = p.get("formatted_address", "")
         types = p.get("types", [])
@@ -1060,7 +1140,9 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
         if phase == "attractions":
             out = _mock_attractions(destination, trip_days, preference)
-            n_attr = min(trip_days * 3, 30) # 토큰 리미트 방지를 위해 최대 30개로 캡
+            n_attr = trip_days * 3
+            if n_attr > 45:
+                n_attr = 45 # 너무 방대한 데이터 방지
             google_spots = []
             
             # 구글 Places API가 존재하면, 목적지와 무관하게 해당 지역의 평점 높은 명소를 구글맵에서 동적으로 검색해 교체합니다.
@@ -1070,7 +1152,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                 )
                 if google_spots:
                     out["attractions"] = google_spots
-                    out["design_notes"] = f"{destination} 일정: 구글맵 기반(경유지 반경 40km 이내) 평점 4.3 이상의 검증된 우수 명소들을 동적으로 분석해 추천합니다. 관련 요금과 주차 정보를 확인해보세요."
+                    out["design_notes"] = f"{destination} 일정: 구글맵 기반으로 출발지~목적지의 차량 이동 경로 및 목적지 반경 45km(약 1시간 거리) 이내의 검증된 우수 명소들을 1:4 비율로 동적 분석하여 추천합니다."
+
 
             if self.settings.openai_api_key:
                 try:
@@ -1083,12 +1166,12 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     
                     route_hint = ""
                     if local_transport == "rental_car":
-                        route_hint = f"\n- **렌트카 이동 동선 주의**: 출발지({origin})에서 주요 거점({destination})들을 오가는 경로 상에 위치한 명소(차로 최대 1시간 내외 거리) 위주로 추천할 것. 엉뚱한 국가나 타지역(예: 이탈리아 로마) 포함을 철저히 금지."
+                        route_hint = f"\n- **렌트카 이동 동선 주의**: 출발지({origin})에서 주요 거점({destination})들을 오가는 경로 상에 위치한 명소와 목적지 내부 명소를 포함한다."
                         
                     target_n = n_attr
                     if google_spots:
                         names_only = [s["name"] for s in google_spots[:n_attr]]
-                        route_hint += f"\n- **필수 준수사항**: 반드시 다음 구글맵 검증 명소 리스트에 대해서만 실무 정보(주차, 요금, 트래킹 시간 등)를 상세히 작성할 것 (다른 장소 임의 추가 금지): {', '.join(names_only)}"
+                        route_hint += f"\n- **필수 준수사항**: 반드시 다음 구글맵 검증 명소 리스트에 대해서만 여행지로서의 구체적인 가치와 실무 정보(주차, 요금, 트래킹 시간 등)를 상세히 작성할 것 (다른 장소 임의 추가 금지): {', '.join(names_only)}"
                         target_n = len(names_only)
 
                     prompt = f"""당신은 여행 일정 설계 전문가입니다.
@@ -1110,7 +1193,7 @@ JSON 객체 하나만 출력:
   - id: attr_001부터 순번
   - name: 공식에 가까운 명소명(한글 병기 가능)
   - category: 짧은 분류
-  - description: 2~3문장, 왜 가볼 만한지
+  - description: 2~3문장, 이 명소가 여행지로서 왜 가치 있고 꼭 가봐야 하는 곳인지 구체적인 매력(풍경, 역사, 활동 등)을 설명
   - image_url: 비워도 됨(서버가 영문·이탈 위키백과 썸네일·Commons 파일로 자동 매칭). 직접 넣을 때만 https 공개 링크.
   - image_credit: 출처(photographer·라이선스). 없으면 빈 문자열
   - practical_details: 객체(모두 한국어, 구체적 수치·절차):
