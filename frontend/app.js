@@ -707,7 +707,7 @@ function buildTravelInput() {
     origin: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].origin : form.origin.value,
     destination: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[multi_cities.length - 1].destination : form.destination.value,
     start_date: trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[0].date : form.start_date.value,
-    end_date: trip_type === 'round_trip' ? form.end_date?.value : (trip_type === 'multi_city' && multi_cities.length > 0 ? multi_cities[multi_cities.length - 1].date : null) || form.start_date?.value || form.end_date?.value,
+    end_date: form.end_date?.value || form.start_date?.value,
     multi_cities: trip_type === 'multi_city' ? multi_cities : null,
     date_flexibility_days: isNaN(flex) || flex <= 0 ? null : flex,
     local_transport: form.local_transport.value,
