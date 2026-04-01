@@ -431,14 +431,22 @@ async def enrich_attractions_images(
         item = dict(a)
         name = item.get("name") or ""
         try:
-            res = await resolve_place_image(
-                name,
-                destination,
-                exclude_url_keys=used_keys,
-                serpapi_key=serpapi_key or "",
-                use_serpapi=use_serpapi,
-                google_places_api_key=google_places_api_key or "",
-            )
+            if item.get("place_id") and item.get("image_url"):
+                res = {
+                    "place_id": item.get("place_id"),
+                    "image_url": item.get("image_url"),
+                    "image_credit": item.get("image_credit", ""),
+                    "image_source": item.get("image_source", ""),
+                }
+            else:
+                res = await resolve_place_image(
+                    name,
+                    destination,
+                    exclude_url_keys=used_keys,
+                    serpapi_key=serpapi_key or "",
+                    use_serpapi=use_serpapi,
+                    google_places_api_key=google_places_api_key or "",
+                )
             
             pid = res.get("place_id")
             if pid:

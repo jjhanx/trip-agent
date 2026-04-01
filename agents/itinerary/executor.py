@@ -874,7 +874,7 @@ async def _fetch_top_attractions_from_google(
         params = {"query": q, "key": api_key}
         if loc:
             params["location"] = loc
-            params["radius"] = "35000"  # 각 거점 기준 35km 반경 내에서 검색 (동선 1시간 이내 커버)
+            params["radius"] = "40000"  # 각 거점 기준 40km 반경 내에서 검색 (동선 1시간 이내 커버)
             
         url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
         try:
@@ -887,7 +887,7 @@ async def _fetch_top_attractions_from_google(
 
     async with httpx.AsyncClient(timeout=15) as client:
         tasks = []
-        queries = ["Top rated tourist attractions", "Must see places"]
+        queries = ["Top rated tourist attractions", "Must see places", "Best nature spots and parks", "Historical and famous landmarks"]
         for loc in locations or [None]:
             for q in queries:
                 q_text = f"{q} in {places_to_geocode[0]}" if not loc else q
@@ -1060,7 +1060,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
         if phase == "attractions":
             out = _mock_attractions(destination, trip_days, preference)
-            n_attr = min(trip_days * 3, 42)
+            n_attr = min(trip_days * 3, 30) # 토큰 리미트 방지를 위해 최대 30개로 캡
+            google_spots = []
             
             # 구글 Places API가 존재하면, 목적지와 무관하게 해당 지역의 평점 높은 명소를 구글맵에서 동적으로 검색해 교체합니다.
             if self.settings.google_places_api_key:
@@ -1069,7 +1070,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                 )
                 if google_spots:
                     out["attractions"] = google_spots
-                    out["design_notes"] = f"{destination} 일정: 구글맵 기반(경유지 반경 35km 이내) 평점 4.3 이상의 검증된 우수 명소들을 동적으로 분석해 추천합니다. 사진과 사용자 평가를 참고해 방문할 곳을 고르세요."
+                    out["design_notes"] = f"{destination} 일정: 구글맵 기반(경유지 반경 40km 이내) 평점 4.3 이상의 검증된 우수 명소들을 동적으로 분석해 추천합니다. 관련 요금과 주차 정보를 확인해보세요."
 
             if self.settings.openai_api_key:
                 try:
@@ -1079,12 +1080,17 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         api_key=self.settings.openai_api_key,
                         base_url=self.settings.openai_base_url,
                     )
-                    n_attr = min(trip_days * 3, 42)
                     
                     route_hint = ""
                     if local_transport == "rental_car":
                         route_hint = f"\n- **렌트카 이동 동선 주의**: 출발지({origin})에서 주요 거점({destination})들을 오가는 경로 상에 위치한 명소(차로 최대 1시간 내외 거리) 위주로 추천할 것. 엉뚱한 국가나 타지역(예: 이탈리아 로마) 포함을 철저히 금지."
                         
+                    target_n = n_attr
+                    if google_spots:
+                        names_only = [s["name"] for s in google_spots[:n_attr]]
+                        route_hint += f"\n- **필수 준수사항**: 반드시 다음 구글맵 검증 명소 리스트에 대해서만 실무 정보(주차, 요금, 트래킹 시간 등)를 상세히 작성할 것 (다른 장소 임의 추가 금지): {', '.join(names_only)}"
+                        target_n = len(names_only)
+
                     prompt = f"""당신은 여행 일정 설계 전문가입니다.
 - 목적지 주변 **실제 방문 가능한 구체적 명소**만 나열한다(유형만이 아니라 정식 명칭: 예 Tre Cime, Seceda, Lago di Braies).{route_hint}
 - 각 명소는 사용자가 **비용·시간·예약**을 비교해 고를 수 있게 **실무 정보**를 반드시 채운다.
@@ -1100,7 +1106,7 @@ JSON 객체 하나만 출력:
 - trip_days: {trip_days}
 - time_ratio_note: 한국어
 - design_notes: 한국어(요금은 참고용·현지 확인 필요 등 면책 한 줄 포함)
-- attractions: 정확히 {n_attr}개 배열. 각 항목 필수:
+- attractions: 정확히 {target_n}개 배열. 각 항목 필수:
   - id: attr_001부터 순번
   - name: 공식에 가까운 명소명(한글 병기 가능)
   - category: 짧은 분류
@@ -1137,6 +1143,19 @@ JSON 객체 하나만 출력:
                     pass
             atts = out.get("attractions")
             if isinstance(atts, list) and atts:
+                if google_spots:
+                    gmap = { gs["name"].lower(): gs for gs in google_spots }
+                    for a in atts:
+                        n_lower = (a.get("name") or "").lower()
+                        if n_lower in gmap:
+                            gs = gmap[n_lower]
+                            if gs.get("place_id"):
+                                a["place_id"] = gs.get("place_id")
+                            if gs.get("image_url"):
+                                a["image_url"] = gs.get("image_url")
+                                a["image_credit"] = gs.get("image_credit")
+                                a["image_source"] = gs.get("image_source")
+
                 out["attractions"] = await enrich_attractions_images(
                     atts,
                     destination,

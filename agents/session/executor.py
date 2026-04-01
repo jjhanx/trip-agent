@@ -482,9 +482,15 @@ class SessionExecutor(BaseAgentExecutor):
             return
 
         if flight_complete and selected_local_transport and not selected_itinerary:
+            start_d, end_d = _extract_rental_dates_from_flight(
+                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+            )
+            lt_payload = _build_local_transport_payload(selected_flight, travel, start_d, end_d)
+            route_origin = lt_payload.get("transit_origin") or travel.origin
+            
             it_payload = {
                 "destination": travel.destination,
-                "origin": travel.origin,
+                "origin": route_origin,
                 "local_transport": travel.local_transport.value,
                 "multi_cities": multi_cities,
                 "start_date": travel.start_date.isoformat(),
