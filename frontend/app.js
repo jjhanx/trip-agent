@@ -1834,12 +1834,20 @@ function renderItineraryWorkflow(data) {
               : `<div class="attraction-card__media attraction-card__media--empty" role="img" aria-label="대표 사진 없음"><span class="attraction-card__media-placeholder">대표 사진 없음</span></div>`;
             const credit = a.image_credit ? `<p class="attraction-card__credit muted">${escapeHtml(a.image_credit)}</p>` : '';
             const pHtml = renderPracticalDetailsHtml(a.practical_details);
+            const web = a.official_website && String(a.official_website).startsWith('http')
+              ? `<a href="${escapeHtml(a.official_website)}" target="_blank" rel="noopener noreferrer">공식 웹</a>` : '';
+            const gmap = a.google_maps_url && String(a.google_maps_url).startsWith('http')
+              ? `<a href="${escapeHtml(a.google_maps_url)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+            const linksRow = (web || gmap)
+              ? `<p class="attraction-card__links muted" style="font-size:0.88rem;">${[web, gmap].filter(Boolean).join(' · ')}</p>`
+              : '';
             return `<label class="attraction-card option-item">
               <div class="attraction-card__pick"><input type="checkbox" class="attr-pick" value="${id}" ${checked} /></div>
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
                 <p class="attraction-card__desc">${escapeHtml(a.description || '')}</p>
+                ${linksRow}
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
               </div>

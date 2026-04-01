@@ -12,6 +12,10 @@ from a2a.server.events import EventQueue
 
 from agents.base_agent import BaseAgentExecutor
 from config import Settings
+from shared.google_place_details import (
+    enrich_attractions_with_place_details,
+    polish_practical_details_with_llm,
+)
 from shared.place_images import enrich_attractions_images
 from shared.utils import new_agent_text_message
 
@@ -1501,6 +1505,31 @@ JSON 객체 하나만 출력:
                                 a["image_url"] = gs.get("image_url")
                                 a["image_credit"] = gs.get("image_credit")
                                 a["image_source"] = gs.get("image_source")
+
+                if self.settings.google_places_api_key:
+                    atts = await enrich_attractions_with_place_details(
+                        atts,
+                        self.settings.google_places_api_key,
+                        destination,
+                    )
+                if self.settings.openai_api_key:
+                    try:
+                        from openai import AsyncOpenAI
+
+                        pol_client = AsyncOpenAI(
+                            api_key=self.settings.openai_api_key,
+                            base_url=self.settings.openai_base_url,
+                        )
+                        atts = await polish_practical_details_with_llm(
+                            atts,
+                            client=pol_client,
+                            model=self.settings.llm_model,
+                            destination=destination,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                    except Exception:
+                        pass
 
                 out["attractions"] = await enrich_attractions_images(
                     atts,
