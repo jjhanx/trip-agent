@@ -902,40 +902,56 @@ async def _fetch_top_attractions_from_google(
     route_target = max_count // 5 if route_points else 0
     dest_target = max_count - route_target
 
-    async def fetch_places(client, loc, is_route: bool, place_name: str) -> list[dict[str, Any]]:
-        # 경로 포인트인 경우 정확한 이름이 없으므로 주변 명소 탐색, 목적지는 이름 명시
-        q = "최고 평점 관광 명소" if is_route else f"{place_name} 관광 명소"
+    async def fetch_places(client, loc, is_route: bool) -> list[dict[str, Any]]:
+        if not loc:
+            return []
         
-        params = {
-            "query": q,
-            "key": api_key,
-            "language": "ko"
-        }
-        if loc:
-            params["location"] = loc
-            # 1시간 거리 반경 제한 (약 45km 제한)
-            params["radius"] = "45000"
+        # nearbysearch를 사용해 확실하게 반경 내 다수의 명소를 확보
+        # 다양한 키워드로 병렬 호출하여 20개 이상의 충분한 POI 풀을 만듦
+        keywords = ["관광 명소", "자연", "파크", "랜드마크"]
+        if is_route:
+            keywords = ["관광 명소", "랜드마크"]
             
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
-        try:
-            r = await client.get(url, timeout=15)
-            if r.status_code == 200:
-                return r.json().get("results", [])
-        except Exception:
-            pass
-        return []
+        async def _search(kw):
+            params = {
+                "location": loc,
+                "radius": "45000",
+                "type": "tourist_attraction",
+                "key": api_key,
+                "language": "ko"
+            }
+            if kw:
+                params["keyword"] = kw
+                
+            url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" + urlencode(params)
+            try:
+                r = await client.get(url, timeout=15)
+                if r.status_code == 200:
+                    return r.json().get("results", [])
+            except Exception:
+                pass
+            return []
+            
+        tasks = [_search(kw) for kw in keywords]
+        tasks.append(_search("")) # 키워드 없는 기본 type 검색 추가
+        
+        pages = await asyncio.gather(*tasks)
+        combined = []
+        for page in pages:
+            combined.extend(page)
+        return combined
 
     async with httpx.AsyncClient(timeout=20) as client:
         # 경로 수집
         route_tasks = []
         for loc in route_points:
-            route_tasks.append(fetch_places(client, loc, True, ""))
+            route_tasks.append(fetch_places(client, loc, True))
         route_res = await asyncio.gather(*route_tasks) if route_tasks else []
 
         # 목적지 수집
         dest_tasks = []
-        for idx, loc in enumerate(dest_points):
-            dest_tasks.append(fetch_places(client, loc, False, dest_places[idx]))
+        for loc in dest_points:
+            dest_tasks.append(fetch_places(client, loc, False))
         dest_res = await asyncio.gather(*dest_tasks) if dest_tasks else []
 
     # 병원, 치과, 숙박 등 불필요 장소 필터링
