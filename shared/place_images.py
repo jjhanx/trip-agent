@@ -333,6 +333,7 @@ async def fetch_google_places_unique(
         if not pref:
             continue
         title = (res.get("name") or q)[:80]
+        place_id = res.get("place_id") or ""
         # redirect를 피하기 위해 maxwidth를 지정하여 이미지 URL 생성
         photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
         key = normalize_url_key(photo_url)
@@ -342,6 +343,7 @@ async def fetch_google_places_unique(
             "image_url": photo_url,
             "image_credit": f"Google Maps · {title}",
             "image_source": "google_places",
+            "place_id": place_id,
         }
     return None
 
@@ -423,6 +425,8 @@ async def enrich_attractions_images(
     used_keys: set[str] = set()
     out: list[dict[str, Any]] = []
 
+    used_place_ids: set[str] = set()
+
     for a in attractions:
         item = dict(a)
         name = item.get("name") or ""
@@ -435,6 +439,13 @@ async def enrich_attractions_images(
                 use_serpapi=use_serpapi,
                 google_places_api_key=google_places_api_key or "",
             )
+            
+            pid = res.get("place_id")
+            if pid:
+                if pid in used_place_ids:
+                    continue  # 완벽히 같은 장소이므로 생략 (중복 제거)
+                used_place_ids.add(pid)
+                
             u = (res.get("image_url") or "").strip()
             if u.startswith("https://"):
                 k = normalize_url_key(u)

@@ -540,7 +540,9 @@ function refreshStepView(step) {
         attractions: state.itineraryAttractionCatalog,
         design_notes: '',
         time_ratio_note: '',
-        trip_days: state.itineraryAttractionCatalog?.length ? Math.ceil(state.itineraryAttractionCatalog.length / 3) : 1,
+        trip_days: (state.travelInput?.start_date && state.travelInput?.end_date) 
+          ? Math.max(1, Math.round((new Date(state.travelInput.end_date) - new Date(state.travelInput.start_date)) / 86400000) + 1)
+          : (state.itineraryAttractionCatalog?.length ? Math.ceil(state.itineraryAttractionCatalog.length / 3) : 1),
       });
     } else if (state.itineraries?.length) {
       renderItineraries(state.itineraries);

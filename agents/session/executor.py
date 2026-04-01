@@ -484,6 +484,9 @@ class SessionExecutor(BaseAgentExecutor):
         if flight_complete and selected_local_transport and not selected_itinerary:
             it_payload = {
                 "destination": travel.destination,
+                "origin": travel.origin,
+                "local_transport": travel.local_transport.value,
+                "multi_cities": multi_cities,
                 "start_date": travel.start_date.isoformat(),
                 "end_date": travel.end_date.isoformat(),
                 "preference": travel.preference.model_dump(),
