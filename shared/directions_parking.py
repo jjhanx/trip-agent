@@ -1,14 +1,15 @@
-"""Google Directions + Geocoding + Places Nearby로 거점·주행 분을 산출해 parking 문구를 확정한다.
+"""Google Directions + Places Nearby로 parking 문구를 확정한다.
 
-LLM 추정과 무관하게 (나)의 **분**은 Directions API 값을 사용한다.
-동일 Maps API 키로 Geocoding·Directions·Places가 동작한다(콘솔에서 API 사용 설정 필요).
+거점은 **명소 좌표 기준 지도상 가장 가까운 locality(마을·시)** — Places `rankby=distance`.
+(나)의 **분**은 해당 거점 좌표 → 명소 좌표 **Directions(driving)** 값.
+광역 관광지명(예: Dolomites) 지오코딩 결과는 거점으로 쓰지 않는다(거리·분 부자연 방지).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
+import math
 from typing import Any
 from urllib.parse import urlencode
 
@@ -19,6 +20,31 @@ logger = logging.getLogger(__name__)
 USER_AGENT = (
     "TripAgent/1.0 (https://github.com/jjhanx/trip-agent; directions parking)"
 )
+
+
+def _destination_is_vague_region(dest: str) -> bool:
+    """도시명이 아니라 광역·산악권만 적힌 경우 — 지오코딩해도 거점으로 쓰지 않음."""
+    d = (dest or "").strip().lower()
+    if not d:
+        return True
+    vague = (
+        "dolomiti",
+        "dolomiten",
+        "dolomites",
+        "dolomite",
+        "tre cime",
+        "drei zinnen",
+        "alta badia",
+        "sella ronda",
+        "south tyrol",
+        "alto adige",
+        "südtirol",
+        "sudtirol",
+        "돌로미티",
+        "도로미티",
+        "트레 치메",
+    )
+    return any(k in d for k in vague)
 
 
 async def _http_get_json(url: str) -> dict[str, Any] | None:
@@ -53,9 +79,48 @@ async def geocode_address(address: str, api_key: str) -> tuple[float, float, str
     return float(lat), float(lng), short_name
 
 
-async def nearby_locality_candidates(
-    lat: float, lng: float, api_key: str, *, radius_m: int = 55000
-) -> list[dict[str, Any]]:
+async def nearest_locality_rankby_distance(
+    lat: float, lng: float, api_key: str
+) -> dict[str, Any] | None:
+    """명소 좌표에서 지도상 거리 순 첫 locality — Google 권장: rankby=distance (반경 없음)."""
+    url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" + urlencode(
+        {
+            "location": f"{lat},{lng}",
+            "rankby": "distance",
+            "type": "locality",
+            "key": api_key,
+        }
+    )
+    data = await _http_get_json(url)
+    if not data or data.get("status") not in ("OK", "ZERO_RESULTS"):
+        return None
+    results = data.get("results") or []
+    if not results:
+        return None
+    r0 = results[0]
+    loc = r0.get("geometry", {}).get("location", {})
+    la, lo = loc.get("lat"), loc.get("lng")
+    if la is None or lo is None:
+        return None
+    nm = (r0.get("name") or "").strip()
+    if not nm:
+        return None
+    return {"name": nm, "lat": float(la), "lng": float(lo)}
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+async def nearest_locality_by_radius_haversine(
+    lat: float, lng: float, api_key: str, *, radius_m: int = 50000
+) -> dict[str, Any] | None:
+    """rankby 실패 시 반경 검색 후 직선거리 최소 locality."""
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" + urlencode(
         {
             "location": f"{lat},{lng}",
@@ -66,9 +131,11 @@ async def nearby_locality_candidates(
     )
     data = await _http_get_json(url)
     if not data or data.get("status") not in ("OK", "ZERO_RESULTS"):
-        return []
-    out: list[dict[str, Any]] = []
-    for r in (data.get("results") or [])[:10]:
+        return None
+    results = data.get("results") or []
+    best: dict[str, Any] | None = None
+    best_d = 1e18
+    for r in results:
         loc = r.get("geometry", {}).get("location", {})
         la, lo = loc.get("lat"), loc.get("lng")
         if la is None or lo is None:
@@ -76,8 +143,31 @@ async def nearby_locality_candidates(
         nm = (r.get("name") or "").strip()
         if not nm:
             continue
-        out.append({"name": nm, "lat": float(la), "lng": float(lo)})
-    return out
+        d = _haversine_m(lat, lng, float(la), float(lo))
+        if d < best_d:
+            best_d = d
+            best = {"name": nm, "lat": float(la), "lng": float(lo)}
+    return best
+
+
+async def resolve_nearest_village_hub(
+    api_key: str,
+    destination: str,
+    attr_lat: float,
+    attr_lng: float,
+) -> tuple[str, float, float] | None:
+    """지도상 가장 가까운 마을·시 좌표. 광역 목적지 지오코딩은 보조로만(모호하면 생략)."""
+    hub = await nearest_locality_rankby_distance(attr_lat, attr_lng, api_key)
+    if not hub:
+        hub = await nearest_locality_by_radius_haversine(attr_lat, attr_lng, api_key)
+    if hub:
+        return hub["name"], hub["lat"], hub["lng"]
+    if not _destination_is_vague_region(destination):
+        geo = await geocode_address(destination, api_key)
+        if geo:
+            la, lo, nm = geo
+            return nm, la, lo
+    return None
 
 
 async def driving_minutes_between(
@@ -110,52 +200,6 @@ async def driving_minutes_between(
     return max(1, int(round(float(sec) / 60.0)))
 
 
-def _dedupe_hubs(cands: list[tuple[str, float, float]]) -> list[tuple[str, float, float]]:
-    seen: set[str] = set()
-    out: list[tuple[str, float, float]] = []
-    for nm, la, lo in cands:
-        k = nm.strip().lower()
-        if not k or k in seen:
-            continue
-        seen.add(k)
-        out.append((nm.strip(), la, lo))
-    return out
-
-
-async def pick_nearest_hub_drive_minutes(
-    api_key: str,
-    destination: str,
-    attr_lat: float,
-    attr_lng: float,
-) -> tuple[str, int] | None:
-    """목적지 지오코드 + 인근 locality 후보 각각에 대해 명소까지 주행 분을 구해 최소인 거점을 고른다."""
-    candidates: list[tuple[str, float, float]] = []
-    geo = await geocode_address(destination, api_key)
-    if geo:
-        la, lo, nm = geo
-        candidates.append((nm, la, lo))
-    for n in await nearby_locality_candidates(attr_lat, attr_lng, api_key):
-        candidates.append((n["name"], n["lat"], n["lng"]))
-    candidates = _dedupe_hubs(candidates)
-    if not candidates:
-        return None
-
-    sem = asyncio.Semaphore(5)
-    results: list[tuple[str, int]] = []
-
-    async def measure(nm: str, ola: float, olo: float) -> None:
-        async with sem:
-            m = await driving_minutes_between(api_key, ola, olo, attr_lat, attr_lng)
-        if m is not None:
-            results.append((nm, m))
-
-    await asyncio.gather(*(measure(nm, la, lo) for nm, la, lo in candidates))
-    if not results:
-        return None
-    best = min(results, key=lambda x: x[1])
-    return best[0], best[1]
-
-
 def _extract_toll_snippet(text: str) -> str:
     if not text or "€" not in text:
         return ""
@@ -165,30 +209,15 @@ def _extract_toll_snippet(text: str) -> str:
     return ""
 
 
-def _extract_population_fragment(text: str) -> str:
-    if not text:
-        return ""
-    m = re.search(
-        r"(?:약\s*)?[\d.,]+\s*명(?:\s*이상)?|인구[^.]{0,45}",
-        text,
-    )
-    if m:
-        return m.group(0).strip()
-    return ""
-
-
-def _build_parking_line(
-    hub_name: str,
+def _build_parking_line_nearest_village(
+    village_name: str,
     minutes: int,
-    *,
-    population_hint: str,
     toll_extra: str,
 ) -> str:
-    pop_part = population_hint if population_hint else "인구 등은 지자체·통계 공표 자료를 참고하세요"
     toll = f" {toll_extra}" if toll_extra else ""
     return (
-        f"(가) 거점 {hub_name} ({pop_part}). "
-        f"(나) 위 거점 도심에서 이 명소까지 승용차 약 {minutes}분 "
+        f"(가) 거점 {village_name} — 명소 좌표 기준 **지도상 가장 가까운** 읍·면·시(Places locality)입니다. "
+        f"(나) 그 마을·시 쪽 도로 접근 지점에서 이 명소까지 승용차 약 {minutes}분 "
         f"(Google Maps Directions 도로 기준, 실시간·통제에 따라 다름).{toll}"
     ).strip()
 
@@ -198,7 +227,7 @@ async def enrich_attractions_parking_directions(
     destination: str,
     api_key: str,
 ) -> list[dict[str, Any]]:
-    """각 명소에 attr_lat/lng가 있으면 Directions로 거점·분을 확정해 parking을 덮어쓴다."""
+    """명소 좌표에서 가장 가까운 마을까지의 주행 분(Directions)으로 parking을 덮어쓴다."""
     if not attractions or not (api_key or "").strip():
         return attractions
 
@@ -236,30 +265,27 @@ async def enrich_attractions_parking_directions(
                     a["attr_lat"] = alat
                     a["attr_lng"] = alng
             if alat is None or alng is None:
-                logger.debug(
-                    "directions_parking: no coords for %s", a.get("name")
-                )
+                logger.debug("directions_parking: no coords for %s", a.get("name"))
                 return
 
-            picked = await pick_nearest_hub_drive_minutes(
+            hub = await resolve_nearest_village_hub(
                 api_key, destination, float(alat), float(alng)
             )
-            if not picked:
-                logger.warning(
-                    "directions_parking: hub/directions 실패 — %s", a.get("name")
-                )
+            if not hub:
+                logger.warning("directions_parking: nearest village 없음 — %s", a.get("name"))
                 return
 
-            hub_name, mins = picked
-            old_pk = str((a.get("practical_details") or {}).get("parking") or "")
-            pop_hint = _extract_population_fragment(old_pk)
-            toll = _extract_toll_snippet(old_pk)
-            line = _build_parking_line(
-                hub_name,
-                mins,
-                population_hint=pop_hint,
-                toll_extra=toll,
+            vname, vla, vlo = hub
+            mins = await driving_minutes_between(
+                api_key, vla, vlo, float(alat), float(alng)
             )
+            if mins is None:
+                logger.warning("directions_parking: Directions 실패 — %s", a.get("name"))
+                return
+
+            old_pk = str((a.get("practical_details") or {}).get("parking") or "")
+            toll = _extract_toll_snippet(old_pk)
+            line = _build_parking_line_nearest_village(vname, mins, toll)
             pr = dict(a.get("practical_details") or {})
             pr["parking"] = line
             a["practical_details"] = pr
