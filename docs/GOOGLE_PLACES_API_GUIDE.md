@@ -44,3 +44,7 @@ GOOGLE_PLACES_API_KEY=AIzaSy_여기에_복사한_키를_붙여넣으세요
 ## 6. Directions API / Geocoding API (선택이 아님 — 주행 분 자동 입력용)
 
 라이브러리에서 **Directions API**, **Geocoding API**를 각각 검색한 뒤 **[사용]**으로 활성화합니다. 키 제한을 쓰는 경우 위 API들이 허용 목록에 포함되어야 합니다. 과금은 [Maps Platform 가격](https://developers.google.com/maps/billing-and-pricing/pricing)을 참고하세요(무료 크레딧 범위 내 활용 가능).
+
+## 7. 입장료·주차비 (Places가 아닌 SerpApi)
+
+Place Details에는 **공식 입장료·주차 금액 필드가 없는 경우가 많습니다.** 별도로 `.env`의 **`SERPAPI_API_KEY`**([SerpApi](https://serpapi.com))가 있으면, 서버가 명소마다 Google 검색 **`{이름} 입장료`**, **`{이름} 주차비`**(이름이 짧으면 목적지 포함) 스니펫을 모아 LLM이 카드의 **입장료·톨·기타** 문단을 채웁니다. 명소당 검색이 2회 들어가므로 SerpApi 무료 한도를 참고하세요.

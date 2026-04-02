@@ -532,17 +532,25 @@ async def polish_practical_details_with_llm(
     destination: str,
     start_date: str,
     end_date: str,
+    serpapi_key: str = "",
 ) -> list[dict[str, Any]]:
-    """Places로도 부족한 항목을 LLM으로 보강(일반 지식 허용, 수치는 '참고·확인 필요' 명시)."""
+    """Places로도 부족한 항목을 LLM으로 보강. SerpApi가 있으면 입장·주차 검색 스니펫을 넣어 fees_other를 보강한다."""
     if not attractions:
         return attractions
+
+    sk = (serpapi_key or "").strip()
+    if sk:
+        from shared.fees_web_search import enrich_attractions_fee_search_snippets
+
+        await enrich_attractions_fee_search_snippets(attractions, sk, destination)
 
     payload = []
     for a in attractions:
         if not isinstance(a, dict):
             continue
         pr = a.get("practical_details") or {}
-        need = _needs_practical_polish(pr)
+        fee_snip = str(a.get("_fee_search_snippets") or "").strip()
+        need = _needs_practical_polish(pr) or bool(fee_snip)
         payload.append(
             {
                 "name": a.get("name"),
@@ -551,6 +559,7 @@ async def polish_practical_details_with_llm(
                 "practical_details_before": _practical_snapshot_for_polish(pr),
                 "google_maps_url": a.get("google_maps_url") or "",
                 "official_website": a.get("official_website") or "",
+                "fee_search_snippets": fee_snip[:2500],
                 "_need_polish": need,
             }
         )
@@ -576,6 +585,9 @@ async def polish_practical_details_with_llm(
                 if nv:
                     merged[k] = nv
                 continue
+            if k == "fees_other" and nv:
+                merged[k] = nv
+                continue
             if _field_needs_replace(old) or len(old) < 40:
                 merged[k] = nv
 
@@ -596,7 +608,7 @@ async def polish_practical_details_with_llm(
 - parking (**주차·도로**, **모든 명소 필수**): **등록 주소·길찾기 주소 금지**(다른 칸에만). **반드시** ① 명소에서 **가장 가까운 인구 3,000명 이상** 거점(도시·읍·면) **실제 지명** + **인구(명)**. ② 그 거점 **도심·대표 접점**에서 **명소 입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분). ③ 주차·톨 €. (지명·인구·분이 없으면 안 됨.)
 - cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
 - walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **총 1000자 이내**로 쓴다. 입력에 **방문자 리뷰 발췌**가 있으면 **원문을 잘라 붙이지 말고** 내용을 바탕으로 **한국어로 요약·정리**해 통합한다(어절·문장 중간에서 끊지 않는다). 루트·시간·난이도 정보 밀도를 유지한다.
-- fees_other: **입장료**·환경세·톨·보트. Places API에 공식 금액이 없어도, **도보·하이킹 발췌에 나온 입장·주차 €가 있으면 그 수치를 반영**하고 `리뷰 발췌 기준`임을 짧게 명시. 발췌와 **모순되게** `Places에 없음`만 단독으로 쓰지 말 것. 미확인 시 "관련 정보 없음".
+- fees_other: **입장료**·환경세·톨·보트·**주차**. 입력에 **`fee_search_snippets`가 비어 있지 않으면** 그 안의 **Google 검색 스니펫(입장료·주차비 키워드)** 내용을 **우선** 반영해 €·유료·무료·대략 가격을 **한국어 문장**으로 정리한다. 스니펫과 도보·하이킹 발췌가 겹치면 **합리적으로 통합**하고, 출처를 `웹 검색 스니펫 기준`·`리뷰 발췌 기준`처럼 짧게 구분. 스니펫이 없으면 발췌·일반 지식으로 채운다. **Places API에 금액 필드가 없다는 말만 단독으로 쓰지 말 것.** 미확인 시 "관련 정보 없음".
 - reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크. **Google Maps URL은 쓰지 말 것**(카드에 지도 링크가 따로 있음).
 - tips: **상단 소개(description)에 이미 평점·리뷰 수가 있으면 반복하지 말 것.** 준비물·최적 시간대·혼잡·날씨만. 비어 있어도 됨.
 
@@ -781,6 +793,9 @@ async def polish_practical_details_with_llm(
             except Exception as e:
                 logger.warning("parking mandatory retry failed: %s", e)
 
+    for a in out:
+        if isinstance(a, dict):
+            a.pop("_fee_search_snippets", None)
     return out
 
 
