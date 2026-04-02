@@ -2,7 +2,7 @@
 
 거점 좌표는 명소와 가까운 **도시·마을(locality)** — 고개(Passo)·콜(Colle) 등은 건너뜀.
 표시명은 **역지오코딩 locality**(영어 우선, 없으면 한국어)로 실제 행정·도시명에 가깝게.
-(나)의 분은 거점 좌표 → 명소 좌표 Directions(driving).
+분은 거점 좌표 → 명소 좌표 Directions(driving)로 채움.
 """
 
 from __future__ import annotations
@@ -274,11 +274,10 @@ def _extract_toll_snippet(text: str) -> str:
 
 
 def _build_parking_line_real_city(display_name: str, minutes: int, toll_extra: str) -> str:
-    """메타·프롬프트 설명 없이 거점 도시명 + 분만."""
+    """거점 지명 + 승용차 분 한 줄."""
     toll = f" {toll_extra}" if toll_extra else ""
     return (
-        f"(가) 거점 {display_name} — "
-        f"(나) {display_name}에서 이 명소까지 승용차 약 {minutes}분 (Google Maps 도로 검색 기준).{toll}"
+        f"{display_name}에서 이 명소까지 승용차 약 {minutes}분 (Google Maps 도로 검색 기준).{toll}"
     ).strip()
 
 

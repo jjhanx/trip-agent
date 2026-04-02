@@ -148,7 +148,9 @@ def parking_requires_llm_hub_distance(text: str) -> bool:
         return True
     if "내비 검색어" in t or "내비검색어" in t.replace(" ", ""):
         return True
-    # 서버 조합 문구는 (가)(나)로 시작
+    # Directions API 한 줄 또는 예전 (가)(나) 조합
+    if "Google Maps 도로 검색 기준" in t and _text_has_drive_time_minutes(t):
+        return False
     if "(가)" in t and "(나)" in t and _text_has_drive_time_minutes(t):
         return False
     if not parking_meets_nearest_city_pop3000_and_drive_minutes(t):
@@ -187,7 +189,7 @@ def _population_ko_from_item(it: dict[str, Any]) -> str:
 
 
 def _parking_line_from_structured_item(it: dict[str, Any]) -> str:
-    """LLM 구조 필드 → (가)(나) 고정 형식. 자유 서술에 의존하지 않음."""
+    """LLM 구조 필드 → 한 줄 고정 형식. 자유 서술에 의존하지 않음."""
     hub = str(it.get("hub_place_name") or it.get("hub_city") or "").strip()
     mins = _parse_drive_minutes(it.get("drive_minutes"))
     extra = str(it.get("parking_and_toll_eur") or "").strip()
@@ -195,13 +197,13 @@ def _parking_line_from_structured_item(it: dict[str, Any]) -> str:
         return ""
     pop_show = _population_ko_from_item(it)
     pop_part = f" ({pop_show})" if pop_show else ""
-    parts = [
-        f"(가) 거점 {hub}{pop_part}.",
-        f"(나) 위 거점 도심에서 이 명소까지 승용차 약 {mins}분.",
-    ]
+    line = (
+        f"{hub}{pop_part}에서 이 명소까지 승용차 약 {mins}분 "
+        f"(Google Maps 도로 검색 기준)."
+    )
     if extra:
-        parts.append(extra)
-    return " ".join(parts).strip()
+        return f"{line} {extra}".strip()
+    return line
 
 
 def _parking_text_from_mandatory_item(it: dict[str, Any]) -> str:
@@ -579,7 +581,7 @@ async def polish_practical_details_with_llm(
             mand_prompt = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-**역할**: 각 명소에 대해 **필드만** 채운다. **문장을 직접 쓰지 말고** 아래 JSON 키만 채운다. 서버가 (가)(나) 형식으로 합친다.
+**역할**: 각 명소에 대해 **필드만** 채운다. **문장을 직접 쓰지 말고** 아래 JSON 키만 채운다. 서버가 `○○에서 이 명소까지 승용차 약 N분 (Google Maps 도로 검색 기준).` 형식으로 합친다.
 
 **각 item 필수 키** (문자열은 한국어 위주):
 - `idx`: 입력과 동일한 정수
