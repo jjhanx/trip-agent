@@ -1483,11 +1483,7 @@ async def postprocess_attraction_list_for_catalog(
                     if not isinstance(a.get("practical_details"), dict) or not snip:
                         continue
                     pr = a["practical_details"]
-                    head = (
-                        "아래는 Google 웹 검색(명소명+입장료 / 명소명+주차비) 스니펫이다. "
-                        "수치는 시즌·정책에 따라 달라질 수 있음.\n\n"
-                    )
-                    pr["fees_other"] = (head + str(snip))[:4000]
+                    pr["fees_other"] = str(snip)[:4000]
             except Exception as e:
                 logger.warning("Google web search snippets (no LLM) failed: %s", e)
 
