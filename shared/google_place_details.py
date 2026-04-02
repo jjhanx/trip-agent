@@ -51,6 +51,11 @@ _PLACEHOLDER_MARKERS = (
     "요약한다",
     "€ 또는 현지 통화로 명시",
     "예약 경로를 명시",
+    "인구 약 3,000명 이상**인 가장 가까운 도시",
+    "밝히는 것이 원칙입니다",
+    "1000자 전후로 요약해 정리합니다",
+    "Places API에는 개별 입장료가 항상 표시되지 않습니다",
+    "일정 보강 단계에서 별도로 적",
 )
 
 
@@ -160,60 +165,51 @@ def build_practical_from_details(
     type_set = set(types)
     is_nature = bool(type_set.intersection({"natural_feature", "park", "campground"}))
 
+    # 사용자에게는 사실만. LLM 프롬프트 문구(인구 3천·원칙 등)는 넣지 않는다 — polish 단계에서 수치를 채운다.
     parking_lines = []
     if addr:
-        parking_lines.append(f"Google Places 등록 주소: {addr}.")
+        parking_lines.append(f"등록 주소: {addr}")
     parking_lines.append(
-        f"차량 접근 시 내비·지도에서 '{name}' 또는 위 주소로 검색합니다. "
-        "명소 주변에서 **인구 약 3,000명 이상**인 가장 가까운 도시(또는 읍·면 단위 거점)를 하나 정한 뒤, "
-        "그 **도심·대표 접점**에서 **명소 입구(또는 주차장·트레일 헤드)**까지 승용차로 **몇 분** 걸리는지 숫자로 밝히는 것이 원칙입니다. "
-        "주차장·톨·일방통행·환경 보호구역 통행 제한은 시즌·이벤트에 따라 바뀔 수 있습니다."
+        f"내비·지도 검색: 「{name}」 또는 위 주소."
     )
     if is_nature:
-        parking_lines.append(
-            "자연·공원·계곡 구간은 주차장에서 트레일 헤드까지 도보·셔틀이 붙는 경우가 많습니다."
-        )
+        parking_lines.append("자연·공원 구간은 주차장에서 트레일까지 도보·셔틀이 이어지는 경우가 많습니다.")
     if website:
-        parking_lines.append(f"공식·지자체 안내는 웹사이트를 우선 확인: {website}")
-    parking = " ".join(parking_lines)
+        parking_lines.append(f"공식 안내: {website}")
+    parking = " ".join(parking_lines) + " 주차 요금·톨·거리는 현지 표지·공식 안내를 확인하십시오."
 
     # 케이블·리프트는 확인된 경우에만 표시(프론트는 빈 칸이면 항목 자체를 숨김).
     cable = ""
 
-    walking = (
-        f"{name} 일대는 지형·코스에 따라 왕복 30분~수시간까지 달라질 수 있습니다. "
-        "주차장·셔틀 하차 지점에서 트레일 헤드·전망 포인트까지의 거리, 루트 분기, 표고차, "
-        "철제·난간 구간·적설·진흙에 따른 난이도(쉬움/중간/어려움), 왕복 예상 시간대를 "
-        "가능한 한 구체적으로 적되, 한 장소당 약 1000자 전후로 요약해 정리합니다(불필요하게 잘라내지 말 것). "
-        "난이도·날씨는 지도·현지 표지·산악 지도로 교차 확인하세요."
-    )
+    walking_parts: list[str] = [
+        f"{name} 일대 코스·난이도·소요 시간은 지형·시즌에 따라 다릅니다. 지도·현지 표지를 확인하십시오."
+    ]
     if review_bits:
-        joined = " | ".join(review_bits)
-        walking += f" 방문자 언급 참고: {joined[:320]}{'…' if len(joined) > 320 else ''}"
+        joined = " | ".join(review_bits[:2])
+        walking_parts.append(f"방문자 리뷰 발췌: {joined[:280]}{'…' if len(joined) > 280 else ''}")
+    walking = " ".join(walking_parts)
 
-    fees = (
-        "Places API에는 개별 입장료가 항상 표시되지 않습니다. "
-        "그래도 **입장료·환경세·톨·보트·박물관 등** 가능한 한 € 또는 현지 통화로 구체 금액을 적고, "
-        "미확인 시 '관련 정보 없음'으로 표시합니다."
-    )
+    fees = "Places에 등록된 입장료·톨·환경세 금액은 없습니다."
     if website:
-        fees += f" ({website})"
+        fees += f" 공식 요금은 {website}에서 확인하십시오."
+    else:
+        fees += " 공식 웹에서 요금을 확인하십시오."
 
     res_parts = []
+    if hours_line:
+        res_parts.append(f"개방·운영 시간(Places): {hours_line}")
     if website:
         res_parts.append(f"웹사이트: {website}")
     if maps_url:
-        res_parts.append(f"Google Maps 링크: {maps_url}")
+        res_parts.append(f"Google Maps: {maps_url}")
     if phone:
         res_parts.append(f"전화: {phone}")
-    reservation_note = " | ".join(res_parts)
+    reservation_note = " | ".join(res_parts) if res_parts else "관련 정보 없음 (Places에 연락·시간 미표시)."
 
     tips_parts = []
-    if hours_line:
-        tips_parts.append(f"개방·운영 시간(Places 표시): {hours_line}")
     if rating is not None:
-        tips_parts.append(f"평점 {rating}★ · 리뷰 약 {ur}건(참고용).")
-    tips_parts.append("날씨·도로 통제·일몰 시각은 출발 전에 다시 확인하세요.")
+        tips_parts.append(f"Google Maps 평점 {rating}★ · 리뷰 약 {ur}건.")
+    tips_parts.append("날씨·도로 통제·일몰 시각은 출발 전에 확인하십시오.")
     tips = " ".join(tips_parts)
 
     return {
@@ -359,7 +355,7 @@ async def polish_practical_details_with_llm(
 - tips: 최적 시간대·준비물·혼잡
 
 금지: "확인하세요", "권장합니다", "현지 예약 사이트 참고", "달라질 수 있습니다" 등 답변을 회피하거나 떠넘기는 문구 절대 금지. 직접 조사한 구체적인 요금, 시간, 소요시간(숫자)을 기재할 것.
-**절대 금지**: 프롬프트에 나온 지시문을 그대로 출력(예: "…명시한다", "…채운다"). 실제 **도시명·인구·€·분**만 적는다.
+**절대 금지**: 프롬프트에 나온 지시문을 그대로 출력(예: "…명시한다", "…채운다", "…원칙입니다", "…정리합니다"). 실제 **도시명·인구·€·분·주차 요금**만 적는다.
 허용: 지역 일반 지식을 총동원하여 정확한 답변 작성. 확인 불가 시 차라리 "관련 정보 없음"이라고 명시.
 
 입력:
