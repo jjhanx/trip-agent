@@ -1354,6 +1354,100 @@ async def _fetch_top_attractions_from_google(
     return out, primary_bias
 
 
+async def postprocess_attraction_list_for_catalog(
+    atts: list[dict[str, Any]],
+    *,
+    settings: Settings,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    merged_pre_llm: list[dict[str, Any]] | None = None,
+    location_bias: str | None = None,
+    response_out: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Places 상세 → LLM practical 보강 → 이미지. Session 폴백·Itinerary 본 경로 공통."""
+    if not atts:
+        return atts
+    for i, a in enumerate(atts):
+        if isinstance(a, dict):
+            atts[i] = _ensure_attraction_record(a, i, destination)
+    if merged_pre_llm:
+        for a in atts:
+            if not isinstance(a, dict):
+                continue
+            gs = _match_google_attraction_row(a.get("name") or "", merged_pre_llm)
+            if gs:
+                if gs.get("place_id"):
+                    a["place_id"] = gs.get("place_id")
+                if gs.get("image_url"):
+                    a["image_url"] = gs.get("image_url")
+                    a["image_credit"] = gs.get("image_credit")
+                    a["image_source"] = gs.get("image_source")
+
+    if settings.google_places_api_key:
+        atts = await enrich_attractions_with_place_details(
+            atts,
+            settings.google_places_api_key,
+            destination,
+        )
+    else:
+        logger.warning(
+            "GOOGLE_PLACES_API_KEY 없음: 명소 주소·Maps 링크 Places 보강 생략(.env / docker-compose)."
+        )
+
+    if (settings.openai_api_key or "").strip():
+        try:
+            from openai import AsyncOpenAI
+
+            pol_client = AsyncOpenAI(
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_base_url,
+            )
+            atts = await polish_practical_details_with_llm(
+                atts,
+                client=pol_client,
+                model=settings.llm_model,
+                destination=destination,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as e:
+            logger.warning(
+                "polish_practical_details_with_llm failed (parking·거점 보강 생략): %s",
+                e,
+            )
+    else:
+        logger.warning(
+            "OPENAI_API_KEY 없음: 거점·parking LLM 보강(polish_practical_details_with_llm)을 실행하지 않습니다. "
+            "서버 .env에 설정 후 itinerary 컨테이너 재시작 필요."
+        )
+
+    for a in atts:
+        if isinstance(a, dict):
+            pr = _merge_practical_details(a.get("practical_details"))
+            _sanitize_meta_instruction_practical(pr)
+            a["practical_details"] = pr
+
+    ats_enriched = await enrich_attractions_images(
+        atts,
+        destination,
+        serpapi_key=settings.serpapi_api_key or "",
+        use_serpapi=settings.place_images_use_serpapi,
+        google_places_api_key=settings.google_places_api_key or "",
+        location_bias=location_bias,
+    )
+    ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
+    with_img = _filter_attractions_with_images_only(ats_enriched)
+    if not with_img and ats_enriched and response_out is not None:
+        dn = (response_out.get("design_notes") or "").strip()
+        response_out["design_notes"] = (
+            dn
+            + " [대표 사진(https)을 확보한 명소만 남겼는데 후보가 비었습니다. "
+            "목적지 표기를 바꿔 다시 시도하거나 Places 키를 확인해 주세요.]"
+        )
+    return _renumber_attraction_ids(with_img)
+
+
 def _finalize_merge(
     destination: str,
     route_bundle: dict[str, Any],
@@ -1605,74 +1699,16 @@ JSON 객체 하나만 출력:
                     pass
             atts = out.get("attractions")
             if isinstance(atts, list) and atts:
-                for i, a in enumerate(atts):
-                    if isinstance(a, dict):
-                        atts[i] = _ensure_attraction_record(a, i, destination)
-                if merged_pre_llm:
-                    for a in atts:
-                        if not isinstance(a, dict):
-                            continue
-                        gs = _match_google_attraction_row(a.get("name") or "", merged_pre_llm)
-                        if gs:
-                            if gs.get("place_id"):
-                                a["place_id"] = gs.get("place_id")
-                            if gs.get("image_url"):
-                                a["image_url"] = gs.get("image_url")
-                                a["image_credit"] = gs.get("image_credit")
-                                a["image_source"] = gs.get("image_source")
-
-                if self.settings.google_places_api_key:
-                    atts = await enrich_attractions_with_place_details(
-                        atts,
-                        self.settings.google_places_api_key,
-                        destination,
-                    )
-                if self.settings.openai_api_key:
-                    try:
-                        from openai import AsyncOpenAI
-
-                        pol_client = AsyncOpenAI(
-                            api_key=self.settings.openai_api_key,
-                            base_url=self.settings.openai_base_url,
-                        )
-                        atts = await polish_practical_details_with_llm(
-                            atts,
-                            client=pol_client,
-                            model=self.settings.llm_model,
-                            destination=destination,
-                            start_date=start_date,
-                            end_date=end_date,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "polish_practical_details_with_llm failed (parking·거점 보강 생략): %s",
-                            e,
-                        )
-
-                for a in atts:
-                    if isinstance(a, dict):
-                        pr = _merge_practical_details(a.get("practical_details"))
-                        _sanitize_meta_instruction_practical(pr)
-                        a["practical_details"] = pr
-
-                ats_enriched = await enrich_attractions_images(
+                out["attractions"] = await postprocess_attraction_list_for_catalog(
                     atts,
-                    destination,
-                    serpapi_key=self.settings.serpapi_api_key or "",
-                    use_serpapi=self.settings.place_images_use_serpapi,
-                    google_places_api_key=self.settings.google_places_api_key or "",
+                    settings=self.settings,
+                    destination=destination,
+                    start_date=start_date,
+                    end_date=end_date,
+                    merged_pre_llm=merged_pre_llm if merged_pre_llm else None,
                     location_bias=location_bias,
+                    response_out=out,
                 )
-                ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
-                with_img = _filter_attractions_with_images_only(ats_enriched)
-                if not with_img and ats_enriched:
-                    dn = (out.get("design_notes") or "").strip()
-                    out["design_notes"] = (
-                        dn
-                        + " [대표 사진(https)을 확보한 명소만 남겼는데 후보가 비었습니다. "
-                        "목적지 표기를 바꿔 다시 시도하거나 Places 키를 확인해 주세요.]"
-                    )
-                out["attractions"] = _renumber_attraction_ids(with_img)
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

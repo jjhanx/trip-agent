@@ -4,6 +4,7 @@
 """
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta
 
@@ -14,6 +15,8 @@ from agents.base_agent import BaseAgentExecutor
 from config import Settings
 from shared.models import TravelInput, LocalTransportType
 from shared.utils import A2AClient, new_agent_text_message
+
+logger = logging.getLogger(__name__)
 
 
 def _carrier_code_from_outbound_flight(f: dict | None) -> str | None:
@@ -295,7 +298,8 @@ class SessionExecutor(BaseAgentExecutor):
     async def _call_agent(self, name: str, payload: dict) -> str | None:
         try:
             return await self.clients[name].send_message(json.dumps(payload, default=str))
-        except Exception:
+        except Exception as e:
+            logger.warning("A2A %s 호출 실패(폴백 가능): %s", name, e)
             return None
 
     def _rental_car_fallback_json(self, lt_payload: dict) -> str:
@@ -509,10 +513,19 @@ class SessionExecutor(BaseAgentExecutor):
                 bundle = data.get("route_plan_bundle")
                 it_payload["route_plan_bundle"] = bundle if isinstance(bundle, dict) else {}
             resp = await self._call_agent("itinerary", it_payload)
-            if resp:
+            if resp and str(resp).strip():
                 await event_queue.enqueue_event(new_agent_text_message(resp))
             else:
-                from agents.itinerary.executor import _mock_attractions, _trip_inclusive_days
+                if not resp or not str(resp).strip():
+                    logger.warning(
+                        "일정 에이전트(itinerary) 응답 없음 또는 빈 문자열 — "
+                        "목(mock) 명소로 폴백합니다. ITINERARY_AGENT_URL·itinerary 컨테이너·네트워크를 확인하세요."
+                    )
+                from agents.itinerary.executor import (
+                    _mock_attractions,
+                    _trip_inclusive_days,
+                    postprocess_attraction_list_for_catalog,
+                )
 
                 trip_days = _trip_inclusive_days(
                     travel.start_date.isoformat(), travel.end_date.isoformat()
@@ -521,15 +534,18 @@ class SessionExecutor(BaseAgentExecutor):
                     travel.destination, trip_days, travel.preference.model_dump()
                 )
                 if phase == "attractions":
-                    from shared.place_images import enrich_attractions_images
-
-                    fallback["attractions"] = await enrich_attractions_images(
-                        fallback["attractions"],
-                        travel.destination,
-                        serpapi_key=self.settings.serpapi_api_key or "",
-                        use_serpapi=self.settings.place_images_use_serpapi,
-                        google_places_api_key=self.settings.google_places_api_key or "",
-                    )
+                    atts_fb = fallback.get("attractions")
+                    if isinstance(atts_fb, list) and atts_fb:
+                        fallback["attractions"] = await postprocess_attraction_list_for_catalog(
+                            atts_fb,
+                            settings=self.settings,
+                            destination=travel.destination,
+                            start_date=travel.start_date.isoformat(),
+                            end_date=travel.end_date.isoformat(),
+                            merged_pre_llm=None,
+                            location_bias=None,
+                            response_out=fallback,
+                        )
                 await event_queue.enqueue_event(
                     new_agent_text_message(json.dumps(fallback, ensure_ascii=False))
                 )
