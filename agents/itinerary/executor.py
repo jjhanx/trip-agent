@@ -76,16 +76,27 @@ def _merge_practical_details(raw: Any) -> dict[str, str]:
             v = raw.get(k)
             if v is not None and str(v).strip():
                 base[k] = str(v).strip()
+    _strip_cable_if_absent(base)
     return base
+
+
+def _strip_cable_if_absent(pr: dict[str, str]) -> None:
+    """케이블·리프트가 없을 때는 빈 문자열로 두어 UI에서 항목을 숨긴다."""
+    v = (pr.get("cable_car_lift") or "").strip()
+    if not v:
+        return
+    compact = v.replace(" ", "")
+    if "해당없음" in compact or "해당 없음" in v:
+        pr["cable_car_lift"] = ""
 
 
 def _default_practical_block() -> dict[str, str]:
     return {
-        "parking": "가까운 대중교통 거점과 거기서 차로 걸리는 시간, 주차 위치·요금·예약 필요 여부는 현지 안내를 확인하세요.",
-        "cable_car_lift": "케이블카나 리프트 유무와 요금은 방문 전 공식 요금표로 명확하게 확인하세요.",
-        "walking_hiking": "예상 도보·트레일 시간과 난이도는 코스 선택에 따라 다릅니다. 지도·현지 표지를 기준으로 하세요.",
-        "fees_other": "입장료·환경세·톨게이트 등 요금은 연도별로 달라지므로 공식 안내를 확인하세요.",
-        "reservation_note": "운영 시간과 성수기·주말 사전 예약 필수 여부를 미리 확인하세요.",
+        "parking": "인구 약 3,000명 이상인 가장 가까운 도시(또는 읍·면 거점)명과, 그 도심·대표 접점에서 명소 입구(또는 주차장·트레일 헤드)까지 승용차로 몇 분인지·주차 요금(€)을 채운다.",
+        "cable_car_lift": "",
+        "walking_hiking": "대표 루트·왕복 시간·난이도·주차~트레일 헤드를 약 1000자 전후로 요약한다(핵심을 과도하게 삭제하지 말 것).",
+        "fees_other": "입장료·톨·보트 등 요금을 € 또는 현지 통화로 명시한다.",
+        "reservation_note": "개방·운영 시간, 예약 필수 여부, 예약 경로를 명시한다.",
         "tips": "날씨·일몰 시각·혼잡도를 출발 전에 확인하세요.",
     }
 
@@ -121,8 +132,8 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Drei_Zinnen_2010.jpg/800px-Drei_Zinnen_2010.jpg",
             "image_credit": f"{w} · Drei Zinnen",
             "practical_details": {
-                "parking": "아우론조(Auronzo) 유료 주차장 이용. 성수기(여름·주말)에는 온라인 사전 예약이 사실상 필수인 경우가 많고, 일당 대략 €30~45 전후(연도·시즌·시간대별 상이).",
-                "cable_car_lift": "차량으로 아우론조 주차장까지 진입 후 도보(해당 구간은 유료 도로·입장 개념이 붙는 시즌이 있음—현지 표지 확인).",
+                "parking": "아우론조(Auronzo) 유료 주차장 이용. 성수기(여름·주말)에는 온라인 사전 예약이 사실상 필수인 경우가 많고, 일당 대략 €30~45 전후(연도·시즌·시간대별 상이). 차량으로 아우론조 주차장까지 진입 후 도보(해당 구간은 유료 도로·입장 개념이 붙는 시즌이 있음—현지 표지 확인).",
+                "cable_car_lift": "",
                 "walking_hiking": "오비스터리(Refugio Auronzo) 방향으로 이어지는 루프 왕복 보통 3~4시간 안팎(체력·사진·휴식에 따라 더 길어질 수 있음).",
                 "fees_other": "유료 도로·환경 관련 요금이 붙는 구간이 있을 수 있음(시즌별).",
                 "reservation_note": "주차 예약·입장 제한은 공식 파르체지오/지자체 페이지를 출발 전에 확인.",
@@ -167,7 +178,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w} · Lago di Braies",
             "practical_details": {
                 "parking": "호수 인근 주차장은 **매우 혼잡**. 이른 아침 도착 또는 지정 셔틀·버스 이용 권장. 주차 요금은 시간제 € 수준(현지 표지).",
-                "cable_car_lift": "해당 없음(호수 주변 도보).",
+                "cable_car_lift": "",
                 "walking_hiking": "호수 둘레 산책 약 1~1.5시간(평탄, 사진·휴식 제외).",
                 "fees_other": "보트 렌탈·일부 구간 입장료가 별도일 수 있음.",
                 "reservation_note": "성수기 보트·주차는 예약 또는 시간 제한이 붙는 경우가 있음.",
@@ -182,7 +193,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w} · Val di Funes",
             "practical_details": {
                 "parking": "뷰포인트·교회 인근 유료·시간제 주차. 성수기 혼잡.",
-                "cable_car_lift": "해당 없음.",
+                "cable_car_lift": "",
                 "walking_hiking": "교회·전망 포인트까지 짧은 산책 20~60분 코스 여러 개.",
                 "fees_other": "일부 사진 스팟은 사유지·입장 안내 준수.",
                 "reservation_note": "특별 행사 시 도로 통제 가능.",
@@ -212,7 +223,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w} · Misurina",
             "practical_details": {
                 "parking": "호수 주변 유료 주차(시간·일당).",
-                "cable_car_lift": "해당 없음.",
+                "cable_car_lift": "",
                 "walking_hiking": "둘레 산책 30분~1시간.",
                 "fees_other": "인근 리조트 이용 시 주차 혜택 가능.",
                 "reservation_note": "성수기 주차 대기 가능.",
@@ -227,7 +238,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w}",
             "practical_details": {
                 "parking": "미수리나 또는 근처 주차 후 도보 접근.",
-                "cable_car_lift": "해당 없음.",
+                "cable_car_lift": "",
                 "walking_hiking": "왕복 1~2시간(길·날씨에 따라 상이), 난이도 중간.",
                 "fees_other": "일부 구간 입장 제한 가능.",
                 "reservation_note": "위험 구간 표지 준수.",
@@ -257,7 +268,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w} · Bolzano",
             "practical_details": {
                 "parking": "시내 지하·외곽 유료 주차, ZTL(차량 제한 구역) 주의.",
-                "cable_car_lift": "해당 없음.",
+                "cable_car_lift": "",
                 "walking_hiking": "구시가지 산책 반나절.",
                 "fees_other": "박물관 입장료.",
                 "reservation_note": "인기 박물관 사전 예약.",
@@ -287,7 +298,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w} · Karersee",
             "practical_details": {
                 "parking": "호수 인근 유료 주차, 짧은 체류.",
-                "cable_car_lift": "해당 없음.",
+                "cable_car_lift": "",
                 "walking_hiking": "둘레 산책 20~40분.",
                 "fees_other": "보호 구역 규칙 준수.",
                 "reservation_note": "성수기 주차 제한.",
@@ -347,7 +358,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w}",
             "practical_details": {
                 "parking": "Passo Pordoi 주차장 (유료).",
-                "cable_car_lift": "왕복 요금 확인 필요.",
+                "cable_car_lift": "Passo Pordoi 패소 케이블카로 2,950m 부근 전망대까지, 성인 왕복 수십 €대(시즌·요금제 변동).",
                 "walking_hiking": "전망대 주변 짧은 산책.",
                 "fees_other": "고산 지대 방한 의복 필수.",
             },
@@ -360,7 +371,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w}",
             "practical_details": {
                 "parking": "Bai de Dones 리프트 주차장.",
-                "cable_car_lift": "리프트 운영 기간 확인.",
+                "cable_car_lift": "Bai de Dones 곤돌라·리프트로 접근, 상·하행 편도 €대(시즌별).",
                 "walking_hiking": "타워 주변을 도는 왕복 1-2시간 코스.",
                 "tips": "스코이아톨리 산장 배경 사진이 유명합니다.",
             },
@@ -385,7 +396,7 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "image_credit": f"{w}",
             "practical_details": {
                 "parking": "Passo Tre Croci 갓길 주차 (매우 혼잡).",
-                "cable_car_lift": "도보로만 접근 가능.",
+                "cable_car_lift": "",
                 "walking_hiking": "왕복 4~5시간, 철제 사다리 및 절벽 구간 있어 주의.",
                 "tips": "물과 행동식 충분히 지참, 비가 온 후에는 미끄러움.",
             },
@@ -660,11 +671,11 @@ def _generic_spot(destination: str, i: int) -> dict[str, Any]:
         "image_url": "",
         "image_credit": "",
         "practical_details": {
-            "parking": "근처 대중교통 동네 및 차 소요 시간, 주차 요금과 위치는 현지 기반 앱으로 명확히 확인. 제한 구역 주의.",
-            "cable_car_lift": "케이블카나 리프트가 확실하게 있는지(요금 포함) 사전 확인. 없으면 도보/차량 판단.",
-            "walking_hiking": "왕복 예상 도보 시간은 코스마다 다름(1~4시간). 난이도·날씨를 고려해 여유 있게 잡을 것.",
-            "fees_other": "입장료 등 각종 관람 요금은 공식 채널에서 명확하게 파악.",
-            "reservation_note": "운영 시간과 온라인 예약 필수 여부는 출발 전 확인 권장.",
+            "parking": "인구 3,000명 이상 최근접 거점명과, 그곳에서 명소 입구까지 차로 몇 분·주차 요금(€)을 수치로 채운다.",
+            "cable_car_lift": "",
+            "walking_hiking": "대표 루트·왕복 시간·난이도를 약 1000자 전후로 요약한다.",
+            "fees_other": "입장료·톨 등을 €로 명시한다.",
+            "reservation_note": "개방·운영 시간과 예약 필수 여부를 명시한다.",
             "tips": "물·방풍·막바람에 대비. 일몰 전 하산 및 혼잡도 회피 계획.",
         },
     }
@@ -1414,12 +1425,12 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
                         prompt = f"""당신은 여행 일정 설계 전문가입니다. (Chunk {chunk_idx+1}/{len(all_chunks)})
 - 목적지 주변 실제 방문 가능한 구체적 명소만 나열한다.{route_hint}{req_names}
-- 각 명소는 사용자가 비용·시간·예약을 비교해 고를 수 있게 실무 정보를 반드시 채운다.
+- 각 명소는 사용자가 비용·시간·예약을 비교해 고를 수 있게 실무 정보를 반드시 채운다. **입장료·개방·운영 시간·주차 요금·예약 필요 여부**는 빠지면 안 된다(미확인 시 "관련 정보 없음").
 - **[이름] 위 명소 리스트가 있으면 `name`은 반드시 그 목록의 문자열을 **글자 단위로 그대로** 복사한다(번역·축약·치환 금지).
 - **[설명 description]**: "구글맵 평점 기반" 같은 메타 문구는 절대 쓰지 말 것. 각 장소마다 **지명·지형·대표 루트·다른 명소와의 관계·역사·감상 포인트**를 바탕으로 2~4문장으로 **직접 조사한 것처럼** 구체적으로 서술한다(일반적인 관광 소개문 금지).
 - **[중요] 계절(시즌) 제한**: 여행 기간({start_date} ~ {end_date})의 월(계절)을 고려하여, **여름에 스키 슬로프·스키 학교만을 위한 시설**처럼 계절에 맞지 않는 명소는 누락한다. 여름 케이블카·전망·하이킹 리프트는 유지한다.
 - **[중요] 내부 관람 필수형(박물관·오페라·극장·스칼라 등)**: 입장·공연 예약이 핵심인 곳은 `fees_other`와 `reservation_note`에 **요금·예약 경로·운영 시간**을 숫자와 절차로 구체적으로 적고, 불가능하면 목록에서 삭제한다. **외관만 보는 것으로 의미 없는 곳은 넣지 않는다.**
-- **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다.
+- **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다. **약 1000자 전후**로 요약·정리하되, 설명이 길다고 한두 문장으로 줄이지 말고 정보 밀도를 유지한다.
 - **[중요] 답변 회피 금지**: "현지 안내를 확인하세요", "달라질 수 있습니다", "공식 사이트 참고" 등 책임을 회피하는 문구는 **절대 금지**합니다. 모르면 차라리 "관련 정보 없음"이라고 명시하되, 당신의 지식을 총동원하여 구체적인 소요시간, 거리, 요금(숫자)을 무조건 기재하세요.
 
 목적지: {destination}
@@ -1439,11 +1450,11 @@ JSON 객체 하나만 출력:
   - image_url: 비워둘 것
   - image_credit: 출처. 없으면 빈 문자열
   - practical_details: 객체(모두 한국어, 구체적 수치·절차):
-    - parking: 주차장명·유료 여부·주차 요금(€ 등) 금액 명확히 기재·대중교통이 있는 가장 가까운 동네와 거기서 명소 입구까지 차로 걸리는 소요 시간 필수 기재
-    - cable_car_lift: 케이블카나 리프트가 확실하게 있는지 없는지 유무 명확히 기재 (있으면 노선·대략 요금(€), 없으면 "해당 없음")
-    - walking_hiking: 대표 루프·왕복 예상 시간·난이도 (도보 구간 필수 기재)
-    - fees_other: 입장료·톨·보트 등 기타 내부 관람비 명확하게 기재
-    - reservation_note: 예약해야 하는지 여부 명확히 기재·운영 시간·예약 링크·성수기 예약 제한 요약
+    - parking: **주차·도로 접근** — 명소 주변에서 **인구 약 3,000명 이상**인 가장 가까운 도시(또는 읍·면 거점)명을 밝히고, 그 **도심·대표 접점**에서 **명소 입구(또는 주차장·트레일 헤드)**까지 **승용차로 몇 분**인지 숫자로 명시. 주차장명·유료 여부·**주차 요금**(€/시간·일당) 필수.
+    - cable_car_lift: **케이블카·곤돌라·리프트가 있을 때만** 노선·대략 요금(€) 기재. **없으면 빈 문자열 ""** (키는 두되 내용 비움 — UI에서 항목 숨김). "해당 없음" 문구 금지.
+    - walking_hiking: 대표 루프·왕복 예상 시간·난이도·주차~트레일 헤드·철제 구간 등, **약 1000자 전후** 요약(과도한 축약 금지).
+    - fees_other: **입장료**·톨·보트·환경세 등 — 금액·통화로 명확히 기재(미확인 시 "관련 정보 없음").
+    - reservation_note: **개방·운영 시간**, **예약 필수 여부**, 예약 링크·전화·성수기 제한
     - tips: 준비물·최적 시간대(날씨·혼잡 회피)
 """
                         max_retries = 2

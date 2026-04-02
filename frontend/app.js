@@ -1728,8 +1728,8 @@ const PRACTICAL_DETAIL_LABELS = {
   parking: '주차·도로 접근',
   cable_car_lift: '케이블카·리프트',
   walking_hiking: '도보·하이킹',
-  fees_other: '기타 요금·톨',
-  reservation_note: '예약·통제',
+  fees_other: '입장료·톨·기타',
+  reservation_note: '예약·개방·운영시간',
   tips: '준비·팁',
 };
 

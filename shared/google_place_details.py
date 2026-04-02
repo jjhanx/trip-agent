@@ -159,7 +159,9 @@ def build_practical_from_details(
     if addr:
         parking_lines.append(f"Google Places 등록 주소: {addr}.")
     parking_lines.append(
-        f"차량 접근 시 내비·지도에서 '{name}' 또는 위 주소로 검색하고, "
+        f"차량 접근 시 내비·지도에서 '{name}' 또는 위 주소로 검색합니다. "
+        "명소 주변에서 **인구 약 3,000명 이상**인 가장 가까운 도시(또는 읍·면 단위 거점)를 하나 정한 뒤, "
+        "그 **도심·대표 접점**에서 **명소 입구(또는 주차장·트레일 헤드)**까지 승용차로 **몇 분** 걸리는지 숫자로 밝히는 것이 원칙입니다. "
         "주차장·톨·일방통행·환경 보호구역 통행 제한은 시즌·이벤트에 따라 바뀔 수 있습니다."
     )
     if is_nature:
@@ -170,20 +172,15 @@ def build_practical_from_details(
         parking_lines.append(f"공식·지자체 안내는 웹사이트를 우선 확인: {website}")
     parking = " ".join(parking_lines)
 
-    if is_nature:
-        cable = (
-            "케이블카·리프트는 이 장소 유형상 필수는 아닙니다. "
-            "인근 리프트·곤돌라를 쓰는 동선이면 별도로 역·요금을 확인하세요. 없으면 '해당 없음'으로 계획."
-        )
-    else:
-        cable = (
-            "등록 정보상 케이블카·리프트는 별도 확인이 필요합니다. "
-            "없으면 도보·셔틀·버스만 고려하면 됩니다."
-        )
+    # 케이블·리프트는 확인된 경우에만 표시(프론트는 빈 칸이면 항목 자체를 숨김).
+    cable = ""
 
     walking = (
         f"{name} 일대는 지형·코스에 따라 왕복 30분~수시간까지 달라질 수 있습니다. "
-        "난이도·표고차·적설 여부는 지도·현지 표지·산악 지도로 확인하세요."
+        "주차장·셔틀 하차 지점에서 트레일 헤드·전망 포인트까지의 거리, 루트 분기, 표고차, "
+        "철제·난간 구간·적설·진흙에 따른 난이도(쉬움/중간/어려움), 왕복 예상 시간대를 "
+        "가능한 한 구체적으로 적되, 한 장소당 약 1000자 전후로 요약해 정리합니다(불필요하게 잘라내지 말 것). "
+        "난이도·날씨는 지도·현지 표지·산악 지도로 교차 확인하세요."
     )
     if review_bits:
         joined = " | ".join(review_bits)
@@ -191,7 +188,8 @@ def build_practical_from_details(
 
     fees = (
         "Places API에는 개별 입장료가 항상 표시되지 않습니다. "
-        "자연 보호지역·톨·보트·박물관 등은 별도 요금이 붙을 수 있으니 공식 요금표를 확인하세요."
+        "그래도 **입장료·환경세·톨·보트·박물관 등** 가능한 한 € 또는 현지 통화로 구체 금액을 적고, "
+        "미확인 시 '관련 정보 없음'으로 표시합니다."
     )
     if website:
         fees += f" ({website})"
@@ -207,7 +205,7 @@ def build_practical_from_details(
 
     tips_parts = []
     if hours_line:
-        tips_parts.append(f"영업·운영 시간(표시 시): {hours_line}")
+        tips_parts.append(f"개방·운영 시간(Places 표시): {hours_line}")
     if rating is not None:
         tips_parts.append(f"평점 {rating}★ · 리뷰 약 {ur}건(참고용).")
     tips_parts.append("날씨·도로 통제·일몰 시각은 출발 전에 다시 확인하세요.")
@@ -291,7 +289,11 @@ def _needs_practical_polish(pr: dict[str, Any]) -> bool:
         return True
     pk = str(pr.get("parking") or "")
     walk = str(pr.get("walking_hiking") or "")
-    if len(pk.strip()) < 50 or len(walk.strip()) < 50:
+    fees = str(pr.get("fees_other") or "")
+    resv = str(pr.get("reservation_note") or "")
+    if len(pk.strip()) < 80 or len(walk.strip()) < 400:
+        return True
+    if len(fees.strip()) < 20 or len(resv.strip()) < 20:
         return True
     return False
 
@@ -343,11 +345,12 @@ async def polish_practical_details_with_llm(
 여행 기간: {start_date} ~ {end_date}
 
 아래 JSON 배열의 각 명소에 대해 `practical_details` 6키를 **판단에 도움이 되게** 채운다.
-- parking: 대중교통이 있는 가장 가까운 동네와 명소 입구까지의 차량 소요 시간, 제한구역 여부, 명확한 주차 요금(€)
-- cable_car_lift: 케이블카나 리프트가 확실하게 있는지 유무 명시 (있으면 노선·요금, 없으면 명확히 '해당 없음')
-- walking_hiking: 대표 루트·왕복 시간·난이도(쉬움/중간/어려움), 주차지~트레일 헤드 포함
-- fees_other: 입장료·톨·보트 등 명확한 요금 기재
-- reservation_note: 예약해야 하는지 여부, 운영 시간, 예약 링크·전화
+
+- parking (**주차·도로 접근**): 명소 주변에서 **인구 약 3,000명 이상**인 **가장 가까운 도시**(또는 읍·면 단위 거점) 이름을 밝히고, 그 **도심·대표 접점**에서 **명소 입구(또는 주차장·트레일 헤드)**까지 **승용차로 몇 분**인지 숫자로 명시한다. **주차 요금**(€/시간·일당 등)과 주차장명·유료 여부·제한구역·톨을 함께 적는다.
+- cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
+- walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **약 1000자 전후**로 요약한다. 기존 설명이 길면 **핵심을 빼앗기지 말고** 정리할 것(지나치게 짧게 줄이지 말 것).
+- fees_other: **입장료**·환경세·톨·보트 등 **반드시** 수치·통화로 적는다. 미확인 시 "관련 정보 없음".
+- reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크.
 - tips: 최적 시간대·준비물·혼잡
 
 금지: "확인하세요", "권장합니다", "현지 예약 사이트 참고", "달라질 수 있습니다" 등 답변을 회피하거나 떠넘기는 문구 절대 금지. 직접 조사한 구체적인 요금, 시간, 소요시간(숫자)을 기재할 것.
@@ -382,6 +385,9 @@ async def polish_practical_details_with_llm(
                 merged = dict(a.get("practical_details") or {})
                 for k in PRACTICAL_DETAIL_KEYS:
                     v = new_pr.get(k)
+                    if k == "cable_car_lift" and v is not None:
+                        merged[k] = str(v).strip()
+                        continue
                     if v is None or not str(v).strip():
                         continue
                     old = str(merged.get(k) or "")
