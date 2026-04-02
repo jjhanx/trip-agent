@@ -99,6 +99,35 @@ def _text_mentions_population_at_least_3000(t: str) -> bool:
                 continue
             if num >= 3000:
                 return True
+    # English (모델이 영어로만 쓸 때도 보강 루프가 무한 반복되지 않게)
+    if re.search(r"\d+(?:\.\d+)?\s*thousand\s*(?:people|inhabitants)?", t, re.I):
+        return True
+    for m in re.finditer(r"population\s*(?:of|is|around|approximately|≈|~)?\s*([\d][\d,\s]*)", t, re.I):
+        digits_only = re.sub(r"\D", "", m.group(1))
+        if digits_only:
+            try:
+                if int(digits_only) >= 3000:
+                    return True
+            except ValueError:
+                pass
+    for m in re.finditer(r"([\d][\d,\s]*)\s*(?:inhabitants|people)\b", t, re.I):
+        digits_only = re.sub(r"\D", "", m.group(1))
+        if not digits_only:
+            continue
+        try:
+            if int(digits_only) >= 3000:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _text_has_drive_time_minutes(t: str) -> bool:
+    """한국어 ○분 또는 영어 min(s)/minutes."""
+    if re.search(r"\d+\s*분", t):
+        return True
+    if re.search(r"\d+\s*(?:min|mins|minutes)\b", t, re.I):
+        return True
     return False
 
 
@@ -107,7 +136,7 @@ def parking_meets_nearest_city_pop3000_and_drive_minutes(text: str) -> bool:
     t = (text or "").strip()
     if len(t) < 20:
         return False
-    if not re.search(r"\d+\s*분", t):
+    if not _text_has_drive_time_minutes(t):
         return False
     return _text_mentions_population_at_least_3000(t)
 
@@ -380,8 +409,8 @@ async def polish_practical_details_with_llm(
     chunk_size = 12
     out = [dict(x) for x in attractions]
 
-    if not any(p.get("_need_polish") for p in payload):
-        return out
+    # 메인 폴리시만 생략 가능. parking 전용 repair/최종 패스는 아래에서 항상 검토한다.
+    run_main_polish = any(p.get("_need_polish") for p in payload)
 
     def _merge_polish_practical(merged: dict[str, str], new_pr: dict[str, Any]) -> None:
         for k in PRACTICAL_DETAIL_KEYS:
@@ -394,24 +423,19 @@ async def polish_practical_details_with_llm(
             nv = str(v).strip()
             old = str(merged.get(k) or "")
             if k == "parking":
+                # 검증 통과 여부와 무관하게 비어 있지 않은 새 parking은 신뢰(기존 로직은 '가짜 합격' old 때문에 좋은 nv를 버릴 수 있음)
                 if nv:
-                    if parking_meets_nearest_city_pop3000_and_drive_minutes(nv):
-                        merged[k] = nv
-                    elif "내비 검색어" in old:
-                        merged[k] = nv
-                    elif not parking_meets_nearest_city_pop3000_and_drive_minutes(old):
-                        merged[k] = nv
-                    elif _field_needs_replace(old) or len(old) < 40:
-                        merged[k] = nv
+                    merged[k] = nv
                 continue
             if _field_needs_replace(old) or len(old) < 40:
                 merged[k] = nv
 
-    for i in range(0, len(payload), chunk_size):
-        chunk = payload[i : i + chunk_size]
-        if not any(c.get("_need_polish") for c in chunk):
-            continue
-        prompt = f"""여행지 실무 카드 작성. 한국어만 사용.
+    if run_main_polish:
+        for i in range(0, len(payload), chunk_size):
+            chunk = payload[i : i + chunk_size]
+            if not any(c.get("_need_polish") for c in chunk):
+                continue
+            prompt = f"""여행지 실무 카드 작성. 한국어만 사용.
 
 목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
@@ -438,39 +462,39 @@ async def polish_practical_details_with_llm(
 {{ "items": [ {{ "name": "...", "practical_details": {{ ...6키... }} }} ] }}
 이름은 입력과 동일하게 유지한다."""
 
-        try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = resp.choices[0].message.content or ""
-            parsed = _extract_json_object(text)
-            items = (parsed or {}).get("items") or []
-            items_list = [it for it in items if isinstance(it, dict)]
-            by_name = {str(it.get("name") or "").strip(): it for it in items_list}
-            chunk_len = len(chunk)
-            for j in range(chunk_len):
-                idx = i + j
-                if idx >= len(out):
-                    break
-                a = out[idx]
-                if not isinstance(a, dict):
-                    continue
-                upd = None
-                if j < len(items_list):
-                    upd = items_list[j]
-                if upd is None:
-                    upd = by_name.get(str(a.get("name") or "").strip())
-                if not upd:
-                    continue
-                new_pr = upd.get("practical_details")
-                if not isinstance(new_pr, dict):
-                    continue
-                merged = dict(a.get("practical_details") or {})
-                _merge_polish_practical(merged, new_pr)
-                a["practical_details"] = merged
-        except Exception as e:
-            logger.debug("polish_practical_llm failed: %s", e)
+            try:
+                resp = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = resp.choices[0].message.content or ""
+                parsed = _extract_json_object(text)
+                items = (parsed or {}).get("items") or []
+                items_list = [it for it in items if isinstance(it, dict)]
+                by_name = {str(it.get("name") or "").strip(): it for it in items_list}
+                chunk_len = len(chunk)
+                for j in range(chunk_len):
+                    idx = i + j
+                    if idx >= len(out):
+                        break
+                    a = out[idx]
+                    if not isinstance(a, dict):
+                        continue
+                    upd = None
+                    if j < len(items_list):
+                        upd = items_list[j]
+                    if upd is None:
+                        upd = by_name.get(str(a.get("name") or "").strip())
+                    if not upd:
+                        continue
+                    new_pr = upd.get("practical_details")
+                    if not isinstance(new_pr, dict):
+                        continue
+                    merged = dict(a.get("practical_details") or {})
+                    _merge_polish_practical(merged, new_pr)
+                    a["practical_details"] = merged
+            except Exception as e:
+                logger.warning("polish_practical_llm chunk failed: %s", e)
 
     # parking만 아직 규칙 미달이면 parking 전용 재폴리시 (idx로 병합 — 이름 불일치 방지)
     repair = []
@@ -538,7 +562,7 @@ async def polish_practical_details_with_llm(
                 merged["parking"] = pk_new
                 a["practical_details"] = merged
         except Exception as e:
-            logger.debug("parking repair polish failed: %s", e)
+            logger.warning("parking repair polish failed: %s", e)
 
     # idx 기반 거점·주행 **최종** 패스: 여전히 비어 있거나 규칙 미달이면 전체 명소를 한 번 더 (이름 매칭 없음)
     still_bad = [
@@ -598,7 +622,7 @@ async def polish_practical_details_with_llm(
                 merged["parking"] = pk_new
                 a["practical_details"] = merged
         except Exception as e:
-            logger.debug("parking hub finalize failed: %s", e)
+            logger.warning("parking hub finalize failed: %s", e)
 
     return out
 
