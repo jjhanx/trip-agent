@@ -1725,7 +1725,7 @@ function updateRentalBookingButton() {
 }
 
 const PRACTICAL_DETAIL_LABELS = {
-  parking: '주차·도로 접근',
+  parking: '주차·도로 (거점·승용차 분)',
   cable_car_lift: '케이블카·리프트',
   walking_hiking: '도보·하이킹',
   fees_other: '입장료·톨·기타',

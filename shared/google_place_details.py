@@ -148,9 +148,67 @@ def parking_requires_llm_hub_distance(text: str) -> bool:
         return True
     if "내비 검색어" in t or "내비검색어" in t.replace(" ", ""):
         return True
+    # 서버 조합 문구는 (가)(나)로 시작
+    if "(가)" in t and "(나)" in t and _text_has_drive_time_minutes(t):
+        return False
     if not parking_meets_nearest_city_pop3000_and_drive_minutes(t):
         return True
     return False
+
+
+def _parse_drive_minutes(val: Any) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        n = int(round(val))
+        return n if 1 <= n <= 600 else None
+    s = str(val).strip()
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return None
+    n = int(m.group(1))
+    return n if 1 <= n <= 600 else None
+
+
+def _population_ko_from_item(it: dict[str, Any]) -> str:
+    pk = str(it.get("population_ko") or "").strip()
+    if pk:
+        return pk
+    raw = it.get("population")
+    if raw is None:
+        return ""
+    try:
+        n = int(float(str(raw)))
+    except (TypeError, ValueError):
+        return ""
+    return f"약 {n}명"
+
+
+def _parking_line_from_structured_item(it: dict[str, Any]) -> str:
+    """LLM 구조 필드 → (가)(나) 고정 형식. 자유 서술에 의존하지 않음."""
+    hub = str(it.get("hub_place_name") or it.get("hub_city") or "").strip()
+    mins = _parse_drive_minutes(it.get("drive_minutes"))
+    extra = str(it.get("parking_and_toll_eur") or "").strip()
+    if not hub or mins is None:
+        return ""
+    pop_show = _population_ko_from_item(it)
+    pop_part = f" ({pop_show})" if pop_show else ""
+    parts = [
+        f"(가) 거점 {hub}{pop_part}.",
+        f"(나) 위 거점 도심에서 이 명소까지 승용차 약 {mins}분.",
+    ]
+    if extra:
+        parts.append(extra)
+    return " ".join(parts).strip()
+
+
+def _parking_text_from_mandatory_item(it: dict[str, Any]) -> str:
+    line = _parking_line_from_structured_item(it)
+    if line:
+        return line
+    return str(it.get("parking") or "").strip()
 
 
 def _is_google_stub_description(desc: str) -> bool:
@@ -516,19 +574,21 @@ async def polish_practical_details_with_llm(
             mand_prompt = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-**역할**: 여행 일정·숙소를 정할 때 쓰는 **주차·도로(parking)** 문단만 작성한다. **아래 입력의 명소마다 정확히 하나씩** `parking`을 쓴다.
+**역할**: 각 명소에 대해 **필드만** 채운다. **문장을 직접 쓰지 말고** 아래 JSON 키만 채운다. 서버가 (가)(나) 형식으로 합친다.
 
-**절대 규칙 (각 parking 문단에 세 가지를 모두 한국어 문장으로 포함 — 하나라도 빠지면 실패)**:
-1) 이 명소에 가장 가까운 **인구 3,000명 이상**인 **거점 도시(또는 읍)의 실제 지명** + **인구 수(명)**.
-2) 그 **거점 도심**(또는 대표 접근 지점)에서 이 명소 **입구·주차장·트레일 헤드**까지 **승용차로 약 몇 분** — 반드시 **숫자+분**(예: 약 45분).
-3) 주차 요금·톨 등 **€** 표기.
+**각 item 필수 키** (문자열은 한국어 위주):
+- `idx`: 입력과 동일한 정수
+- `hub_place_name`: 이 명소에 가장 가까운 **인구 3,000명 이상**인 거점의 **실제 지명**(도시·읍·면, 현지명도 가능)
+- `population_ko`: 인구 표기. 예: `약 5,800명` (또는 숫자로 `population` 키에 5800)
+- `drive_minutes`: **정수** — 그 거점 **도심**에서 이 명소 **입구·주차·트레일 헤드**까지 **승용차**로 **몇 분**인지 (1~600)
+- `parking_and_toll_eur`: 주차·톨 € 등 **한 문장** (숫자·€ 포함)
 
-**금지**: 내비에 무엇을 치라는 식만 쓰기, 등록지 주소만 복사, "확인하십시오" 류. 참고용으로 기존 문구가 있어도 위 규칙에 맞게 **다시 쓴다**.
+**금지**: 내비 검색어만, 등록 주소만 복사, 빈 문자열로 두기.
 
 입력:
 {json.dumps(chunk, ensure_ascii=False)}
 
-출력은 **JSON 객체 하나**이며 키 `items`만 사용한다. `items` 길이는 **정확히 {len(chunk)}**개. 각 원소는 `idx`(입력과 동일한 정수)와 `parking`(문자열)만. idx 순서는 입력과 같게."""
+출력: JSON 객체 `{{"items":[...]}}` — `items` 길이는 **정확히 {len(chunk)}**개. 각 원소는 위 키를 모두 포함. `parking` 문자열은 **쓰지 않아도 됨**(서버가 조합)."""
 
             try:
                 try:
@@ -554,7 +614,7 @@ async def polish_practical_details_with_llm(
                         continue
                     if idx < 0 or idx >= len(out):
                         continue
-                    pk_new = str(it.get("parking") or "").strip()
+                    pk_new = _parking_text_from_mandatory_item(it)
                     if not pk_new:
                         continue
                     a = out[idx]
@@ -586,14 +646,14 @@ async def polish_practical_details_with_llm(
             mand_prompt2 = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-이전 응답이 규칙을 지키지 못했다. **다시** 각 명소에 대해 `parking` 한 문단만 작성한다.
+이전 응답이 규칙을 지키지 못했다. **다시** 각 명소에 대해 **필드만** 채운다.
 
-**반드시 포함**: (1) 거점 도시명 + 인구 3천 이상(명) (2) 그 도심에서 명소까지 승용차 약 N분 (3) 주차·톨 €
+필수 키(각 item): `idx`, `hub_place_name`, `population_ko` 또는 숫자 `population`, 정수 `drive_minutes`, `parking_and_toll_eur`.
 
 입력:
 {json.dumps(chunk_r, ensure_ascii=False)}
 
-출력 JSON: {{"items":[{{"idx":정수,"parking":"문자열"}},...]}} — items는 **{len(chunk_r)}**개."""
+출력 JSON: {{"items":[...]}} — items는 **{len(chunk_r)}**개. 각 원소에 위 키 필수."""
 
             try:
                 try:
@@ -618,7 +678,7 @@ async def polish_practical_details_with_llm(
                         continue
                     if idx < 0 or idx >= len(out):
                         continue
-                    pk_new = str(it.get("parking") or "").strip()
+                    pk_new = _parking_text_from_mandatory_item(it)
                     if not pk_new:
                         continue
                     a = out[idx]
