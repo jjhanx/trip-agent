@@ -72,32 +72,44 @@ def _field_needs_replace(val: str) -> bool:
     return any(m in v for m in _PLACEHOLDER_MARKERS)
 
 
+def _text_mentions_population_at_least_3000(t: str) -> bool:
+    """인구 3천 이상이 한국어·숫자로 드러나는지. '인구' 단어 없이 '5,800명'만 쓴 경우도 인정한다."""
+    if not t:
+        return False
+    if re.search(r"3[.,]?\s*000\s*명\s*이상|3[.,]?\s*천\s*명\s*이상|삼천\s*명\s*이상", t):
+        return True
+    if re.search(r"\d+(?:\.\d+)?\s*만\s*명", t):
+        return True
+    segments: list[str] = [t]
+    if "인구" in t:
+        pos = t.find("인구")
+        segments.append(t[pos : pos + 220])
+    for segment in segments:
+        if re.search(r"3[.,]?\s*000\s*명\s*이상|3[.,]?\s*천\s*명\s*이상|삼천\s*명\s*이상", segment):
+            return True
+        if re.search(r"\d+(?:\.\d+)?\s*만\s*명", segment):
+            return True
+        for m in re.finditer(r"([\d][\d.,\s]*)\s*명", segment):
+            digits_only = re.sub(r"\D", "", m.group(1))
+            if not digits_only:
+                continue
+            try:
+                num = int(digits_only)
+            except ValueError:
+                continue
+            if num >= 3000:
+                return True
+    return False
+
+
 def parking_meets_nearest_city_pop3000_and_drive_minutes(text: str) -> bool:
-    """주차·도로 문구에 '인구 3천 이상 최근접 도시' + '승용차로 몇 분'이 모두 드러나는지."""
+    """주차·도로 문구에 '인구 3천 이상 거점' + '몇 분'이 모두 드러나는지."""
     t = (text or "").strip()
-    if len(t) < 30:
+    if len(t) < 20:
         return False
     if not re.search(r"\d+\s*분", t):
         return False
-    if "인구" not in t:
-        return False
-    pos = t.find("인구")
-    segment = t[pos : pos + 220] if pos >= 0 else t
-    if re.search(r"3[.,]?\s*000\s*명\s*이상|3[.,]?\s*천\s*명\s*이상|삼천\s*명\s*이상", segment):
-        return True
-    if re.search(r"\d+(?:\.\d+)?\s*만\s*명", segment):
-        return True
-    for m in re.finditer(r"([\d][\d.,\s]*)\s*명", segment):
-        digits_only = re.sub(r"\D", "", m.group(1))
-        if not digits_only:
-            continue
-        try:
-            num = int(digits_only)
-        except ValueError:
-            continue
-        if num >= 3000:
-            return True
-    return False
+    return _text_mentions_population_at_least_3000(t)
 
 
 def parking_requires_llm_hub_distance(text: str) -> bool:

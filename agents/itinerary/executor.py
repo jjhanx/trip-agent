@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -18,6 +19,8 @@ from shared.google_place_details import (
 )
 from shared.place_images import enrich_attractions_images
 from shared.utils import new_agent_text_message
+
+logger = logging.getLogger(__name__)
 
 
 def _trip_inclusive_days(start_date: str, end_date: str) -> int:
@@ -1640,8 +1643,11 @@ JSON 객체 하나만 출력:
                             start_date=start_date,
                             end_date=end_date,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "polish_practical_details_with_llm failed (parking·거점 보강 생략): %s",
+                            e,
+                        )
 
                 for a in atts:
                     if isinstance(a, dict):
