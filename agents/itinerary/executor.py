@@ -17,6 +17,7 @@ from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
     enrich_attractions_with_place_details,
     polish_practical_details_with_llm,
+    walking_hiking_clamp_smart,
 )
 from shared.place_images import enrich_attractions_images
 from shared.utils import new_agent_text_message
@@ -1423,6 +1424,15 @@ async def postprocess_attraction_list_for_catalog(
             "서버 .env에 설정 후 itinerary 컨테이너 재시작 필요."
         )
 
+    for a in atts:
+        if isinstance(a, dict):
+            pr = a.get("practical_details")
+            if isinstance(pr, dict):
+                w = str(pr.get("walking_hiking") or "")
+                if w:
+                    pr["walking_hiking"] = walking_hiking_clamp_smart(w, 1000)
+                    a["practical_details"] = pr
+
     if (settings.google_places_api_key or "").strip():
         try:
             atts = await enrich_attractions_parking_directions(
@@ -1637,7 +1647,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 - **[설명 description]**: "구글맵 평점 기반" 같은 메타 문구는 절대 쓰지 말 것. 각 장소마다 **지명·지형·대표 루트·다른 명소와의 관계·역사·감상 포인트**를 바탕으로 2~4문장으로 **직접 조사한 것처럼** 구체적으로 서술한다(일반적인 관광 소개문 금지).
 - **[중요] 계절(시즌) 제한**: 여행 기간({start_date} ~ {end_date})의 월(계절)을 고려하여, **여름에 스키 슬로프·스키 학교만을 위한 시설**처럼 계절에 맞지 않는 명소는 누락한다. 여름 케이블카·전망·하이킹 리프트는 유지한다.
 - **[중요] 내부 관람 필수형(박물관·오페라·극장·스칼라 등)**: 입장·공연 예약이 핵심인 곳은 `fees_other`와 `reservation_note`에 **요금·예약 경로·운영 시간**을 숫자와 절차로 구체적으로 적고, 불가능하면 목록에서 삭제한다. **외관만 보는 것으로 의미 없는 곳은 넣지 않는다.**
-- **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다. **약 1000자 전후**로 요약·정리하되, 설명이 길다고 한두 문장으로 줄이지 말고 정보 밀도를 유지한다.
+- **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다. **총 1000자 이내**로 요약·정리한다(서버 보강 단계에서 방문자 리뷰 발췌가 있으면 잘라 붙이지 않고 요약해 넣는다).
 - **[중요] 답변 회피 금지**: "확인하십시오", "확인하세요", "현지 안내를 확인하세요", "공식 사이트에서 확인" 등 **사용자에게 확인을 떠넘기는** 문구는 **절대 금지**. 모르면 "관련 정보 없음"이라고 명시하되, 당신의 지식으로 **이미 조사한 것처럼** 구체적인 소요시간·거리·요금(숫자)·도시명을 적는다.
 
 목적지: {destination}
@@ -1659,7 +1669,7 @@ JSON 객체 하나만 출력:
   - practical_details: 객체(모두 한국어, 구체적 수치·절차):
     - parking: **주차·도로(필수)** — 일정·숙소 판단용 **거점+분**이 본문이다. **한 문단 안에** ① 거점 **지명**+**인구(명)** ② **승용차 약 ○분** ③ **주차·톨 €** (서버 보강 단계에서 `○○에서 승용차 약 N분 (Google Maps …)` 한 줄로 고정될 수 있음). **내비 검색어 단독 금지**. **등록 주소 금지**.
     - cable_car_lift: **케이블카·곤돌라·리프트가 있을 때만** 노선·대략 요금(€) 기재. **없으면 빈 문자열 ""** (키는 두되 내용 비움 — UI에서 항목 숨김). "해당 없음" 문구 금지.
-    - walking_hiking: 대표 루프·왕복 예상 시간·난이도·주차~트레일 헤드·철제 구간 등, **약 1000자 전후** 요약(과도한 축약 금지).
+    - walking_hiking: 대표 루프·왕복 예상 시간·난이도·주차~트레일 헤드·철제 구간 등, **총 1000자 이내** 요약(과도한 축약 금지).
     - fees_other: **입장료**·톨·보트·환경세 등 — 금액·통화로 명확히 기재(미확인 시 "관련 정보 없음").
     - reservation_note: **개방·운영 시간**, **예약 필수 여부**, 예약 링크·전화·성수기 제한
     - tips: 준비물·최적 시간대(날씨·혼잡 회피)

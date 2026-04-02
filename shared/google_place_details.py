@@ -14,6 +14,9 @@ from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
+# Places Details 리뷰 원문 상한(비정상적으로 긴 단일 리뷰 방지). 합본은 폴리시·압축 단계에서 1000자 요약.
+_MAX_SINGLE_REVIEW_CHARS = 6000
+
 USER_AGENT = (
     "TripAgent/1.0 (https://github.com/jjhanx/trip-agent; place details; contact via repo)"
 )
@@ -63,6 +66,65 @@ _PLACEHOLDER_MARKERS = (
     "공식 웹에서 요금을",
     "내비 검색어",
 )
+
+
+def _trim_body_to_budget_by_segments(body: str, budget: int) -> str:
+    """' | ' 구간·문장 경계 우선. 한글 중간 낱말 절단 최소화."""
+    b = (body or "").strip()
+    if budget < 40:
+        return b[:budget].rstrip()
+    if len(b) <= budget:
+        return b
+    parts = [p.strip() for p in b.split("|") if p.strip()]
+    sep = " | "
+    if len(parts) > 1:
+        acc: list[str] = []
+        cur = 0
+        for p in parts:
+            add = p if not acc else sep + p
+            if cur + len(add) <= budget:
+                acc.append(p)
+                cur += len(add)
+            else:
+                break
+        if acc:
+            return sep.join(acc) if len(acc) > 1 else acc[0]
+        b = parts[0]
+    cut = b[:budget]
+    for punct in ("。", ".", "!", "?", "？", "…", "\n"):
+        pos = cut.rfind(punct)
+        if pos >= budget * 2 // 5:
+            return b[: pos + 1].strip()
+    pos = cut.rfind(" ")
+    if pos >= budget * 2 // 5:
+        return b[:pos].strip() + "…"
+    return cut.rstrip() + "…"
+
+
+def walking_hiking_clamp_smart(text: str, max_chars: int = 1000) -> str:
+    """도보·하이킹 문단을 max_chars 이내로. LLM 미사용/실패 시 폴백(발췌 단위·문장 경계)."""
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    head = "방문자 리뷰 발췌:"
+    if t.startswith(head):
+        body = t[len(head) :].lstrip()
+        budget = max_chars - len(head) - 1
+        compact = _trim_body_to_budget_by_segments(body, max(budget, 40))
+        return f"{head} {compact}".strip()
+    return _trim_body_to_budget_by_segments(t, max_chars)
+
+
+def _practical_snapshot_for_polish(pr: dict[str, Any]) -> dict[str, str]:
+    """폴리시 프롬프트용. walking_hiking은 리뷰 발췌 전체를 넘길 수 있어 상한을 크게 둔다."""
+    out: dict[str, str] = {}
+    for k in PRACTICAL_DETAIL_KEYS:
+        v = str(pr.get(k) or "")
+        if k == "walking_hiking":
+            out[k] = v[:12000]
+        else:
+            out[k] = v[:500]
+    return out
 
 
 def _field_needs_replace(val: str) -> bool:
@@ -303,7 +365,9 @@ def build_practical_from_details(
             if isinstance(r, dict):
                 t = (r.get("text") or "").strip()
                 if len(t) > 25:
-                    review_bits.append(t[:140])
+                    if len(t) > _MAX_SINGLE_REVIEW_CHARS:
+                        t = t[:_MAX_SINGLE_REVIEW_CHARS].rstrip() + "…"
+                    review_bits.append(t)
 
     # Places는 거점·주행분을 주지 않음. parking은 비워 두어 반드시 LLM 보강(인구 3천+ 거점 + 승용차 ○분)이 채우게 함.
     # (내비 검색어만 넣으면 사용자가 일정·숙소 판단 근거를 얻지 못함.)
@@ -314,8 +378,8 @@ def build_practical_from_details(
 
     walking_parts: list[str] = []
     if review_bits:
-        joined = " | ".join(review_bits[:2])
-        walking_parts.append(f"방문자 리뷰 발췌: {joined[:280]}{'…' if len(joined) > 280 else ''}")
+        joined = " | ".join(review_bits)
+        walking_parts.append(f"방문자 리뷰 발췌: {joined}")
     if not walking_parts:
         walking_parts.append(
             f"{name} 일대: 코스·난이도·소요 시간은 지형·시즌에 따라 다릅니다. (Places에 상세 코스 미등록)"
@@ -433,6 +497,8 @@ def _needs_practical_polish(pr: dict[str, Any]) -> bool:
     resv = str(pr.get("reservation_note") or "")
     if parking_requires_llm_hub_distance(pk):
         return True
+    if "방문자 리뷰 발췌" in walk and len(walk.strip()) > 1000:
+        return True
     if len(pk.strip()) < 80 or len(walk.strip()) < 400:
         return True
     if len(fees.strip()) < 20 or len(resv.strip()) < 20:
@@ -464,7 +530,7 @@ async def polish_practical_details_with_llm(
                 "name": a.get("name"),
                 "category": a.get("category"),
                 "description_excerpt": (a.get("description") or "")[:400],
-                "practical_details_before": {k: str(pr.get(k) or "")[:500] for k in PRACTICAL_DETAIL_KEYS},
+                "practical_details_before": _practical_snapshot_for_polish(pr),
                 "google_maps_url": a.get("google_maps_url") or "",
                 "official_website": a.get("official_website") or "",
                 "_need_polish": need,
@@ -511,7 +577,7 @@ async def polish_practical_details_with_llm(
 
 - parking (**주차·도로**, **모든 명소 필수**): **등록 주소·길찾기 주소 금지**(다른 칸에만). **반드시** ① 명소에서 **가장 가까운 인구 3,000명 이상** 거점(도시·읍·면) **실제 지명** + **인구(명)**. ② 그 거점 **도심·대표 접점**에서 **명소 입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분). ③ 주차·톨 €. (지명·인구·분이 없으면 안 됨.)
 - cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
-- walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **약 1000자 전후**로 요약한다. 기존 설명이 길면 **핵심을 빼앗기지 말고** 정리할 것(지나치게 짧게 줄이지 말 것).
+- walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **총 1000자 이내**로 쓴다. 입력에 **방문자 리뷰 발췌**가 있으면 **원문을 잘라 붙이지 말고** 내용을 바탕으로 **한국어로 요약·정리**해 통합한다(어절·문장 중간에서 끊지 않는다). 루트·시간·난이도 정보 밀도를 유지한다.
 - fees_other: **입장료**·환경세·톨·보트 등 **반드시** 수치·통화로 적는다. 미확인 시 "관련 정보 없음".
 - reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크.
 - tips: 최적 시간대·준비물·혼잡
