@@ -198,7 +198,7 @@ def _parking_line_from_structured_item(it: dict[str, Any]) -> str:
     pop_show = _population_ko_from_item(it)
     pop_part = f" ({pop_show})" if pop_show else ""
     line = (
-        f"{hub}{pop_part}에서 이 명소까지 승용차 약 {mins}분 "
+        f"{hub}{pop_part}에서 승용차 약 {mins}분 "
         f"(Google Maps 도로 검색 기준)."
     )
     if extra:
@@ -581,7 +581,7 @@ async def polish_practical_details_with_llm(
             mand_prompt = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-**역할**: 각 명소에 대해 **필드만** 채운다. **문장을 직접 쓰지 말고** 아래 JSON 키만 채운다. 서버가 `○○에서 이 명소까지 승용차 약 N분 (Google Maps 도로 검색 기준).` 형식으로 합친다.
+**역할**: 각 명소에 대해 **필드만** 채운다. **문장을 직접 쓰지 말고** 아래 JSON 키만 채운다. 서버가 `○○에서 승용차 약 N분 (Google Maps 도로 검색 기준).` 형식으로 합친다.
 
 **각 item 필수 키** (문자열은 한국어 위주):
 - `idx`: 입력과 동일한 정수

@@ -277,7 +277,7 @@ def _build_parking_line_real_city(display_name: str, minutes: int, toll_extra: s
     """거점 지명 + 승용차 분 한 줄."""
     toll = f" {toll_extra}" if toll_extra else ""
     return (
-        f"{display_name}에서 이 명소까지 승용차 약 {minutes}분 (Google Maps 도로 검색 기준).{toll}"
+        f"{display_name}에서 승용차 약 {minutes}분 (Google Maps 도로 검색 기준).{toll}"
     ).strip()
 
 
