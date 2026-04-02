@@ -56,6 +56,11 @@ _PLACEHOLDER_MARKERS = (
     "1000자 전후로 요약해 정리합니다",
     "Places API에는 개별 입장료가 항상 표시되지 않습니다",
     "일정 보강 단계에서 별도로 적",
+    "확인하십시오",
+    "확인하세요",
+    "현지 표지·공식 안내를",
+    "지도·현지 표지를",
+    "공식 웹에서 요금을",
 )
 
 
@@ -204,24 +209,27 @@ def build_practical_from_details(
         parking_lines.append("자연·공원 구간은 주차장에서 트레일까지 도보·셔틀이 이어지는 경우가 많습니다.")
     if website:
         parking_lines.append(f"공식 안내: {website}")
-    parking = " ".join(parking_lines) + " 주차 요금·톨·거리는 현지 표지·공식 안내를 확인하십시오."
+    # 수치(€·분·거점)는 Places에 없으므로 비우지 않고 사실만 두면, 폴리시가 구체 숫자로 덮어씀.
+    parking = " ".join(parking_lines)
 
     # 케이블·리프트는 확인된 경우에만 표시(프론트는 빈 칸이면 항목 자체를 숨김).
     cable = ""
 
-    walking_parts: list[str] = [
-        f"{name} 일대 코스·난이도·소요 시간은 지형·시즌에 따라 다릅니다. 지도·현지 표지를 확인하십시오."
-    ]
+    walking_parts: list[str] = []
     if review_bits:
         joined = " | ".join(review_bits[:2])
         walking_parts.append(f"방문자 리뷰 발췌: {joined[:280]}{'…' if len(joined) > 280 else ''}")
+    if not walking_parts:
+        walking_parts.append(
+            f"{name} 일대: 코스·난이도·소요 시간은 지형·시즌에 따라 다릅니다. (Places에 상세 코스 미등록)"
+        )
     walking = " ".join(walking_parts)
 
-    fees = "Places에 등록된 입장료·톨·환경세 금액은 없습니다."
+    fees = "Places 응답에 입장료·톨·환경세 금액 필드는 없음."
     if website:
-        fees += f" 공식 요금은 {website}에서 확인하십시오."
+        fees += f" 공식 요금 페이지 URL: {website}"
     else:
-        fees += " 공식 웹에서 요금을 확인하십시오."
+        fees += " 공식 웹 URL 미등록(Places)."
 
     res_parts = []
     if hours_line:
@@ -237,8 +245,7 @@ def build_practical_from_details(
     tips_parts = []
     if rating is not None:
         tips_parts.append(f"Google Maps 평점 {rating}★ · 리뷰 약 {ur}건.")
-    tips_parts.append("날씨·도로 통제·일몰 시각은 출발 전에 확인하십시오.")
-    tips = " ".join(tips_parts)
+    tips = " ".join(tips_parts) if tips_parts else "관련 정보 없음 (평점 미표시)."
 
     return {
         "parking": parking,
@@ -409,7 +416,7 @@ async def polish_practical_details_with_llm(
 - reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크.
 - tips: 최적 시간대·준비물·혼잡
 
-금지: "확인하세요", "권장합니다", "현지 예약 사이트 참고", "달라질 수 있습니다" 등 답변을 회피하거나 떠넘기는 문구 절대 금지. 직접 조사한 구체적인 요금, 시간, 소요시간(숫자)을 기재할 것.
+금지: "확인하세요", "확인하십시오", "권장합니다", "현지 예약 사이트 참고", "달라질 수 있습니다", "…을 확인하" 등 **사용자에게 가서 확인하라는** 표현. 반드시 **조사한 결과**(€·분·도시명·시간)를 문장으로 적는다.
 **절대 금지**: 프롬프트에 나온 지시문을 그대로 출력(예: "…명시한다", "…채운다", "…원칙입니다", "…정리합니다"). 실제 **도시명·인구·€·분·주차 요금**만 적는다.
 허용: 지역 일반 지식을 총동원하여 정확한 답변 작성. 확인 불가 시 차라리 "관련 정보 없음"이라고 명시.
 
@@ -471,7 +478,7 @@ async def polish_practical_details_with_llm(
 2) 그 도시 **도심·대표 접점**에서 이 명소 **입구 또는 주차장·트레일 헤드**까지 **승용차로 약 몇 분**(숫자+분 필수).
 3) 주차·톨 요금이 있으면 € 등으로 덧붙임.
 
-금지: 메타·지시 문구. 확인 불가 시 "관련 정보 없음"을 해당 항목에만 쓰고 나머지는 추정 가능한 범위에서 숫자를 적는다.
+금지: 메타·지시 문구, "확인하십시오", "확인하세요", "…을 확인하" 류. 불가 시 "관련 정보 없음"만 쓰고, 가능하면 추정·지식으로 숫자·지명을 적는다.
 
 입력:
 {json.dumps(repair, ensure_ascii=False)}
