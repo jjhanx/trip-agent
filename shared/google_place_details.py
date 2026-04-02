@@ -496,133 +496,139 @@ async def polish_practical_details_with_llm(
             except Exception as e:
                 logger.warning("polish_practical_llm chunk failed: %s", e)
 
-    # parking만 아직 규칙 미달이면 parking 전용 재폴리시 (idx로 병합 — 이름 불일치 방지)
-    repair = []
-    for ri, a in enumerate(out):
+    # 전 명소 대상 parking 강제 채움: 거점 도시 + 승용차 ○분이 모든 카드에 들어가도록 단일 패스(청크)
+    rows: list[dict[str, Any]] = []
+    for idx, a in enumerate(out):
         if not isinstance(a, dict):
             continue
-        if parking_requires_llm_hub_distance(
-            str((a.get("practical_details") or {}).get("parking") or "")
-        ):
-            repair.append(
-                {
-                    "idx": ri,
-                    "name": a.get("name"),
-                    "category": a.get("category"),
-                    "parking_before": str((a.get("practical_details") or {}).get("parking") or "")[:800],
-                    "google_maps_url": a.get("google_maps_url") or "",
-                    "official_website": a.get("official_website") or "",
-                }
-            )
-    if repair:
-        fix_prompt = f"""목적지: {destination}
-여행 기간: {start_date} ~ {end_date}
-
-아래 명소들만 처리한다. 각 항목의 `parking` 필드만 채운다.
-
-**용도**: 일정·숙소 배치를 위한 **거점 도시 + 승용차 소요 분**이 핵심이다. 내비 검색어만 쓰지 말 것.
-
-**필수 (한국어)** — **등록 주소 금지**:
-1) **가장 가까운 인구 3,000명 이상** 거점 **지명** + **인구(명)**.
-2) 그 거점 **도심**에서 명소 **입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분).
-3) 주차·톨 €.
-
-금지: "내비 검색어", 메타·지시 문구, "확인하십시오".
-
-입력 (idx 순서 유지):
-{json.dumps(repair, ensure_ascii=False)}
-
-출력 JSON만. **반드시** 입력과 **같은 개수**의 items, 각 항목에 **idx** 포함:
-{{ "items": [ {{ "idx": 0, "parking": "..." }}, ... ] }}"""
-
-        try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": fix_prompt}],
-            )
-            text = resp.choices[0].message.content or ""
-            parsed_re = _extract_json_object(text)
-            items_re = (parsed_re or {}).get("items") or []
-            for it in items_re:
-                if not isinstance(it, dict):
-                    continue
-                try:
-                    idx = int(it.get("idx", -1))
-                except (TypeError, ValueError):
-                    continue
-                if idx < 0 or idx >= len(out):
-                    continue
-                pk_new = str(it.get("parking") or "").strip()
-                if not pk_new:
-                    continue
-                a = out[idx]
-                if not isinstance(a, dict):
-                    continue
-                merged = dict(a.get("practical_details") or {})
-                merged["parking"] = pk_new
-                a["practical_details"] = merged
-        except Exception as e:
-            logger.warning("parking repair polish failed: %s", e)
-
-    # idx 기반 거점·주행 **최종** 패스: 여전히 비어 있거나 규칙 미달이면 전체 명소를 한 번 더 (이름 매칭 없음)
-    still_bad = [
-        ei
-        for ei, a in enumerate(out)
-        if isinstance(a, dict)
-        and parking_requires_llm_hub_distance(
-            str((a.get("practical_details") or {}).get("parking") or "")
+        rows.append(
+            {
+                "idx": idx,
+                "name": a.get("name") or "",
+                "existing_parking": str((a.get("practical_details") or {}).get("parking") or "")[:700],
+                "google_maps_url": (a.get("google_maps_url") or "")[:220],
+            }
         )
-    ]
-    if still_bad:
-        hub_batch = []
-        for ei in still_bad:
-            a = out[ei]
-            hub_batch.append(
-                {
-                    "idx": ei,
-                    "name": a.get("name") or "",
-                    "reservation_excerpt": str((a.get("practical_details") or {}).get("reservation_note") or "")[:400],
-                }
-            )
-        hub_prompt = f"""목적지: {destination}
+    if rows:
+        mandatory_chunk = 8
+        for c0 in range(0, len(rows), mandatory_chunk):
+            chunk = rows[c0 : c0 + mandatory_chunk]
+            mand_prompt = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-아래 명소 각각에 대해 **parking 한 필드만** 작성한다. 일정·숙소 거리 판단에 쓸 **가장 가까운 인구 3천 이상 거점 도시명·인구·그 도심에서 명소 입구까지 승용차 약 ○분·주차·톨 €**를 한 문단으로.
+**역할**: 여행 일정·숙소를 정할 때 쓰는 **주차·도로(parking)** 문단만 작성한다. **아래 입력의 명소마다 정확히 하나씩** `parking`을 쓴다.
 
-금지: 내비 검색어만, 등록 주소 복사, 확인하십시오.
+**절대 규칙 (각 parking 문단에 세 가지를 모두 한국어 문장으로 포함 — 하나라도 빠지면 실패)**:
+1) 이 명소에 가장 가까운 **인구 3,000명 이상**인 **거점 도시(또는 읍)의 실제 지명** + **인구 수(명)**.
+2) 그 **거점 도심**(또는 대표 접근 지점)에서 이 명소 **입구·주차장·트레일 헤드**까지 **승용차로 약 몇 분** — 반드시 **숫자+분**(예: 약 45분).
+3) 주차 요금·톨 등 **€** 표기.
+
+**금지**: 내비에 무엇을 치라는 식만 쓰기, 등록지 주소만 복사, "확인하십시오" 류. 참고용으로 기존 문구가 있어도 위 규칙에 맞게 **다시 쓴다**.
 
 입력:
-{json.dumps(hub_batch, ensure_ascii=False)}
+{json.dumps(chunk, ensure_ascii=False)}
 
-출력 JSON만: {{ "items": [ {{ "idx": 숫자, "parking": "한국어 한 문단" }} ] }} — 입력과 **동일 개수**."""
+출력은 **JSON 객체 하나**이며 키 `items`만 사용한다. `items` 길이는 **정확히 {len(chunk)}**개. 각 원소는 `idx`(입력과 동일한 정수)와 `parking`(문자열)만. idx 순서는 입력과 같게."""
 
-        try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": hub_prompt}],
-            )
-            text = resp.choices[0].message.content or ""
-            parsed_h = _extract_json_object(text)
-            for it in (parsed_h or {}).get("items") or []:
-                if not isinstance(it, dict):
-                    continue
+            try:
                 try:
-                    idx = int(it.get("idx", -1))
-                except (TypeError, ValueError):
-                    continue
-                if idx < 0 or idx >= len(out):
-                    continue
-                pk_new = str(it.get("parking") or "").strip()
-                if not pk_new:
-                    continue
-                a = out[idx]
-                if not isinstance(a, dict):
-                    continue
-                merged = dict(a.get("practical_details") or {})
-                merged["parking"] = pk_new
-                a["practical_details"] = merged
-        except Exception as e:
-            logger.warning("parking hub finalize failed: %s", e)
+                    resp = await client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": mand_prompt}],
+                        response_format={"type": "json_object"},
+                    )
+                except Exception:
+                    resp = await client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": mand_prompt}],
+                    )
+                text = resp.choices[0].message.content or ""
+                parsed_m = _extract_json_object(text)
+                items_m = (parsed_m or {}).get("items") or []
+                for it in items_m:
+                    if not isinstance(it, dict):
+                        continue
+                    try:
+                        idx = int(it.get("idx", -1))
+                    except (TypeError, ValueError):
+                        continue
+                    if idx < 0 or idx >= len(out):
+                        continue
+                    pk_new = str(it.get("parking") or "").strip()
+                    if not pk_new:
+                        continue
+                    a = out[idx]
+                    if not isinstance(a, dict):
+                        continue
+                    merged = dict(a.get("practical_details") or {})
+                    merged["parking"] = pk_new
+                    a["practical_details"] = merged
+            except Exception as e:
+                logger.warning("parking mandatory all-chunk failed: %s", e)
+
+        # 강제 패스 후에도 미달이면 1회 재시도(실패한 idx만)
+        retry_idx = [
+            idx
+            for idx, a in enumerate(out)
+            if isinstance(a, dict)
+            and parking_requires_llm_hub_distance(str((a.get("practical_details") or {}).get("parking") or ""))
+        ]
+        if retry_idx:
+            chunk_r = [
+                {
+                    "idx": i,
+                    "name": out[i].get("name") or "",
+                    "existing_parking": str((out[i].get("practical_details") or {}).get("parking") or "")[:700],
+                    "google_maps_url": (out[i].get("google_maps_url") or "")[:220],
+                }
+                for i in retry_idx
+            ]
+            mand_prompt2 = f"""목적지: {destination}
+여행 기간: {start_date} ~ {end_date}
+
+이전 응답이 규칙을 지키지 못했다. **다시** 각 명소에 대해 `parking` 한 문단만 작성한다.
+
+**반드시 포함**: (1) 거점 도시명 + 인구 3천 이상(명) (2) 그 도심에서 명소까지 승용차 약 N분 (3) 주차·톨 €
+
+입력:
+{json.dumps(chunk_r, ensure_ascii=False)}
+
+출력 JSON: {{"items":[{{"idx":정수,"parking":"문자열"}},...]}} — items는 **{len(chunk_r)}**개."""
+
+            try:
+                try:
+                    resp2 = await client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": mand_prompt2}],
+                        response_format={"type": "json_object"},
+                    )
+                except Exception:
+                    resp2 = await client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": mand_prompt2}],
+                    )
+                text2 = resp2.choices[0].message.content or ""
+                parsed_r = _extract_json_object(text2)
+                for it in (parsed_r or {}).get("items") or []:
+                    if not isinstance(it, dict):
+                        continue
+                    try:
+                        idx = int(it.get("idx", -1))
+                    except (TypeError, ValueError):
+                        continue
+                    if idx < 0 or idx >= len(out):
+                        continue
+                    pk_new = str(it.get("parking") or "").strip()
+                    if not pk_new:
+                        continue
+                    a = out[idx]
+                    if not isinstance(a, dict):
+                        continue
+                    merged = dict(a.get("practical_details") or {})
+                    merged["parking"] = pk_new
+                    a["practical_details"] = merged
+            except Exception as e:
+                logger.warning("parking mandatory retry failed: %s", e)
 
     return out
 
