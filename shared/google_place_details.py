@@ -66,6 +66,34 @@ def _field_needs_replace(val: str) -> bool:
     return any(m in v for m in _PLACEHOLDER_MARKERS)
 
 
+def parking_meets_nearest_city_pop3000_and_drive_minutes(text: str) -> bool:
+    """주차·도로 문구에 '인구 3천 이상 최근접 도시' + '승용차로 몇 분'이 모두 드러나는지."""
+    t = (text or "").strip()
+    if len(t) < 30:
+        return False
+    if not re.search(r"\d+\s*분", t):
+        return False
+    if "인구" not in t:
+        return False
+    pos = t.find("인구")
+    segment = t[pos : pos + 220] if pos >= 0 else t
+    if re.search(r"3[.,]?\s*000\s*명\s*이상|3[.,]?\s*천\s*명\s*이상|삼천\s*명\s*이상", segment):
+        return True
+    if re.search(r"\d+(?:\.\d+)?\s*만\s*명", segment):
+        return True
+    for m in re.finditer(r"([\d][\d.,\s]*)\s*명", segment):
+        digits_only = re.sub(r"\D", "", m.group(1))
+        if not digits_only:
+            continue
+        try:
+            num = int(digits_only)
+        except ValueError:
+            continue
+        if num >= 3000:
+            return True
+    return False
+
+
 def _is_google_stub_description(desc: str) -> bool:
     d = desc or ""
     return "구글맵 기준 평점" in d or "별도로 보강됩니다" in d
@@ -292,6 +320,8 @@ def _needs_practical_polish(pr: dict[str, Any]) -> bool:
     walk = str(pr.get("walking_hiking") or "")
     fees = str(pr.get("fees_other") or "")
     resv = str(pr.get("reservation_note") or "")
+    if not parking_meets_nearest_city_pop3000_and_drive_minutes(pk):
+        return True
     if len(pk.strip()) < 80 or len(walk.strip()) < 400:
         return True
     if len(fees.strip()) < 20 or len(resv.strip()) < 20:
@@ -336,6 +366,28 @@ async def polish_practical_details_with_llm(
     if not any(p.get("_need_polish") for p in payload):
         return out
 
+    def _merge_polish_practical(merged: dict[str, str], new_pr: dict[str, Any]) -> None:
+        for k in PRACTICAL_DETAIL_KEYS:
+            v = new_pr.get(k)
+            if k == "cable_car_lift" and v is not None:
+                merged[k] = str(v).strip()
+                continue
+            if v is None or not str(v).strip():
+                continue
+            nv = str(v).strip()
+            old = str(merged.get(k) or "")
+            if k == "parking":
+                if nv:
+                    if parking_meets_nearest_city_pop3000_and_drive_minutes(nv):
+                        merged[k] = nv
+                    elif not parking_meets_nearest_city_pop3000_and_drive_minutes(old):
+                        merged[k] = nv
+                    elif _field_needs_replace(old) or len(old) < 40:
+                        merged[k] = nv
+                continue
+            if _field_needs_replace(old) or len(old) < 40:
+                merged[k] = nv
+
     for i in range(0, len(payload), chunk_size):
         chunk = payload[i : i + chunk_size]
         if not any(c.get("_need_polish") for c in chunk):
@@ -347,7 +399,10 @@ async def polish_practical_details_with_llm(
 
 아래 JSON 배열의 각 명소에 대해 `practical_details` 6키를 **판단에 도움이 되게** 채운다.
 
-- parking (**주차·도로 접근**): **구체적 도시(또는 읍·면) 이름**을 쓴 뒤, 그곳이 **인구 약 3,000명 이상**임을 한 문장으로 밝히고, **그 도심·대표 접점 → 명소 입구(또는 주차장·트레일 헤드)**까지 **승용차로 몇 분**을 숫자로 적는다. **주차 요금**(€/시간·일당)·주차장명·유료 여부·톨을 함께 적는다.
+- parking (**주차·도로 접근**, **모든 명소 필수**): 아래 **형식을 반드시 한 덩어리로** 쓴다 (지시문이 아니라 **실제 이름·숫자**만).
+  ① 명소 주변에서 **가장 가까운 인구 3,000명 이상**인 도시(또는 읍·면) **이름** + 그 **인구**(예: 인구 약 5,800명 또는 3,000명 이상 거점).
+  ② 그 도시의 **대표 접점**(시청·역·주요 내비 찍는 도심 지점 등)에서 **명소 입구 또는 주차장·트레일 헤드**까지 **승용차로 약 ○분**(숫자+분 필수).
+  ③ 이어서 주차 요금(€)·톨·유료도로가 있으면 적는다.
 - cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
 - walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **약 1000자 전후**로 요약한다. 기존 설명이 길면 **핵심을 빼앗기지 말고** 정리할 것(지나치게 짧게 줄이지 말 것).
 - fees_other: **입장료**·환경세·톨·보트 등 **반드시** 수치·통화로 적는다. 미확인 시 "관련 정보 없음".
@@ -385,19 +440,68 @@ async def polish_practical_details_with_llm(
                 if not isinstance(new_pr, dict):
                     continue
                 merged = dict(a.get("practical_details") or {})
-                for k in PRACTICAL_DETAIL_KEYS:
-                    v = new_pr.get(k)
-                    if k == "cable_car_lift" and v is not None:
-                        merged[k] = str(v).strip()
-                        continue
-                    if v is None or not str(v).strip():
-                        continue
-                    old = str(merged.get(k) or "")
-                    if _field_needs_replace(old) or len(old) < 40:
-                        merged[k] = str(v).strip()
+                _merge_polish_practical(merged, new_pr)
                 a["practical_details"] = merged
         except Exception as e:
             logger.debug("polish_practical_llm failed: %s", e)
+
+    # parking만 아직 규칙 미달이면 parking 전용 재폴리시(최대 1회)
+    repair = [
+        {
+            "name": a.get("name"),
+            "category": a.get("category"),
+            "parking_before": str((a.get("practical_details") or {}).get("parking") or "")[:800],
+            "google_maps_url": a.get("google_maps_url") or "",
+            "official_website": a.get("official_website") or "",
+        }
+        for a in out
+        if isinstance(a, dict)
+        and not parking_meets_nearest_city_pop3000_and_drive_minutes(
+            str((a.get("practical_details") or {}).get("parking") or "")
+        )
+    ]
+    if repair:
+        fix_prompt = f"""목적지: {destination}
+여행 기간: {start_date} ~ {end_date}
+
+아래 명소들만 처리한다. 각 항목의 `parking` 필드만 채운다 (다른 키는 출력하지 않음).
+
+**필수 내용 (한국어, 한 필드에 연결해서 서술)**:
+1) 이 명소 주변에서 **가장 가까운 인구 3,000명 이상**인 도시(또는 읍·면)의 **실제 지명**과 **인구**(숫자+명).
+2) 그 도시 **도심·대표 접점**에서 이 명소 **입구 또는 주차장·트레일 헤드**까지 **승용차로 약 몇 분**(숫자+분 필수).
+3) 주차·톨 요금이 있으면 € 등으로 덧붙임.
+
+금지: 메타·지시 문구. 확인 불가 시 "관련 정보 없음"을 해당 항목에만 쓰고 나머지는 추정 가능한 범위에서 숫자를 적는다.
+
+입력:
+{json.dumps(repair, ensure_ascii=False)}
+
+출력 JSON만: {{ "items": [ {{ "name": "...", "parking": "..." }} ] }}"""
+
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": fix_prompt}],
+            )
+            text = resp.choices[0].message.content or ""
+            parsed = _extract_json_object(text)
+            items = (parsed or {}).get("items") or []
+            by_name = {str(it.get("name") or "").strip(): it for it in items if isinstance(it, dict)}
+            for a in out:
+                if not isinstance(a, dict):
+                    continue
+                nm = str(a.get("name") or "").strip()
+                it = by_name.get(nm)
+                if not it:
+                    continue
+                pk_new = str(it.get("parking") or "").strip()
+                if not pk_new:
+                    continue
+                merged = dict(a.get("practical_details") or {})
+                merged["parking"] = pk_new
+                a["practical_details"] = merged
+        except Exception as e:
+            logger.debug("parking repair polish failed: %s", e)
 
     return out
 
