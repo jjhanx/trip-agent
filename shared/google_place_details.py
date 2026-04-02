@@ -61,6 +61,7 @@ _PLACEHOLDER_MARKERS = (
     "현지 표지·공식 안내를",
     "지도·현지 표지를",
     "공식 웹에서 요금을",
+    "내비 검색어",
 )
 
 
@@ -96,6 +97,18 @@ def parking_meets_nearest_city_pop3000_and_drive_minutes(text: str) -> bool:
             continue
         if num >= 3000:
             return True
+    return False
+
+
+def parking_requires_llm_hub_distance(text: str) -> bool:
+    """거점 도시(인구 3천+)·승용차 ○분이 없거나, 내비 검색어만 있는 스텁이면 LLM 보강 필요."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if "내비 검색어" in t or "내비검색어" in t.replace(" ", ""):
+        return True
+    if not parking_meets_nearest_city_pop3000_and_drive_minutes(t):
+        return True
     return False
 
 
@@ -172,7 +185,6 @@ def build_practical_from_details(
     website = (details.get("website") or "").strip()
     maps_url = (details.get("url") or "").strip()
     phone = (details.get("formatted_phone_number") or details.get("international_phone_number") or "").strip()
-    types = list(details.get("types") or [])
     rating = details.get("rating")
     ur = int(details.get("user_ratings_total") or 0)
     oh = details.get("opening_hours") or {}
@@ -192,16 +204,9 @@ def build_practical_from_details(
                 if len(t) > 25:
                     review_bits.append(t[:140])
 
-    type_set = set(types)
-    is_nature = bool(type_set.intersection({"natural_feature", "park", "campground"}))
-
-    # 등록 주소는 reservation_note에 한 번만 둔다. parking은 거점·분·€를 LLM 보강이 채움 — Places는 검색어·참고만.
-    parking_lines = [f"내비 검색어: 「{name}」"]
-    if is_nature:
-        parking_lines.append("자연·공원 구간은 주차장에서 트레일까지 도보·셔틀이 이어지는 경우가 많습니다.")
-    if website:
-        parking_lines.append(f"공식 URL: {website}")
-    parking = " ".join(parking_lines)
+    # Places는 거점·주행분을 주지 않음. parking은 비워 두어 반드시 LLM 보강(인구 3천+ 거점 + 승용차 ○분)이 채우게 함.
+    # (내비 검색어만 넣으면 사용자가 일정·숙소 판단 근거를 얻지 못함.)
+    parking = ""
 
     # 케이블·리프트는 확인된 경우에만 표시(프론트는 빈 칸이면 항목 자체를 숨김).
     cable = ""
@@ -320,7 +325,7 @@ def _needs_practical_polish(pr: dict[str, Any]) -> bool:
     walk = str(pr.get("walking_hiking") or "")
     fees = str(pr.get("fees_other") or "")
     resv = str(pr.get("reservation_note") or "")
-    if not parking_meets_nearest_city_pop3000_and_drive_minutes(pk):
+    if parking_requires_llm_hub_distance(pk):
         return True
     if len(pk.strip()) < 80 or len(walk.strip()) < 400:
         return True
@@ -380,6 +385,8 @@ async def polish_practical_details_with_llm(
                 if nv:
                     if parking_meets_nearest_city_pop3000_and_drive_minutes(nv):
                         merged[k] = nv
+                    elif "내비 검색어" in old:
+                        merged[k] = nv
                     elif not parking_meets_nearest_city_pop3000_and_drive_minutes(old):
                         merged[k] = nv
                     elif _field_needs_replace(old) or len(old) < 40:
@@ -397,9 +404,11 @@ async def polish_practical_details_with_llm(
 목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
+**[parking 목적]** 사용자는 **전체 일정·숙소 위치**를 정할 때 **어느 거점 도시를 기준으로 몇 분 거리인지**를 봅니다. **내비에 무엇을 검색할지**만 적는 것은 **실패 응답**이며 금지입니다.
+
 아래 JSON 배열의 각 명소에 대해 `practical_details` 6키를 **판단에 도움이 되게** 채운다.
 
-- parking (**주차·도로 접근**, **모든 명소 필수**): **등록 주소·길찾기 주소는 쓰지 말 것**(다른 칸에 한 번만). **첫 문장부터** ① 명소 주변 **가장 가까운 인구 3,000명 이상** 거점(도시·읍·면) **이름** + **인구(명)**. ② 그 **거점 도심·대표 접점**에서 **명소 입구·주차장·트레일 헤드**까지 **승용차 약 ○분**(숫자+분). ③ 주차·톨 €.
+- parking (**주차·도로**, **모든 명소 필수**): **등록 주소·길찾기 주소 금지**(다른 칸에만). **반드시** ① 명소에서 **가장 가까운 인구 3,000명 이상** 거점(도시·읍·면) **실제 지명** + **인구(명)**. ② 그 거점 **도심·대표 접점**에서 **명소 입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분). ③ 주차·톨 €. (지명·인구·분이 없으면 안 됨.)
 - cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
 - walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **약 1000자 전후**로 요약한다. 기존 설명이 길면 **핵심을 빼앗기지 말고** 정리할 것(지나치게 짧게 줄이지 말 것).
 - fees_other: **입장료**·환경세·톨·보트 등 **반드시** 수치·통화로 적는다. 미확인 시 "관련 정보 없음".
@@ -453,7 +462,7 @@ async def polish_practical_details_with_llm(
         }
         for a in out
         if isinstance(a, dict)
-        and not parking_meets_nearest_city_pop3000_and_drive_minutes(
+        and parking_requires_llm_hub_distance(
             str((a.get("practical_details") or {}).get("parking") or "")
         )
     ]
@@ -463,12 +472,14 @@ async def polish_practical_details_with_llm(
 
 아래 명소들만 처리한다. 각 항목의 `parking` 필드만 채운다 (다른 키는 출력하지 않음).
 
-**필수 내용 (한국어, 한 필드만)** — **등록 주소·중복 주소 금지**:
-1) **가장 가까운 인구 3,000명 이상** 거점의 **지명**과 **인구(명)**.
-2) 그 거점 **도심**에서 이 명소 **입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분).
-3) 주차·톨 €가 있으면 덧붙임.
+**용도**: 일정·숙소 배치를 위한 **거점 도시 + 승용차 소요 분**이 핵심이다. 내비 검색어만 쓰지 말 것.
 
-금지: 메타·지시 문구, "확인하십시오", "확인하세요", "…을 확인하" 류. 불가 시 "관련 정보 없음"만 쓰고, 가능하면 추정·지식으로 숫자·지명을 적는다.
+**필수 (한국어, 한 필드)** — **등록 주소 금지**:
+1) **가장 가까운 인구 3,000명 이상** 거점 **지명** + **인구(명)**.
+2) 그 거점 **도심**에서 명소 **입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분).
+3) 주차·톨 €.
+
+금지: "내비 검색어", 메타·지시 문구, "확인하십시오". 불가 시 해당 항목만 "관련 정보 없음" 가능하나, 가능하면 지명·분·€를 추정해 적는다.
 
 입력:
 {json.dumps(repair, ensure_ascii=False)}
