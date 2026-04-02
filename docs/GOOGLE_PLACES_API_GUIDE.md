@@ -25,7 +25,10 @@ Google Maps Platform을 사용하려면 결제 수단을 등록해야 합니다.
 1. 좌측 메뉴의 **[API 및 서비스]** > **[사용자 인증 정보]**로 이동합니다.
 2. 상단 **[+ 사용자 인증 정보 만들기]** > **[API 키]**를 클릭하여 키를 생성합니다.
 3. **(중요)** 생성된 키를 클릭하여 엽니다.
-4. 하단 **API 제한사항**에서 **키 제한**을 선택하고 `Places API`만 선택하여 저장합니다. (불필요한 과금 방지)
+4. 하단 **API 제한사항**에서 **키 제한**을 선택할 때, 아래를 함께 허용합니다(일정 `parking`의 **거점→명소 주행 분**에 **Directions API**·**Geocoding API**가 필요합니다).
+   - `Places API` (또는 Places API (New))
+   - `Directions API`
+   - `Geocoding API`
 
 ## 5. `.env` 파일에 적용
 
@@ -36,4 +39,8 @@ Google Maps Platform을 사용하려면 결제 수단을 등록해야 합니다.
 GOOGLE_PLACES_API_KEY=AIzaSy_여기에_복사한_키를_붙여넣으세요
 ```
 
-이제 서버를 재시작하면, Itinerary Agent가 명소를 추천할 때 이 API를 이용해 가장 정확하고 아름다운 구글맵스 사진을 가져오게 됩니다!
+이제 서버를 재시작하면, Itinerary Agent가 명소를 추천할 때 이 API를 이용해 고화질 사진·Place Details·좌표를 가져오고, **Directions·Geocoding**이 켜져 있으면 명소 카드 `parking`의 **승용차 ○분**을 지도 도로 기준으로 채웁니다.
+
+## 6. Directions API / Geocoding API (선택이 아님 — 주행 분 자동 입력용)
+
+라이브러리에서 **Directions API**, **Geocoding API**를 각각 검색한 뒤 **[사용]**으로 활성화합니다. 키 제한을 쓰는 경우 위 API들이 허용 목록에 포함되어야 합니다. 과금은 [Maps Platform 가격](https://developers.google.com/maps/billing-and-pricing/pricing)을 참고하세요(무료 크레딧 범위 내 활용 가능).

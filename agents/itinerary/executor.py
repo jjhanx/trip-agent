@@ -13,6 +13,7 @@ from a2a.server.events import EventQueue
 
 from agents.base_agent import BaseAgentExecutor
 from config import Settings
+from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
     enrich_attractions_with_place_details,
     polish_practical_details_with_llm,
@@ -1421,6 +1422,16 @@ async def postprocess_attraction_list_for_catalog(
             "OPENAI_API_KEY 없음: 거점·parking LLM 보강(polish_practical_details_with_llm)을 실행하지 않습니다. "
             "서버 .env에 설정 후 itinerary 컨테이너 재시작 필요."
         )
+
+    if (settings.google_places_api_key or "").strip():
+        try:
+            atts = await enrich_attractions_parking_directions(
+                atts,
+                destination,
+                settings.google_places_api_key,
+            )
+        except Exception as e:
+            logger.warning("enrich_attractions_parking_directions failed: %s", e)
 
     for a in atts:
         if isinstance(a, dict):

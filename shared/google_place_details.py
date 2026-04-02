@@ -220,7 +220,7 @@ async def fetch_place_details_raw(place_id: str, api_key: str) -> dict[str, Any]
     if not place_id or not api_key.strip():
         return None
     fields = (
-        "name,formatted_address,formatted_phone_number,international_phone_number,"
+        "name,geometry,formatted_address,formatted_phone_number,international_phone_number,"
         "website,url,opening_hours,rating,user_ratings_total,types,reviews,editorial_summary"
     )
     url = "https://maps.googleapis.com/maps/api/place/details/json?" + urlencode(
@@ -395,6 +395,11 @@ async def enrich_attractions_with_place_details(
             return idx, a
         item = dict(a)
         name = item.get("name") or raw.get("name") or "명소"
+        geom = raw.get("geometry") or {}
+        loc = geom.get("location") or {}
+        if isinstance(loc.get("lat"), (int, float)) and isinstance(loc.get("lng"), (int, float)):
+            item["attr_lat"] = float(loc["lat"])
+            item["attr_lng"] = float(loc["lng"])
         fresh_pr = build_practical_from_details(name, destination, raw)
         pr = _merge_practical(item.get("practical_details"), fresh_pr)
         item["practical_details"] = pr
