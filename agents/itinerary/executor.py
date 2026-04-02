@@ -1450,6 +1450,8 @@ async def postprocess_attraction_list_for_catalog(
                 start_date=start_date,
                 end_date=end_date,
                 serpapi_key=settings.serpapi_api_key or "",
+                google_api_key=settings.google_places_api_key or "",
+                google_cse_cx=settings.google_cse_cx or "",
             )
         except Exception as e:
             logger.warning(
@@ -1461,27 +1463,33 @@ async def postprocess_attraction_list_for_catalog(
             "OPENAI_API_KEY 없음: 거점·parking LLM 보강(polish_practical_details_with_llm)을 실행하지 않습니다. "
             "서버 .env에 설정 후 itinerary 컨테이너 재시작 필요."
         )
-        if (settings.serpapi_api_key or "").strip():
+        if (settings.serpapi_api_key or "").strip() or (
+            (settings.google_cse_cx or "").strip() and (settings.google_places_api_key or "").strip()
+        ):
             try:
-                from shared.fees_web_search import enrich_attractions_fee_search_snippets
+                from shared.fees_web_search import enrich_attractions_google_search_snippets
 
-                await enrich_attractions_fee_search_snippets(
-                    atts, settings.serpapi_api_key, destination
+                await enrich_attractions_google_search_snippets(
+                    atts,
+                    destination,
+                    google_api_key=settings.google_places_api_key or "",
+                    google_cse_cx=settings.google_cse_cx or "",
+                    serpapi_key=settings.serpapi_api_key or "",
                 )
                 for a in atts:
                     if not isinstance(a, dict):
                         continue
-                    snip = a.pop("_fee_search_snippets", None)
+                    snip = a.pop("_google_web_search_snippets", None)
                     if not isinstance(a.get("practical_details"), dict) or not snip:
                         continue
                     pr = a["practical_details"]
                     head = (
-                        "Google 검색 스니펫(명소명+입장료 / 명소명+주차비)입니다. "
+                        "아래는 Google 웹 검색(명소명+입장료 / 명소명+주차비) 스니펫이다. "
                         "수치는 시즌·정책에 따라 달라질 수 있음.\n\n"
                     )
                     pr["fees_other"] = (head + str(snip))[:4000]
             except Exception as e:
-                logger.warning("fee search (SerpApi, no LLM) failed: %s", e)
+                logger.warning("Google web search snippets (no LLM) failed: %s", e)
 
     for a in atts:
         if isinstance(a, dict):

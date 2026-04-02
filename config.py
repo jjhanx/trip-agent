@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     serpapi_api_key: str = ""
     # 일정 명소 이미지: 위키·커먼스 등 무료 API 한계 시 Google Places API 사용 (월 $200 무료 제공)
     google_places_api_key: str = ""
+    # Google Programmable Search (Custom Search JSON API) — 입장·주차 웹 검색 스니펫용 cx. 콘솔에서 Custom Search API 사용 설정
+    google_cse_cx: str = ""
     # 일정 명소 이미지: 위키·커먼스 실패 후 SerpApi Google 이미지 검색 사용(선택, API 한도·저작권 유의)
     place_images_use_serpapi: bool = False
     # Flight API - Amadeus (SerpApi 한도 초과 시 fallback)

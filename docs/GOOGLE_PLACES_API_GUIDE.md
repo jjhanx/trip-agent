@@ -45,6 +45,13 @@ GOOGLE_PLACES_API_KEY=AIzaSy_여기에_복사한_키를_붙여넣으세요
 
 라이브러리에서 **Directions API**, **Geocoding API**를 각각 검색한 뒤 **[사용]**으로 활성화합니다. 키 제한을 쓰는 경우 위 API들이 허용 목록에 포함되어야 합니다. 과금은 [Maps Platform 가격](https://developers.google.com/maps/billing-and-pricing/pricing)을 참고하세요(무료 크레딧 범위 내 활용 가능).
 
-## 7. 입장료·주차비 (Places가 아닌 SerpApi)
+## 7. 입장료·주차비 (Google 웹 검색 스니펫 — Places API 아님)
 
-Place Details에는 **공식 입장료·주차 금액 필드가 없는 경우가 많습니다.** 별도로 `.env`의 **`SERPAPI_API_KEY`**([SerpApi](https://serpapi.com))가 있으면, 서버가 명소마다 Google 검색 **`{이름} 입장료`**, **`{이름} 주차비`**(이름이 짧으면 목적지 포함) 스니펫을 모아 LLM이 카드의 **입장료·톨·기타** 문단을 채웁니다. 명소당 검색이 2회 들어가므로 SerpApi 무료 한도를 참고하세요.
+Place Details에는 **입장·주차 금액 필드가 없는 경우가 많습니다.** Trip Agent는 입장료를 **Places가 아니라 Google 웹 검색 결과**(검색어: `{이름} 입장료`, `{이름} 주차비`, 이름이 짧으면 목적지 포함)에서 나온 **스니펫**을 모아 LLM이 **입장료·톨·기타** 문단을 씁니다.
+
+**연동 우선순위**
+
+1. **`GOOGLE_CSE_CX`** + **`GOOGLE_PLACES_API_KEY`**(또는 Custom Search용 키): [Google Programmable Search](https://programmablesearchengine.google.com/)에서 검색 엔진을 만들고 `cx`를 복사합니다. Google Cloud에서 **Custom Search API**를 사용(Enabled)으로 켭니다. 무료 일일 쿼터(약 100회)가 있으니 명소 수에 맞게 참고하세요.
+2. **`SERPAPI_API_KEY`**만 있는 경우: [SerpApi](https://serpapi.com)의 **`engine=google`**으로 동일하게 Google 검색 결과 페이지를 JSON으로 받습니다(항공·렌트와 동일 키 가능). 명소당 검색 2회가 들어가므로 SerpApi 무료 한도도 참고하세요.
+
+둘 다 **본질적으로 google.com 검색 질의**에 대한 요약·스니펫을 가져오는 방식입니다.
