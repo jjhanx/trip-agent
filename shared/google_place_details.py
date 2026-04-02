@@ -303,6 +303,25 @@ async def fetch_place_details_raw(place_id: str, api_key: str) -> dict[str, Any]
     return data.get("result") or None
 
 
+def _compact_weekday_hours(weekday_text: list[str] | None) -> str:
+    """요일별 문구가 모두 같으면 한 줄로(24시간×7 중복 제거). 다르면 전체 나열."""
+    if not weekday_text or not isinstance(weekday_text, list):
+        return ""
+    lines = [str(x).strip() for x in weekday_text if str(x).strip()]
+    if not lines:
+        return ""
+    suffixes: list[str] = []
+    for line in lines:
+        sep = ":" if ":" in line else ("：" if "：" in line else None)
+        if sep:
+            suffixes.append(line.split(sep, 1)[1].strip())
+        else:
+            suffixes.append(line)
+    if len(lines) >= 2 and len(set(suffixes)) == 1:
+        return f"매일 동일: {suffixes[0]} (Places)"
+    return " | ".join(lines)
+
+
 def _editorial_overview(details: dict[str, Any]) -> str:
     es = details.get("editorial_summary")
     if isinstance(es, dict):
@@ -354,9 +373,7 @@ def build_practical_from_details(
     weekday_text = oh.get("weekday_text") if isinstance(oh, dict) else None
     hours_line = ""
     if isinstance(weekday_text, list) and weekday_text:
-        hours_line = " | ".join(weekday_text[:4])
-        if len(weekday_text) > 4:
-            hours_line += " …"
+        hours_line = _compact_weekday_hours(weekday_text)
 
     reviews = details.get("reviews") or []
     review_bits: list[str] = []
@@ -386,11 +403,15 @@ def build_practical_from_details(
         )
     walking = " ".join(walking_parts)
 
-    fees = "Places 응답에 입장료·톨·환경세 금액 필드는 없음."
+    fees = (
+        "Places API에는 공식 입장료·톨·환경세 금액 필드가 없을 수 있습니다. "
+        "도보·하이킹 발췌에 나온 입장·주차 €는 방문자 리뷰 기준 참고용이며, "
+        "공식 요금은 해당 웹사이트·현지 표지를 우선합니다."
+    )
     if website:
-        fees += f" 공식 요금 페이지 URL: {website}"
+        fees += f" 공식 사이트: {website}"
     else:
-        fees += " 공식 웹 URL 미등록(Places)."
+        fees += " 공식 웹 URL은 Places에 없을 수 있음."
 
     res_parts = []
     if addr:
@@ -399,16 +420,13 @@ def build_practical_from_details(
         res_parts.append(f"개방·운영 시간(Places): {hours_line}")
     if website:
         res_parts.append(f"웹사이트: {website}")
-    if maps_url:
-        res_parts.append(f"Google Maps: {maps_url}")
+    # 카드 상단에 google_maps_url 링크가 있으므로 여기서 Maps URL 문구는 중복 방지
     if phone:
         res_parts.append(f"전화: {phone}")
     reservation_note = " | ".join(res_parts) if res_parts else "관련 정보 없음 (Places에 연락·시간 미표시)."
 
-    tips_parts = []
-    if rating is not None:
-        tips_parts.append(f"Google Maps 평점 {rating}★ · 리뷰 약 {ur}건.")
-    tips = " ".join(tips_parts) if tips_parts else "관련 정보 없음 (평점 미표시)."
+    # 평점·리뷰 수는 description 한 곳만 — 준비·팁에 반복하지 않음(LLM이 준비물 등으로 채움)
+    tips = ""
 
     return {
         "parking": parking,
@@ -578,9 +596,9 @@ async def polish_practical_details_with_llm(
 - parking (**주차·도로**, **모든 명소 필수**): **등록 주소·길찾기 주소 금지**(다른 칸에만). **반드시** ① 명소에서 **가장 가까운 인구 3,000명 이상** 거점(도시·읍·면) **실제 지명** + **인구(명)**. ② 그 거점 **도심·대표 접점**에서 **명소 입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분). ③ 주차·톨 €. (지명·인구·분이 없으면 안 됨.)
 - cable_car_lift: **케이블카·곤돌라·리프트가 실제로 있을 때만** 노선명·대략 요금(€)을 적는다. **없으면 빈 문자열 ""** (항목 미표시). "해당 없음" 문구 금지.
 - walking_hiking: 대표 루트·분기·왕복 시간·난이도(쉬움/중간/어려움)·주차/셔틀 지점~트레일 헤드·철제 구간 등을 **총 1000자 이내**로 쓴다. 입력에 **방문자 리뷰 발췌**가 있으면 **원문을 잘라 붙이지 말고** 내용을 바탕으로 **한국어로 요약·정리**해 통합한다(어절·문장 중간에서 끊지 않는다). 루트·시간·난이도 정보 밀도를 유지한다.
-- fees_other: **입장료**·환경세·톨·보트 등 **반드시** 수치·통화로 적는다. 미확인 시 "관련 정보 없음".
-- reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크.
-- tips: 최적 시간대·준비물·혼잡
+- fees_other: **입장료**·환경세·톨·보트. Places API에 공식 금액이 없어도, **도보·하이킹 발췌에 나온 입장·주차 €가 있으면 그 수치를 반영**하고 `리뷰 발췌 기준`임을 짧게 명시. 발췌와 **모순되게** `Places에 없음`만 단독으로 쓰지 말 것. 미확인 시 "관련 정보 없음".
+- reservation_note: **개방·운영 시간**(요일별 가능 시), **예약 필수 여부**, 예약 경로·전화·링크. **Google Maps URL은 쓰지 말 것**(카드에 지도 링크가 따로 있음).
+- tips: **상단 소개(description)에 이미 평점·리뷰 수가 있으면 반복하지 말 것.** 준비물·최적 시간대·혼잡·날씨만. 비어 있어도 됨.
 
 금지: "확인하세요", "확인하십시오", "권장합니다", "현지 예약 사이트 참고", "달라질 수 있습니다", "…을 확인하" 등 **사용자에게 가서 확인하라는** 표현. 반드시 **조사한 결과**(€·분·도시명·시간)를 문장으로 적는다.
 **절대 금지**: 프롬프트에 나온 지시문을 그대로 출력(예: "…명시한다", "…채운다", "…원칙입니다", "…정리합니다"). 실제 **도시명·인구·€·분·주차 요금**만 적는다.

@@ -119,6 +119,41 @@ _META_INSTRUCTION_SUBSTRINGS = (
 )
 
 
+def _prune_rating_only_tips(pr: dict[str, str]) -> None:
+    """준비·팁에 평점·리뷰 수만 반복된 경우 제거(상단 소개와 중복)."""
+    t = (pr.get("tips") or "").strip()
+    if not t or len(t) > 180:
+        return
+    if re.search(r"Google\s*Maps\s*(기준\s*)?평점", t, re.I) and re.search(
+        r"리뷰\s*약\s*\d+", t
+    ):
+        if not re.search(
+            r"준비|물|재킷|등산|주차|인파|혼잡|시간|아침|저녁|날씨|계절|일출|일몰|산장|트레일",
+            t,
+        ):
+            pr["tips"] = ""
+
+
+def _strip_duplicate_maps_line_from_reservation(pr: dict[str, str]) -> None:
+    """예약·운영 칸에 카드 상단과 동일한 Google Maps URL 줄 제거."""
+    r = (pr.get("reservation_note") or "").strip()
+    if not r or "Google Maps" not in r:
+        return
+    chunks = [p.strip() for p in r.split("|")]
+    filtered = [
+        c
+        for c in chunks
+        if c and not re.match(r"^Google\s*Maps\s*:\s*https?://", c.strip(), re.I)
+    ]
+    if len(filtered) < len(chunks):
+        if filtered:
+            pr["reservation_note"] = " | ".join(filtered)
+        elif chunks and all(
+            re.match(r"^Google\s*Maps\s*:\s*https?://", c.strip(), re.I) for c in chunks
+        ):
+            pr["reservation_note"] = "지도 링크는 카드 상단을 참고."
+
+
 def _sanitize_meta_instruction_practical(pr: dict[str, str]) -> None:
     """LLM이 프롬프트 지시문을 그대로 붙여넣은 경우 비워 후속 보강·재시도 유도."""
     for k in PRACTICAL_DETAIL_KEYS:
@@ -132,6 +167,8 @@ def _sanitize_meta_instruction_practical(pr: dict[str, str]) -> None:
             pr[k] = ""
         if k == "reservation_note" and "개방·운영 시간" in v and "명시" in v:
             pr[k] = ""
+    _prune_rating_only_tips(pr)
+    _strip_duplicate_maps_line_from_reservation(pr)
 
 
 def _dedupe_attractions_by_canonical_name(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1672,7 +1709,7 @@ JSON 객체 하나만 출력:
     - walking_hiking: 대표 루프·왕복 예상 시간·난이도·주차~트레일 헤드·철제 구간 등, **총 1000자 이내** 요약(과도한 축약 금지).
     - fees_other: **입장료**·톨·보트·환경세 등 — 금액·통화로 명확히 기재(미확인 시 "관련 정보 없음").
     - reservation_note: **개방·운영 시간**, **예약 필수 여부**, 예약 링크·전화·성수기 제한
-    - tips: 준비물·최적 시간대(날씨·혼잡 회피)
+    - tips: 준비물·최적 시간대(날씨·혼잡 회피). **평점·리뷰 수는 description에 넣지 말 것**(중복). 비어 있어도 됨.
 """
                         max_retries = 2
                         for attempt in range(max_retries):
