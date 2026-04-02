@@ -434,12 +434,21 @@ async def polish_practical_details_with_llm(
             text = resp.choices[0].message.content or ""
             parsed = _extract_json_object(text)
             items = (parsed or {}).get("items") or []
-            by_name = {str(it.get("name") or "").strip(): it for it in items if isinstance(it, dict)}
-            for j, a in enumerate(out):
+            items_list = [it for it in items if isinstance(it, dict)]
+            by_name = {str(it.get("name") or "").strip(): it for it in items_list}
+            chunk_len = len(chunk)
+            for j in range(chunk_len):
+                idx = i + j
+                if idx >= len(out):
+                    break
+                a = out[idx]
                 if not isinstance(a, dict):
                     continue
-                nm = str(a.get("name") or "").strip()
-                upd = by_name.get(nm)
+                upd = None
+                if j < len(items_list):
+                    upd = items_list[j]
+                if upd is None:
+                    upd = by_name.get(str(a.get("name") or "").strip())
                 if not upd:
                     continue
                 new_pr = upd.get("practical_details")
@@ -451,40 +460,44 @@ async def polish_practical_details_with_llm(
         except Exception as e:
             logger.debug("polish_practical_llm failed: %s", e)
 
-    # parking만 아직 규칙 미달이면 parking 전용 재폴리시(최대 1회)
-    repair = [
-        {
-            "name": a.get("name"),
-            "category": a.get("category"),
-            "parking_before": str((a.get("practical_details") or {}).get("parking") or "")[:800],
-            "google_maps_url": a.get("google_maps_url") or "",
-            "official_website": a.get("official_website") or "",
-        }
-        for a in out
-        if isinstance(a, dict)
-        and parking_requires_llm_hub_distance(
+    # parking만 아직 규칙 미달이면 parking 전용 재폴리시 (idx로 병합 — 이름 불일치 방지)
+    repair = []
+    for ri, a in enumerate(out):
+        if not isinstance(a, dict):
+            continue
+        if parking_requires_llm_hub_distance(
             str((a.get("practical_details") or {}).get("parking") or "")
-        )
-    ]
+        ):
+            repair.append(
+                {
+                    "idx": ri,
+                    "name": a.get("name"),
+                    "category": a.get("category"),
+                    "parking_before": str((a.get("practical_details") or {}).get("parking") or "")[:800],
+                    "google_maps_url": a.get("google_maps_url") or "",
+                    "official_website": a.get("official_website") or "",
+                }
+            )
     if repair:
         fix_prompt = f"""목적지: {destination}
 여행 기간: {start_date} ~ {end_date}
 
-아래 명소들만 처리한다. 각 항목의 `parking` 필드만 채운다 (다른 키는 출력하지 않음).
+아래 명소들만 처리한다. 각 항목의 `parking` 필드만 채운다.
 
 **용도**: 일정·숙소 배치를 위한 **거점 도시 + 승용차 소요 분**이 핵심이다. 내비 검색어만 쓰지 말 것.
 
-**필수 (한국어, 한 필드)** — **등록 주소 금지**:
+**필수 (한국어)** — **등록 주소 금지**:
 1) **가장 가까운 인구 3,000명 이상** 거점 **지명** + **인구(명)**.
 2) 그 거점 **도심**에서 명소 **입구·주차·트레일 헤드**까지 **승용차 약 ○분**(숫자+분).
 3) 주차·톨 €.
 
-금지: "내비 검색어", 메타·지시 문구, "확인하십시오". 불가 시 해당 항목만 "관련 정보 없음" 가능하나, 가능하면 지명·분·€를 추정해 적는다.
+금지: "내비 검색어", 메타·지시 문구, "확인하십시오".
 
-입력:
+입력 (idx 순서 유지):
 {json.dumps(repair, ensure_ascii=False)}
 
-출력 JSON만: {{ "items": [ {{ "name": "...", "parking": "..." }} ] }}"""
+출력 JSON만. **반드시** 입력과 **같은 개수**의 items, 각 항목에 **idx** 포함:
+{{ "items": [ {{ "idx": 0, "parking": "..." }}, ... ] }}"""
 
         try:
             resp = await client.chat.completions.create(
@@ -492,24 +505,88 @@ async def polish_practical_details_with_llm(
                 messages=[{"role": "user", "content": fix_prompt}],
             )
             text = resp.choices[0].message.content or ""
-            parsed = _extract_json_object(text)
-            items = (parsed or {}).get("items") or []
-            by_name = {str(it.get("name") or "").strip(): it for it in items if isinstance(it, dict)}
-            for a in out:
-                if not isinstance(a, dict):
+            parsed_re = _extract_json_object(text)
+            items_re = (parsed_re or {}).get("items") or []
+            for it in items_re:
+                if not isinstance(it, dict):
                     continue
-                nm = str(a.get("name") or "").strip()
-                it = by_name.get(nm)
-                if not it:
+                try:
+                    idx = int(it.get("idx", -1))
+                except (TypeError, ValueError):
+                    continue
+                if idx < 0 or idx >= len(out):
                     continue
                 pk_new = str(it.get("parking") or "").strip()
                 if not pk_new:
+                    continue
+                a = out[idx]
+                if not isinstance(a, dict):
                     continue
                 merged = dict(a.get("practical_details") or {})
                 merged["parking"] = pk_new
                 a["practical_details"] = merged
         except Exception as e:
             logger.debug("parking repair polish failed: %s", e)
+
+    # idx 기반 거점·주행 **최종** 패스: 여전히 비어 있거나 규칙 미달이면 전체 명소를 한 번 더 (이름 매칭 없음)
+    still_bad = [
+        ei
+        for ei, a in enumerate(out)
+        if isinstance(a, dict)
+        and parking_requires_llm_hub_distance(
+            str((a.get("practical_details") or {}).get("parking") or "")
+        )
+    ]
+    if still_bad:
+        hub_batch = []
+        for ei in still_bad:
+            a = out[ei]
+            hub_batch.append(
+                {
+                    "idx": ei,
+                    "name": a.get("name") or "",
+                    "reservation_excerpt": str((a.get("practical_details") or {}).get("reservation_note") or "")[:400],
+                }
+            )
+        hub_prompt = f"""목적지: {destination}
+여행 기간: {start_date} ~ {end_date}
+
+아래 명소 각각에 대해 **parking 한 필드만** 작성한다. 일정·숙소 거리 판단에 쓸 **가장 가까운 인구 3천 이상 거점 도시명·인구·그 도심에서 명소 입구까지 승용차 약 ○분·주차·톨 €**를 한 문단으로.
+
+금지: 내비 검색어만, 등록 주소 복사, 확인하십시오.
+
+입력:
+{json.dumps(hub_batch, ensure_ascii=False)}
+
+출력 JSON만: {{ "items": [ {{ "idx": 숫자, "parking": "한국어 한 문단" }} ] }} — 입력과 **동일 개수**."""
+
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": hub_prompt}],
+            )
+            text = resp.choices[0].message.content or ""
+            parsed_h = _extract_json_object(text)
+            for it in (parsed_h or {}).get("items") or []:
+                if not isinstance(it, dict):
+                    continue
+                try:
+                    idx = int(it.get("idx", -1))
+                except (TypeError, ValueError):
+                    continue
+                if idx < 0 or idx >= len(out):
+                    continue
+                pk_new = str(it.get("parking") or "").strip()
+                if not pk_new:
+                    continue
+                a = out[idx]
+                if not isinstance(a, dict):
+                    continue
+                merged = dict(a.get("practical_details") or {})
+                merged["parking"] = pk_new
+                a["practical_details"] = merged
+        except Exception as e:
+            logger.debug("parking hub finalize failed: %s", e)
 
     return out
 
