@@ -7,12 +7,12 @@
 
 ## 이 앱에서 쓰는 방식 (실제 장소 위주)
 
-1. **Google Places API**: `.env`에 `GOOGLE_PLACES_API_KEY`가 설정되어 있으면 가장 최우선적으로 구글 맵스의 고화질 장소 사진(Text Search -> Photo)을 가져옵니다. 매월 제공되는 $200 무료 크레딧 한도 내에서 넉넉하게 사용 가능합니다. ([발급 가이드](GOOGLE_PLACES_API_GUIDE.md))
+1. **Google Places API**: `.env`에 `GOOGLE_PLACES_API_KEY`가 설정되어 있으면 **Text Search**로 후보를 고른 뒤, 응답에 `photos`가 없거나 카드에 URL이 비어 있으면 **Place Details**(`fields=photos`)로 첫 장의 `photo_reference`를 받아 같은 Photo API URL을 씁니다. 매월 제공되는 $200 무료 크레딧 한도 내에서 사용합니다. ([발급 가이드](GOOGLE_PLACES_API_GUIDE.md))
 2. **영문·이탈리아어 위키백과** API: 장소명으로 검색해 여러 후보 중 **문서 제목이 명소명과 충분히 겹치는 경우만** 대표 썸네일을 씁니다.
-3. **Wikimedia Commons** API: 파일 검색 후 **파일 제목이 명소와 관련되는 경우만** 스케일된 이미지 URL + 라이선스 메타(가능 시).
+3. **Wikimedia Commons** API: 파일 검색 후 **파일 제목이 명소와 관련되는 경우만** 스케일된 이미지 URL + 라이선스 메타(가능 시). 일부 지역명은 **키워드 고정 썸네일**(Commons URL)로 직접 보강합니다.
 4. **(선택)** `.env`에서 `PLACE_IMAGES_USE_SERPAPI=true` 이고 `SERPAPI_API_KEY`가 있으면 **SerpApi Google 이미지 검색**으로 보강합니다. **저작권은 원 게시자**에게 있으며, API 한도가 소모됩니다.
 5. 한 명소 목록 안에서는 **이미 쓴 이미지 URL은 다른 카드에 재사용하지 않습니다**(정규화한 키로 중복 제거).
-6. 위 과정에서 **확실한 매칭이 없으면** 잘못된 풍경 사진을 넣지 않기 위해 **`image_url`을 비우고**, `image_credit`에 안내 문구를 둡니다. **Unsplash 일반 풍경 폴백은 사용하지 않습니다.**
+6. 위 과정에서 **확실한 매칭이 없으면** 잘못된 풍경 사진을 넣지 않기 위해 **`image_url`을 비우고**, `image_credit`에 안내 문구를 둡니다. **Unsplash 일반 풍경 폴백은 사용하지 않습니다.** 일정 에이전트는 **`https` 대표 사진이 없는 후보를 목록에서 제외**할 수 있습니다.
 
 구현: `shared/place_images.py` (`enrich_attractions_images`).
 

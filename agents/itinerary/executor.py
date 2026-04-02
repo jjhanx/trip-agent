@@ -91,14 +91,103 @@ def _strip_cable_if_absent(pr: dict[str, str]) -> None:
 
 
 def _default_practical_block() -> dict[str, str]:
+    """빈 칸은 보강 단계에서 채움. 사용자에게 지시문처럼 보이는 문장은 넣지 않는다."""
     return {
-        "parking": "인구 약 3,000명 이상인 가장 가까운 도시(또는 읍·면 거점)명과, 그 도심·대표 접점에서 명소 입구(또는 주차장·트레일 헤드)까지 승용차로 몇 분인지·주차 요금(€)을 채운다.",
+        "parking": "",
         "cable_car_lift": "",
-        "walking_hiking": "대표 루트·왕복 시간·난이도·주차~트레일 헤드를 약 1000자 전후로 요약한다(핵심을 과도하게 삭제하지 말 것).",
-        "fees_other": "입장료·톨·보트 등 요금을 € 또는 현지 통화로 명시한다.",
-        "reservation_note": "개방·운영 시간, 예약 필수 여부, 예약 경로를 명시한다.",
-        "tips": "날씨·일몰 시각·혼잡도를 출발 전에 확인하세요.",
+        "walking_hiking": "",
+        "fees_other": "",
+        "reservation_note": "",
+        "tips": "",
     }
+
+
+_META_INSTRUCTION_SUBSTRINGS = (
+    "명시한다",
+    "채운다",
+    "요약한다",
+    "기재한다",
+    "€ 또는 현지 통화로 명시",
+    "예약 경로를 명시",
+)
+
+
+def _sanitize_meta_instruction_practical(pr: dict[str, str]) -> None:
+    """LLM이 프롬프트 지시문을 그대로 붙여넣은 경우 비워 후속 보강·재시도 유도."""
+    for k in PRACTICAL_DETAIL_KEYS:
+        v = (pr.get(k) or "").strip()
+        if not v:
+            continue
+        if any(s in v for s in _META_INSTRUCTION_SUBSTRINGS) and len(v) < 200:
+            pr[k] = ""
+            continue
+        if k == "fees_other" and v.startswith("입장료·톨·보트") and "명시" in v:
+            pr[k] = ""
+        if k == "reservation_note" and "개방·운영 시간" in v and "명시" in v:
+            pr[k] = ""
+
+
+def _dedupe_attractions_by_canonical_name(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """동일·유사 명소명 중복 제거(정규화 키 + 토큰 유사도, place_id·image가 있는 쪽 우선)."""
+    if not attractions:
+        return attractions
+
+    def score(x: dict[str, Any]) -> tuple[int, int]:
+        pid = 1 if (x.get("place_id") or "").strip() else 0
+        img = 1 if str(x.get("image_url") or "").strip().startswith("https://") else 0
+        return (pid + img, len(str(x.get("description") or "")))
+
+    merged: list[dict[str, Any]] = []
+    for a in attractions:
+        if not isinstance(a, dict):
+            continue
+        nm = (a.get("name") or "").strip()
+        key = _normalize_attraction_key(nm)
+        found = -1
+        for i, m in enumerate(merged):
+            mn = (m.get("name") or "").strip()
+            if key and key == _normalize_attraction_key(mn):
+                found = i
+                break
+            if nm and mn and _names_likely_same(nm, mn):
+                found = i
+                break
+        if found < 0:
+            merged.append(dict(a))
+            continue
+        cur = merged[found]
+        if score(a) > score(cur):
+            oid = cur.get("id")
+            new = dict(a)
+            if oid:
+                new["id"] = oid
+            merged[found] = new
+        elif len(nm) > len((cur.get("name") or "")):
+            merged[found]["name"] = nm
+    return merged
+
+
+def _renumber_attraction_ids(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for i, a in enumerate(attractions):
+        if not isinstance(a, dict):
+            continue
+        item = dict(a)
+        item["id"] = f"attr_{i + 1:03d}"
+        out.append(item)
+    return out
+
+
+def _filter_attractions_with_images_only(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """대표 사진(https)이 없으면 후보에서 제외(저작권 안전한 출처 확보 후만 노출)."""
+    out: list[dict[str, Any]] = []
+    for a in attractions:
+        if not isinstance(a, dict):
+            continue
+        u = str(a.get("image_url") or "").strip()
+        if u.startswith("https://"):
+            out.append(a)
+    return out
 
 
 def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> dict[str, Any]:
@@ -110,6 +199,7 @@ def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> 
     out.setdefault("image_url", "")
     out.setdefault("image_credit", "")
     pr = _merge_practical_details(out.get("practical_details"))
+    _sanitize_meta_instruction_practical(pr)
     defaults = _default_practical_block()
     for k in PRACTICAL_DETAIL_KEYS:
         if not pr[k]:
@@ -671,11 +761,11 @@ def _generic_spot(destination: str, i: int) -> dict[str, Any]:
         "image_url": "",
         "image_credit": "",
         "practical_details": {
-            "parking": "인구 3,000명 이상 최근접 거점명과, 그곳에서 명소 입구까지 차로 몇 분·주차 요금(€)을 수치로 채운다.",
+            "parking": "",
             "cable_car_lift": "",
-            "walking_hiking": "대표 루트·왕복 시간·난이도를 약 1000자 전후로 요약한다.",
-            "fees_other": "입장료·톨 등을 €로 명시한다.",
-            "reservation_note": "개방·운영 시간과 예약 필수 여부를 명시한다.",
+            "walking_hiking": "",
+            "fees_other": "",
+            "reservation_note": "",
             "tips": "물·방풍·막바람에 대비. 일몰 전 하산 및 혼잡도 회피 계획.",
         },
     }
@@ -836,7 +926,11 @@ def _is_northern_summer_month(m: int | None) -> bool:
 
 
 def _normalize_attraction_key(name: str) -> str:
-    s = (name or "").lower()
+    """괄호 별칭 제거 후 정규화 — 'Tre Cime … (Drei Zinnen)' vs 'Tre Cime …' 중복 병합용."""
+    s = name or ""
+    s = re.sub(r"\([^)]*\)", "", s)
+    s = re.sub(r"（[^）]*）", "", s)
+    s = s.lower()
     s = re.sub(r"[\s\(\)\[\]'\"`·\-_,./]+", "", s)
     return s
 
@@ -1383,6 +1477,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     merged_pre_llm = _merge_google_with_region_templates(
                         raw_google, destination, n_attr
                     )
+                    merged_pre_llm = _dedupe_attractions_by_canonical_name(merged_pre_llm)
                     out["attractions"] = merged_pre_llm
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(주변 검색·자연/공원/트레일 키워드)과 "
@@ -1426,6 +1521,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         prompt = f"""당신은 여행 일정 설계 전문가입니다. (Chunk {chunk_idx+1}/{len(all_chunks)})
 - 목적지 주변 실제 방문 가능한 구체적 명소만 나열한다.{route_hint}{req_names}
 - 각 명소는 사용자가 비용·시간·예약을 비교해 고를 수 있게 실무 정보를 반드시 채운다. **입장료·개방·운영 시간·주차 요금·예약 필요 여부**는 빠지면 안 된다(미확인 시 "관련 정보 없음").
+- **[절대 금지] 프롬프트 지시문 복사**: "…명시한다" "…채운다" "€ 또는 현지 통화로 명시" 같은 **메타 문구**를 응답에 넣지 말 것. **실제 도시명·€ 금액·분·시간**만 적는다.
 - **[이름] 위 명소 리스트가 있으면 `name`은 반드시 그 목록의 문자열을 **글자 단위로 그대로** 복사한다(번역·축약·치환 금지).
 - **[설명 description]**: "구글맵 평점 기반" 같은 메타 문구는 절대 쓰지 말 것. 각 장소마다 **지명·지형·대표 루트·다른 명소와의 관계·역사·감상 포인트**를 바탕으로 2~4문장으로 **직접 조사한 것처럼** 구체적으로 서술한다(일반적인 관광 소개문 금지).
 - **[중요] 계절(시즌) 제한**: 여행 기간({start_date} ~ {end_date})의 월(계절)을 고려하여, **여름에 스키 슬로프·스키 학교만을 위한 시설**처럼 계절에 맞지 않는 명소는 누락한다. 여름 케이블카·전망·하이킹 리프트는 유지한다.
@@ -1450,7 +1546,7 @@ JSON 객체 하나만 출력:
   - image_url: 비워둘 것
   - image_credit: 출처. 없으면 빈 문자열
   - practical_details: 객체(모두 한국어, 구체적 수치·절차):
-    - parking: **주차·도로 접근** — 명소 주변에서 **인구 약 3,000명 이상**인 가장 가까운 도시(또는 읍·면 거점)명을 밝히고, 그 **도심·대표 접점**에서 **명소 입구(또는 주차장·트레일 헤드)**까지 **승용차로 몇 분**인지 숫자로 명시. 주차장명·유료 여부·**주차 요금**(€/시간·일당) 필수.
+    - parking: **주차·도로 접근** — 반드시 **구체적 도시(또는 읍·면) 이름**을 쓴 뒤, 그곳이 **인구 약 3,000명 이상**임을 한 문장으로 밝히고, **그 도심·대표 접점 → 명소 입구(또는 주차장·트레일 헤드)**까지 **승용차로 몇 분**을 숫자로 적는다(예: "코르티나담페초(인구 약 5,800명) 시내 주차장 기준 약 45분"). 주차장명·유료 여부·**주차 요금**(€/시간·일당) 필수.
     - cable_car_lift: **케이블카·곤돌라·리프트가 있을 때만** 노선·대략 요금(€) 기재. **없으면 빈 문자열 ""** (키는 두되 내용 비움 — UI에서 항목 숨김). "해당 없음" 문구 금지.
     - walking_hiking: 대표 루프·왕복 예상 시간·난이도·주차~트레일 헤드·철제 구간 등, **약 1000자 전후** 요약(과도한 축약 금지).
     - fees_other: **입장료**·톨·보트·환경세 등 — 금액·통화로 명확히 기재(미확인 시 "관련 정보 없음").
@@ -1493,6 +1589,7 @@ JSON 객체 하나만 출력:
                                     merged_ats.append(_ensure_attraction_record(item, len(merged_ats), destination))
                                     
                     if valid_json and merged_ats:
+                        merged_ats = _dedupe_attractions_by_canonical_name(merged_ats)
                         filtered = _filter_llm_attractions_require_indoor_details(merged_ats)
                         if len(filtered) >= max(6, len(merged_ats) * 2 // 3):
                             merged_ats = filtered
@@ -1543,7 +1640,13 @@ JSON 객체 하나만 출력:
                     except Exception:
                         pass
 
-                out["attractions"] = await enrich_attractions_images(
+                for a in atts:
+                    if isinstance(a, dict):
+                        pr = _merge_practical_details(a.get("practical_details"))
+                        _sanitize_meta_instruction_practical(pr)
+                        a["practical_details"] = pr
+
+                ats_enriched = await enrich_attractions_images(
                     atts,
                     destination,
                     serpapi_key=self.settings.serpapi_api_key or "",
@@ -1551,6 +1654,16 @@ JSON 객체 하나만 출력:
                     google_places_api_key=self.settings.google_places_api_key or "",
                     location_bias=location_bias,
                 )
+                ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
+                with_img = _filter_attractions_with_images_only(ats_enriched)
+                if not with_img and ats_enriched:
+                    dn = (out.get("design_notes") or "").strip()
+                    out["design_notes"] = (
+                        dn
+                        + " [대표 사진(https)을 확보한 명소만 남겼는데 후보가 비었습니다. "
+                        "목적지 표기를 바꿔 다시 시도하거나 Places 키를 확인해 주세요.]"
+                    )
+                out["attractions"] = _renumber_attraction_ids(with_img)
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

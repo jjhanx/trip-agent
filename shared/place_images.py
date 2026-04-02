@@ -385,6 +385,103 @@ def _empty_result() -> dict[str, str]:
     }
 
 
+async def fetch_place_photo_from_place_details(
+    client: httpx.AsyncClient,
+    place_id: str,
+    api_key: str,
+    exclude_url_keys: set[str],
+    *,
+    maxwidth: int = 960,
+) -> dict[str, str] | None:
+    """Place Details의 photos 필드로 공식 사진 URL 생성(Text Search에 photos가 없을 때 보강)."""
+    if not place_id or not api_key.strip():
+        return None
+    url = "https://maps.googleapis.com/maps/api/place/details/json?" + urlencode(
+        {
+            "place_id": place_id,
+            "fields": "photos,name",
+            "key": api_key,
+            "language": "en",
+        }
+    )
+    try:
+        r = await client.get(url)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.debug("place details photos failed: %s", e)
+        return None
+    if data.get("status") not in ("OK",):
+        return None
+    result = data.get("result") or {}
+    photos = result.get("photos") or []
+    if not photos:
+        return None
+    pref = photos[0].get("photo_reference")
+    if not pref:
+        return None
+    place_name = (result.get("name") or "")[:80]
+    photo_url = (
+        f"https://maps.googleapis.com/maps/api/place/photo?"
+        f"maxwidth={maxwidth}&photoreference={pref}&key={api_key}"
+    )
+    k = normalize_url_key(photo_url)
+    if k in exclude_url_keys:
+        return None
+    return {
+        "image_url": photo_url,
+        "image_credit": f"Google Maps · {place_name}",
+        "image_source": "google_places_details",
+        "place_id": place_id,
+    }
+
+
+def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
+    """명소명 키워드로 알려진 Wikimedia Commons 썸네일(라이선스 명시)."""
+    n = (name or "").lower()
+    # (필요 키워드 튜플, url, credit)
+    rules: list[tuple[tuple[str, ...], str, str]] = [
+        (
+            ("val di funes", "funes"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg",
+            "Wikimedia Commons · Val di Funes",
+        ),
+        (
+            ("cadini", "misurina"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
+            "Wikimedia Commons · Cadini di Misurina",
+        ),
+        (
+            ("passo gardena",),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2b/Passo_Gardena.jpg/800px-Passo_Gardena.jpg",
+            "Wikimedia Commons · Passo Gardena",
+        ),
+        (
+            ("lago", "carezza"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
+            "Wikimedia Commons · Lago di Carezza",
+        ),
+        (
+            ("carezza", "karer"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
+            "Wikimedia Commons · Lago di Carezza",
+        ),
+        (
+            ("karersee",),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
+            "Wikimedia Commons · Karersee",
+        ),
+    ]
+    for keys, img_url, credit in rules:
+        if all(k in n for k in keys):
+            return {
+                "image_url": img_url,
+                "image_credit": credit,
+                "image_source": "wikimedia_commons_fallback",
+            }
+    return None
+
+
 async def resolve_place_image(
     name: str,
     destination: str,
@@ -468,55 +565,75 @@ async def enrich_attractions_images(
     google_places_api_key: str = "",
     location_bias: str | None = None,
 ) -> list[dict[str, Any]]:
-    """순차 처리로 이미지 URL 중복 제거. 부정확한 일반 풍경(Unsplash) 폴백 없음."""
+    """순차 처리로 이미지 URL 중복 제거. place_id만 있고 사진이 없으면 Details API로 보강, 이후 Commons 키워드 폴백."""
     if not attractions:
         return attractions
     used_keys: set[str] = set()
     out: list[dict[str, Any]] = []
+    headers = {"User-Agent": USER_AGENT}
 
-    for a in attractions:
-        item = dict(a)
-        name = item.get("name") or ""
-        try:
-            if item.get("place_id") and item.get("image_url"):
-                res = {
-                    "place_id": item.get("place_id"),
-                    "image_url": item.get("image_url"),
-                    "image_credit": item.get("image_credit", ""),
-                    "image_source": item.get("image_source", ""),
-                }
-            else:
-                res = await resolve_place_image(
-                    name,
-                    destination,
-                    exclude_url_keys=used_keys,
-                    serpapi_key=serpapi_key or "",
-                    use_serpapi=use_serpapi,
-                    google_places_api_key=google_places_api_key or "",
-                    location_bias=location_bias,
-                )
+    async with httpx.AsyncClient(timeout=22, headers=headers) as details_client:
+        for a in attractions:
+            item = dict(a)
+            name = item.get("name") or ""
+            try:
+                res: dict[str, str] | None = None
+                pid = (item.get("place_id") or "").strip()
+                existing = (item.get("image_url") or "").strip()
 
-            u = (res.get("image_url") or "").strip()
-            if u.startswith("https://"):
-                k = normalize_url_key(u)
-                if k and k not in used_keys:
-                    used_keys.add(k)
-                    item["image_url"] = u
-                    item["image_credit"] = res.get("image_credit", "")
-                    item["image_source"] = res.get("image_source", "")
+                if pid and existing.startswith("https://"):
+                    res = {
+                        "place_id": pid,
+                        "image_url": existing,
+                        "image_credit": item.get("image_credit", "") or "Google Maps",
+                        "image_source": item.get("image_source", "") or "catalog",
+                    }
+                elif pid and google_places_api_key and not existing.startswith("https://"):
+                    r = await fetch_place_photo_from_place_details(
+                        details_client, pid, google_places_api_key, used_keys
+                    )
+                    if r:
+                        res = r
+
+                if not res or not (res.get("image_url") or "").strip().startswith("https://"):
+                    res = await resolve_place_image(
+                        name,
+                        destination,
+                        exclude_url_keys=used_keys,
+                        serpapi_key=serpapi_key or "",
+                        use_serpapi=use_serpapi,
+                        google_places_api_key=google_places_api_key or "",
+                        location_bias=location_bias,
+                    )
+
+                if (not res.get("image_url") or not str(res.get("image_url")).strip().startswith("https://")):
+                    fb = _wikimedia_commons_fallback(name)
+                    if fb:
+                        res = fb
+
+                u = (res.get("image_url") or "").strip()
+                if u.startswith("https://"):
+                    k = normalize_url_key(u)
+                    if k and k not in used_keys:
+                        used_keys.add(k)
+                        item["image_url"] = u
+                        item["image_credit"] = res.get("image_credit", "")
+                        item["image_source"] = res.get("image_source", "")
+                        if res.get("place_id"):
+                            item["place_id"] = res["place_id"]
+                    else:
+                        item["image_url"] = ""
+                        item["image_credit"] = NO_IMAGE_CREDIT_KO
+                        item["image_source"] = "duplicate_skipped"
                 else:
                     item["image_url"] = ""
-                    item["image_credit"] = NO_IMAGE_CREDIT_KO
-                    item["image_source"] = "duplicate_skipped"
-            else:
+                    item["image_credit"] = res.get("image_credit", NO_IMAGE_CREDIT_KO)
+                    item["image_source"] = res.get("image_source", "none")
+            except Exception as e:
+                logger.warning("enrich attraction image failed: %s", e)
                 item["image_url"] = ""
-                item["image_credit"] = res.get("image_credit", NO_IMAGE_CREDIT_KO)
-                item["image_source"] = res.get("image_source", "none")
-        except Exception as e:
-            logger.warning("enrich attraction image failed: %s", e)
-            item["image_url"] = ""
-            item["image_credit"] = NO_IMAGE_CREDIT_KO
-            item["image_source"] = "error"
-        out.append(item)
+                item["image_credit"] = NO_IMAGE_CREDIT_KO
+                item["image_source"] = "error"
+            out.append(item)
 
     return out
