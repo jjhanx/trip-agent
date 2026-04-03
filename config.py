@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     transit_agent_url: str = "http://localhost:9005"
     booking_agent_url: str = "http://localhost:9006"
 
+    # Session → 다른 A2A 에이전트 HTTP 타임아웃(초). 일정(itinerary)은 Places·LLM·이미지로 수 분 걸릴 수 있음.
+    a2a_timeout_seconds: float = 120.0
+    a2a_itinerary_timeout_seconds: float = 600.0
+
     @field_validator("place_images_use_serpapi", mode="before")
     @classmethod
     def _parse_place_images_serpapi(cls, v: object) -> bool:

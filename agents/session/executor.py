@@ -286,13 +286,15 @@ class SessionExecutor(BaseAgentExecutor):
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings()
+        t = self.settings.a2a_timeout_seconds
+        tit = self.settings.a2a_itinerary_timeout_seconds
         self.clients = {
-            "flight": A2AClient(self.settings.flight_agent_url),
-            "itinerary": A2AClient(self.settings.itinerary_agent_url),
-            "accommodation": A2AClient(self.settings.accommodation_agent_url),
-            "rental_car": A2AClient(self.settings.rental_car_agent_url),
-            "transit": A2AClient(self.settings.transit_agent_url),
-            "booking": A2AClient(self.settings.booking_agent_url),
+            "flight": A2AClient(self.settings.flight_agent_url, timeout=t),
+            "itinerary": A2AClient(self.settings.itinerary_agent_url, timeout=tit),
+            "accommodation": A2AClient(self.settings.accommodation_agent_url, timeout=t),
+            "rental_car": A2AClient(self.settings.rental_car_agent_url, timeout=t),
+            "transit": A2AClient(self.settings.transit_agent_url, timeout=t),
+            "booking": A2AClient(self.settings.booking_agent_url, timeout=t),
         }
 
     async def _call_agent(self, name: str, payload: dict) -> str | None:

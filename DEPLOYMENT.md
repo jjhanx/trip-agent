@@ -353,7 +353,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 600s;
         proxy_connect_timeout 75s;
     }
 }
@@ -398,7 +398,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 600s;
         proxy_connect_timeout 75s;
     }
 }
@@ -518,7 +518,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 600s;
         proxy_connect_timeout 75s;
     }
 }
@@ -635,6 +635,14 @@ sudo tail -50 /var/log/nginx/error.log
 ```
 
 `Connection refused` → Trip Agent 미실행. `docker compose up -d` 또는 `python main.py`로 기동하세요.
+
+### HTTP 504 Gateway Timeout (Nginx·프록시 사용 시)
+
+**원인**: 브라우저 → Nginx(또는 클라우드 로드밸런서) → Session(9000) 흐름에서, **업스트림 응답이 늦어지면** 프록시가 먼저 끊어 **504**를 반환합니다. 일정(itinerary) 단계는 Places·LLM·이미지 보강으로 **수 분** 걸릴 수 있습니다.
+
+1. **Nginx** `server` 블록의 `location`에 **`proxy_read_timeout 600s;`**(이 저장소 예시와 동일)가 있는지 확인하고, 더 짧게 두었다면 늘리세요. 수정 후 `sudo nginx -t` → `sudo systemctl reload nginx`.
+2. **애플리케이션**: `.env`에서 `A2A_ITINERARY_TIMEOUT_SECONDS=600`(기본값) 이상으로 Session이 Itinerary A2A를 기다리도록 맞춥니다. 컨테이너 재시작 후 반영.
+3. **클라우드 ALB/API Gateway** 등은 별도 **idle timeout**(예: 60초)이 있으면 일정 단계에서 504가 날 수 있으니, 해당 제품 문서에 따라 **최소 300~600초**로 올리는 것을 검토하세요.
 
 ### 컨테이너가 바로 종료될 때 (Exited 1)
 
