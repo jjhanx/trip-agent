@@ -1114,6 +1114,20 @@ def _merge_google_with_region_templates(
         gi += 1
         if gi > len(pool) * 5:
             break
+    # 큐레이션 풀만으로 상한 미달 시 일반 템플릿으로 반드시 채움(구글 후보가 40개 등으로 짧을 때).
+    gix = 0
+    while len(merged) < n_attr and gix < n_attr * 4:
+        base = _generic_spot(destination, gix)
+        gix += 1
+        tn = (base.get("name") or "").strip()
+        nk = _normalize_attraction_key(tn)
+        if not nk or nk in existing:
+            continue
+        if any(_names_likely_same(tn, (g.get("name") or "").strip()) for g in merged):
+            continue
+        existing.add(nk)
+        base["id"] = f"attr_{len(merged) + 1:03d}"
+        merged.append(_ensure_attraction_record(base, len(merged), destination))
     return merged[:n_attr]
 
 

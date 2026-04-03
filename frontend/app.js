@@ -15,6 +15,14 @@ function inclusiveCalendarDays(startStr, endStr) {
   return Math.max(1, diff + 1);
 }
 
+/** 폼(출발·귀환일 등)과 동기화된 travelInput. 세션/일정 API 호출 직전에 반드시 호출해 stale 날짜 전송을 막는다. */
+function syncTravelInputFromForm() {
+  state.travelInput = buildTravelInput();
+  state.trip_type = state.travelInput?.trip_type || $('#trip_type_select')?.value || 'round_trip';
+  state.multi_cities = state.travelInput?.multi_cities || state.multi_cities || [];
+  return state.travelInput;
+}
+
 const API_BASE = window.location.origin + '/a2a/';
 const API_PLANS = window.location.origin + '/api';
 const STORAGE_KEY = 'trip-agent-form';
@@ -2212,6 +2220,7 @@ $('#btn-next-rental').addEventListener('click', async () => {
   state.selectedLocalTransport = state.selectedLocalTransport || ltNorm[0] || {};
   show('loading');
   try {
+    syncTravelInputFromForm();
     const payload = {
       ...state.travelInput,
       selected_flight: buildSelectedFlight(),
@@ -2236,6 +2245,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     }
     show('loading');
     try {
+      syncTravelInputFromForm();
       const payload = {
         ...state.travelInput,
         selected_flight: state.selectedFlight,
@@ -2256,6 +2266,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     if (!collectAndValidateMealChoices()) return;
     show('loading');
     try {
+      syncTravelInputFromForm();
       const payload = {
         ...state.travelInput,
         selected_flight: state.selectedFlight,
@@ -2279,6 +2290,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     }
     show('loading');
     try {
+      syncTravelInputFromForm();
       const payload = {
         ...state.travelInput,
         selected_flight: state.selectedFlight,
@@ -2307,6 +2319,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     }
     show('loading');
     try {
+      syncTravelInputFromForm();
       const payload = {
         ...state.travelInput,
         selected_flight: state.selectedFlight,
@@ -2354,6 +2367,7 @@ $('#btn-confirm-booking').addEventListener('click', async () => {
   if (!state.selectedAccommodation) { alert('숙소를 선택해 주세요.'); return; }
   show('loading');
   try {
+    syncTravelInputFromForm();
     const payload = {
       ...state.travelInput,
       selected_flight: state.selectedFlight,
