@@ -13,6 +13,10 @@ from a2a.server.events import EventQueue
 
 from agents.base_agent import BaseAgentExecutor
 from config import Settings
+from shared.attraction_filters import (
+    filter_attractions_drop_guide_services,
+    is_guide_or_tour_operator_place,
+)
 from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
     enrich_attractions_with_place_details,
@@ -1214,6 +1218,7 @@ async def _fetch_top_attractions_from_google(
         "doctor",
         "lodging",
         "real_estate_agency",
+        "travel_agency",
         "gym",
         "spa",
         "hair_care",
@@ -1328,6 +1333,8 @@ async def _fetch_top_attractions_from_google(
                 ptypes = set(p.get("types", []))
                 if ptypes.intersection(bad_types):
                     continue
+                if is_guide_or_tour_operator_place(p.get("name"), p.get("types")):
+                    continue
                 if _place_is_ski_only_summer(p, start_date):
                     continue
                 seen.add(pid)
@@ -1388,6 +1395,7 @@ async def _fetch_top_attractions_from_google(
                 "image_url": image_url,
                 "image_credit": "Google Maps",
                 "practical_details": {"tips": ""},
+                "types": list(types or []),
             }
         )
 
@@ -1411,6 +1419,10 @@ async def postprocess_attraction_list_for_catalog(
     for i, a in enumerate(atts):
         if isinstance(a, dict):
             atts[i] = _ensure_attraction_record(a, i, destination)
+    atts = filter_attractions_drop_guide_services(atts)
+    if not atts:
+        logger.warning("명소 후보가 가이드·투어 업체 필터로 모두 제외되었습니다.")
+        return []
     if merged_pre_llm:
         for a in atts:
             if not isinstance(a, dict):
@@ -1430,6 +1442,12 @@ async def postprocess_attraction_list_for_catalog(
             settings.google_places_api_key,
             destination,
         )
+        atts = filter_attractions_drop_guide_services(atts)
+        if not atts:
+            logger.warning(
+                "Places 상세 후 가이드·투어 업체 필터로 명소가 모두 제외되었습니다."
+            )
+            return []
     else:
         logger.warning(
             "GOOGLE_PLACES_API_KEY 없음: 명소 주소·Maps 링크 Places 보강 생략(.env / docker-compose)."
@@ -1713,6 +1731,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
                         prompt = f"""당신은 여행 일정 설계 전문가입니다. (Chunk {chunk_idx+1}/{len(all_chunks)})
 - 목적지 주변 실제 방문 가능한 구체적 명소만 나열한다.{route_hint}{req_names}
+- **[중요] 투어·여행사·현지 가이드 업체·아웃도어 예약만 하는 상점 등은 명소가 아니다.** 산·호수·전망·산장·박물관·마을 등 **실제로 이동해 볼 수 있는 장소**만 넣는다(이름에 Outdoor/Guide/Tour agency만 있는 업체 제외).
 - 각 명소는 사용자가 비용·시간·예약을 비교해 고를 수 있게 실무 정보를 반드시 채운다. **입장료·개방·운영 시간·주차 요금·예약 필요 여부**는 빠지면 안 된다(미확인 시 "관련 정보 없음").
 - **[parking의 목적]** 사용자는 **전체 일정·숙소**를 정할 때 **어느 거점 도시에서 몇 분 거리인지**를 근거로 삼는다. **내비 검색어만** 적는 것은 **허용하지 않는다**. 반드시 **가장 가까운 인구 3천 이상 거점 지명·인구·승용차 ○분**을 적는다.
 - **[절대 금지] 프롬프트 지시문 복사**: "…명시한다" "…채운다" "€ 또는 현지 통화로 명시" 같은 **메타 문구**를 응답에 넣지 말 것. **실제 도시명·€ 금액·분·시간**만 적는다.
@@ -1784,6 +1803,7 @@ JSON 객체 하나만 출력:
                                     
                     if valid_json and merged_ats:
                         merged_ats = _dedupe_attractions_by_canonical_name(merged_ats)
+                        merged_ats = filter_attractions_drop_guide_services(merged_ats)
                         filtered = _filter_llm_attractions_require_indoor_details(merged_ats)
                         if len(filtered) >= max(6, len(merged_ats) * 2 // 3):
                             merged_ats = filtered

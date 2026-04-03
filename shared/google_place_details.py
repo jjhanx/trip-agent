@@ -578,6 +578,7 @@ async def enrich_attractions_with_place_details(
             item["description"] = build_description_from_details(name, destination, raw)
         item["google_maps_url"] = (raw.get("url") or "").strip()
         item["official_website"] = (raw.get("website") or "").strip()
+        item["place_types"] = list(raw.get("types") or [])
         return idx, item
 
     results = await asyncio.gather(*(one(i) for i in range(len(attractions))))
