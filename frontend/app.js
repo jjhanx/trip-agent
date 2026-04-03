@@ -226,6 +226,7 @@ function loadPlanIntoState(data) {
   state.selectedItinerary = data.selectedItinerary ?? null;
   state.itineraryWorkflowStep = data.itineraryWorkflowStep ?? null;
   state.itineraryAttractionCatalog = Array.isArray(data.itineraryAttractionCatalog) ? data.itineraryAttractionCatalog : [];
+  sanitizeAttractionCatalogInPlace(state.itineraryAttractionCatalog);
   state.itineraryRouteBundle = data.itineraryRouteBundle && typeof data.itineraryRouteBundle === 'object' ? data.itineraryRouteBundle : null;
   state.selectedAttractionIds = Array.isArray(data.selectedAttractionIds) ? data.selectedAttractionIds : [];
   state.mealChoices = data.mealChoices && typeof data.mealChoices === 'object' ? data.mealChoices : {};
@@ -1623,7 +1624,9 @@ function collapseInlineDuplicateGoogleMaps(text) {
 function stripStandaloneGoogleMapsLabelLines(text) {
   if (text == null || text === '') return '';
   let s = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  s = s.replace(/\u2028/g, '\n').replace(/\u2029/g, '\n');
   s = s.replace(/<br\s*\/?>/gi, '\n');
+  s = s.replace(/&lt;br\s*\/?&gt;/gi, '\n');
   const lines = s.split('\n');
   const out = [];
   for (const line of lines) {
@@ -1646,6 +1649,17 @@ function prepareAttractionDescription(text, mapsUrl) {
   s = collapseInlineDuplicateGoogleMaps(s);
   s = stripStandaloneGoogleMapsLabelLines(s);
   return s;
+}
+
+/** 서버 구버전·저장 JSON에 남은 잡음 제거. 로드·API 응답 시 in-place로 description 정리 */
+function sanitizeAttractionCatalogInPlace(catalog) {
+  if (!Array.isArray(catalog)) return;
+  for (const a of catalog) {
+    if (!a || typeof a !== 'object') continue;
+    const gm = (a.google_maps_url && String(a.google_maps_url).trim()) || '';
+    const cleaned = prepareAttractionDescription(a.description, gm);
+    if (cleaned !== a.description) a.description = cleaned;
+  }
 }
 
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
@@ -1946,7 +1960,7 @@ function renderItineraryWorkflow(data) {
             const web = owRaw.startsWith('http')
               ? `<a href="${escapeHtml(owRaw)}" target="_blank" rel="noopener noreferrer">${sameUrl ? '공식 웹 · 지도' : '공식 웹'}</a>` : '';
             const gmap = !sameUrl && gmRaw.startsWith('http')
-              ? `<a href="${escapeHtml(gmRaw)}" target="_blank" rel="noopener noreferrer">Google Maps</a>` : '';
+              ? `<a href="${escapeHtml(gmRaw)}" target="_blank" rel="noopener noreferrer" aria-label="Google Maps">지도</a>` : '';
             const linksRow = (web || gmap)
               ? `<p class="attraction-card__links muted" style="font-size:0.88rem;">${[web, gmap].filter(Boolean).join(' · ')}</p>`
               : '';
@@ -2072,6 +2086,7 @@ function applyItineraryResponse(data) {
   if (data?.error) throw new Error(data.error);
   if (data?.itinerary_step === 'select_attractions') {
     state.itineraryAttractionCatalog = data.attractions || [];
+    sanitizeAttractionCatalogInPlace(state.itineraryAttractionCatalog);
     state.itineraryRouteBundle = null;
     state.mealChoices = {};
     state.selectedItinerary = null;

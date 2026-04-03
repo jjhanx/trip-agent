@@ -391,7 +391,9 @@ def _strip_standalone_google_maps_label_lines(text: str) -> str:
     if not text:
         return ""
     s = text.replace("\r\n", "\n").replace("\r", "\n")
+    s = s.replace("\u2028", "\n").replace("\u2029", "\n")
     s = re.sub(r"(?i)<br\s*/?>", "\n", s)
+    s = re.sub(r"(?i)&lt;br\s*/?&gt;", "\n", s)
     lines = s.split("\n")
     out: list[str] = []
     for line in lines:
