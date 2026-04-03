@@ -1132,7 +1132,8 @@ def _merge_google_with_region_templates(
 
 
 def _place_itinerary_rank_key(p: dict[str, Any]) -> tuple[int, float, int]:
-    """Places 후보 정렬: 4.3+ 품질 통과(0) → 4.0대 → 3.5대 → 3.0대 → 2.5대(최후). 낮은 튜플이 우선."""
+    """Places 후보 정렬: 4.3+ 품질 통과(0) → 4.0대 → … → 2.5대(4) → (5) 4.3 미만·리뷰 적음도 평점순.
+    티어 5는 목표 개수 채울 때까지 포함(ingest에서 99만 제외)."""
     r = float(p.get("rating") or 0.0)
     rev = int(p.get("user_ratings_total") or 0)
     if r < 2.5:
@@ -1142,10 +1143,11 @@ def _place_itinerary_rank_key(p: dict[str, Any]) -> tuple[int, float, int]:
     if r >= 4.0:
         return (1, -r, -rev)
     if r >= 3.5:
-        return (2, -r, -rev) if rev >= 2 else (99, 0.0, 0)
+        return (2, -r, -rev) if rev >= 2 else (5, -r, -rev)
     if r >= 3.0:
-        return (3, -r, -rev) if rev >= 3 else (99, 0.0, 0)
-    return (4, -r, -rev) if rev >= 8 else (99, 0.0, 0)
+        return (3, -r, -rev) if rev >= 3 else (5, -r, -rev)
+    # 2.5 <= r < 3.0
+    return (4, -r, -rev) if rev >= 8 else (5, -r, -rev)
 
 
 def _fill_attraction_catalog_to_count(
@@ -1287,7 +1289,8 @@ async def _fetch_top_attractions_from_google(
     max_count: int = 200,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Places Nearby + Text Search로 경로 1 : 목적지 4 비율.
-    4.3+ 품질 통과 장소를 우선하되, 상한 채우기에 부족하면 낮은 평점(높은 순)으로 보강한다."""
+    4.3+·품질 통과를 우선하되, 부족 시 4.3 미만·리뷰 적은 장소도 평점 순(티어 5)으로 풀에 넣어
+    일반 템플릿 보충을 줄인다."""
     import asyncio
     import httpx
     from urllib.parse import urlencode
@@ -1885,7 +1888,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(주변 검색·전망·케이블카·호수·트레일 등 키워드와 "
                         "목적지 반경 텍스트 검색으로 후보를 모은 뒤, **4.3★ 이상·품질 통과**를 우선하고 "
-                        "부족하면 **낮은 평점(높은 순)**으로 상한을 채웁니다. "
+                        "부족하면 **4.3 미만·리뷰 적은 장소도 평점·리뷰 순(뒤쪽 티어)**으로 상한을 채웁니다. "
                         "지역 큐레이션 풀이 있으면 구글만으로 상한이 채워져도 대표 명소가 빠지지 않게 낮은 점수 후보와 교체·"
                         f"부족 시 오프라인 풀로 여행 일수×3(최대 {n_attr}곳)까지 보충합니다. "
                         "출발지~목적지 차량 동선과 목적지 주변을 약 1:4로 나눕니다."
