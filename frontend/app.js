@@ -1589,6 +1589,24 @@ function normalizeLineForMapsCheck(line) {
     .trim();
 }
 
+/** 마크다운·목록 꾸밈을 벗겨 "Google Maps" 단독 줄인지 판별할 때 사용 */
+function stripDecorationsForMapsStandaloneLine(line) {
+  let t = normalizeLineForMapsCheck(line);
+  t = t.replace(/^[`"'「」『』【】\[\]()]+|[`"'「」『』【】\[\]()]+$/g, '');
+  t = t.replace(/^\s*>\s*/, '');
+  t = t.replace(/^\s*[-*•]\s+/, '');
+  t = t.replace(/^\s*\d+[.)]\s+/, '');
+  t = t.replace(/^\*+\s*|\s*\*+$/g, '');
+  t = t.replace(/^_+\s*|\s*_+$/g, '');
+  t = t.replace(/^#{1,6}\s+/, '');
+  return t.trim();
+}
+
+function lineIsStandaloneGoogleMapsLabel(line) {
+  const t = stripDecorationsForMapsStandaloneLine(line);
+  return /^[,;:\s]*Google\s*Maps\.?[,;:\s]*$/i.test(t);
+}
+
 /** 한 줄에 "Google Maps"만 공백으로 두 번 나온 경우 한 번으로 합침 */
 function collapseInlineDuplicateGoogleMaps(text) {
   return String(text).replace(
@@ -1598,40 +1616,35 @@ function collapseInlineDuplicateGoogleMaps(text) {
 }
 
 /**
- * 줄 전체가 "Google Maps"뿐인 경우 처리.
- * - 카드에 지도 링크가 있으면 그 줄은 링크 행과 중복이므로 모두 제거.
- * - 지도 링크가 없으면 첫 번째만 남기고 둘째 줄부터 제거(동일 라벨 중복).
+ * 줄 전체가 "Google Maps"(또는 **Google Maps** 등)뿐인 줄은 전부 제거.
+ * 카드에 지도 링크 행이 따로 있으므로 본문에 라벨만 있는 줄은 의미 없음.
  * 문장 안 "Google Maps 기준 …" 는 줄 전체가 아니므로 유지.
  */
-function stripStandaloneGoogleMapsLabelLines(text, mapsUrl) {
+function stripStandaloneGoogleMapsLabelLines(text) {
   if (text == null || text === '') return '';
-  const hasMapLink = !!(mapsUrl && String(mapsUrl).trim());
-  const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  let seenStandalone = false;
+  let s = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  s = s.replace(/<br\s*\/?>/gi, '\n');
+  const lines = s.split('\n');
   const out = [];
-  const standaloneRe = /^[,;:\s]*Google\s*Maps\.?[,;:\s]*$/i;
   for (const line of lines) {
-    const t = normalizeLineForMapsCheck(line);
-    const isStandalone = standaloneRe.test(t);
-    if (!isStandalone) {
-      out.push(line);
-      continue;
-    }
-    if (hasMapLink) {
-      continue;
-    }
-    if (!seenStandalone) {
-      seenStandalone = true;
-      out.push(line);
-    }
+    if (lineIsStandaloneGoogleMapsLabel(line)) continue;
+    out.push(line);
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function attractionDescriptionToString(raw) {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  return '';
+}
+
 function prepareAttractionDescription(text, mapsUrl) {
-  let s = stripRedundantGoogleMapsAfterMapsUrl(text || '', mapsUrl);
+  let s = attractionDescriptionToString(text);
+  s = stripRedundantGoogleMapsAfterMapsUrl(s, mapsUrl);
   s = collapseInlineDuplicateGoogleMaps(s);
-  s = stripStandaloneGoogleMapsLabelLines(s, mapsUrl);
+  s = stripStandaloneGoogleMapsLabelLines(s);
   return s;
 }
 

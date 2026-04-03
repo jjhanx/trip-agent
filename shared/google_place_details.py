@@ -340,6 +340,23 @@ def _normalize_desc_line_for_maps(s: str) -> str:
     return t.strip()
 
 
+def _strip_decorations_for_maps_standalone_line(line: str) -> str:
+    t = _normalize_desc_line_for_maps(line)
+    t = re.sub(r"^[`\"'「」『』【】\[\]()]+|[`\"'「」『』【】\[\]()]+$", "", t)
+    t = re.sub(r"^\s*>\s*", "", t)
+    t = re.sub(r"^\s*[-*•]\s+", "", t)
+    t = re.sub(r"^\s*\d+[.)]\s+", "", t)
+    t = re.sub(r"^\*+\s*|\s*\*+$", "", t)
+    t = re.sub(r"^_+\s*|\s*_+$", "", t)
+    t = re.sub(r"^#{1,6}\s+", "", t)
+    return t.strip()
+
+
+def _line_is_standalone_google_maps_label(line: str) -> bool:
+    t = _strip_decorations_for_maps_standalone_line(line)
+    return bool(re.match(r"^[,;:\s]*Google\s*Maps\.?[,;:\s]*$", t, re.IGNORECASE))
+
+
 def _strip_redundant_google_maps_after_maps_url(text: str, maps_url: str) -> str:
     """설명 문자열에 maps_url과 동일한 URL이 있을 때, 그 직후 한 번 나오는 'Google Maps' 라벨만 제거."""
     if not maps_url or not text:
@@ -369,24 +386,16 @@ def _collapse_inline_duplicate_google_maps(text: str) -> str:
     )
 
 
-_STANDALONE_GOOGLE_MAPS_LINE = re.compile(r"^[,;:\s]*Google\s*Maps\.?[,;:\s]*$", re.IGNORECASE)
-
-
-def _strip_standalone_google_maps_label_lines(text: str, has_map_link: bool) -> str:
-    """줄 전체가 'Google Maps'뿐인 줄: 지도 링크가 있으면 모두 제거, 없으면 첫 줄만 유지."""
+def _strip_standalone_google_maps_label_lines(text: str) -> str:
+    """줄 전체가 'Google Maps'(마크다운 꾸밈 포함)뿐인 줄은 모두 제거."""
     if not text:
         return ""
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"(?i)<br\s*/?>", "\n", s)
+    lines = s.split("\n")
     out: list[str] = []
-    seen_standalone = False
     for line in lines:
-        t = _normalize_desc_line_for_maps(line)
-        if _STANDALONE_GOOGLE_MAPS_LINE.match(t):
-            if has_map_link:
-                continue
-            if not seen_standalone:
-                seen_standalone = True
-                out.append(line)
+        if _line_is_standalone_google_maps_label(line):
             continue
         out.append(line)
     result = "\n".join(out)
@@ -402,7 +411,7 @@ def sanitize_attraction_description_for_catalog(description: str, google_maps_ur
     maps = (google_maps_url or "").strip()
     text = _strip_redundant_google_maps_after_maps_url(text, maps)
     text = _collapse_inline_duplicate_google_maps(text)
-    text = _strip_standalone_google_maps_label_lines(text, bool(maps))
+    text = _strip_standalone_google_maps_label_lines(text)
     return text
 
 
