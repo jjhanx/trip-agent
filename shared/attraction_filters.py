@@ -114,8 +114,14 @@ _SKI_ONLY_NAME_RE = re.compile(
     r"\bcomprensorio\s+sciistico\b|"
     r"\bpiste\s+da\s+sci\b|"
     r"\bsci\s+club\b|"
+    r"\b(ski\s*tour|skitour|sellaronda|sella\s*ronda|panorama\s+sellaronda)\b|"
     r"스키장\b|"
     r"스키\s*학교\b)"
+)
+
+# 소개 문구에 스키 투어·셀라론다 등이 드러나면 이름만으로는 걸러지지 않는 경우 보완
+_SKI_MARKETING_IN_DESCRIPTION_RE = re.compile(
+    r"(?i)(\bski\s*tour\b|\bskitour\b|\bsellaronda\b|\bsella\s*ronda\b|\bpanorama\s+sellaronda\b)"
 )
 
 
@@ -155,6 +161,7 @@ def should_exclude_warm_season_ski_place(
     types: list[str] | None,
     trip_start: str,
     trip_end: str,
+    description: str | None = None,
 ) -> bool:
     """
     따뜻한 계절(5~9월) 여행에 스키장·스키 학교 등 겨울 전용 시설이면 True(후보 제외).
@@ -171,6 +178,10 @@ def should_exclude_warm_season_ski_place(
         return True
 
     raw = (name or "").strip()
+    desc = (description or "").strip()
+    if desc and _SKI_MARKETING_IN_DESCRIPTION_RE.search(desc):
+        return True
+
     if not raw:
         return False
     if _SKI_ONLY_NAME_RE.search(raw):
@@ -216,6 +227,7 @@ def filter_attractions_warm_season_no_ski(
             typ,
             trip_start,
             trip_end,
+            str(a.get("description") or "").strip() or None,
         ):
             continue
         out.append(a)

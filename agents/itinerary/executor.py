@@ -992,20 +992,76 @@ def _names_likely_same(a: str, b: str) -> bool:
     return len(inter) >= 2 and len(inter) >= min(len(ta), len(tb)) * 0.5
 
 
+# 돌로미티: 구글만으로 상위 N칸이 채워지면 오프라인 풀(케이블카·전망)이 뒤로 밀리므로 먼저 넣는 순서
+_DOLOMITES_PRIORITY_TEMPLATE_NAMES: tuple[str, ...] = (
+    "Tre Cime di Lavaredo (Drei Zinnen)",
+    "Cadini di Misurina 전망 포인트",
+    "Seceda",
+    "Rifugio Lagazuoi",
+    "Sass Pordoi",
+    "Tofana di Mezzo (Freccia nel Cielo)",
+    "Lago di Braies (Pragser Wildsee)",
+    "Passo Gardena & 그란 라세타",
+    "Marmolada 그룹 (펠레 지역)",
+    "Cinque Torri",
+    "Passo Falzarego",
+    "Alpe di Siusi (Seiser Alm)",
+    "Val di Funes (푸네스 계곡)",
+    "Lago di Misurina",
+)
+
+
+def _dolomites_priority_seed() -> list[dict[str, Any]]:
+    pool = _dolomites_attraction_templates()
+    by_name = {(t.get("name") or "").strip(): t for t in pool}
+    out: list[dict[str, Any]] = []
+    for nm in _DOLOMITES_PRIORITY_TEMPLATE_NAMES:
+        t = by_name.get(nm)
+        if t:
+            out.append(dict(t))
+    return out
+
+
 def _merge_google_with_region_templates(
     google_list: list[dict[str, Any]],
     destination: str,
     n_attr: int,
 ) -> list[dict[str, Any]]:
-    """구글 후보가 일수×3에 못 미치면 돌로미티 등 오프라인 풀(하이킹·호수 포함)로 보충."""
-    merged: list[dict[str, Any]] = list(google_list)
-    if len(merged) >= n_attr:
-        return merged[:n_attr]
+    """구글 후보와 지역 오프라인 풀 병합. 돌로미티는 유명 전망·케이블카 시드를 앞에 두고 구글과 합친다."""
+    merged: list[dict[str, Any]] = []
+    existing: set[str] = set()
+
+    def _append_candidate(row: dict[str, Any]) -> None:
+        if len(merged) >= n_attr:
+            return
+        tn = (row.get("name") or "").strip()
+        if not tn:
+            return
+        nk = _normalize_attraction_key(tn)
+        if nk in existing:
+            return
+        if any(_names_likely_same(tn, g.get("name", "")) for g in merged):
+            return
+        existing.add(nk)
+        item = dict(row)
+        item["id"] = f"attr_{len(merged) + 1:03d}"
+        merged.append(item)
+
+    if _looks_like_dolomites(destination):
+        for t in _dolomites_priority_seed():
+            _append_candidate(t)
+            if len(merged) >= n_attr:
+                return merged[:n_attr]
+
+    for g in google_list:
+        _append_candidate(g)
+        if len(merged) >= n_attr:
+            return merged[:n_attr]
+
     if _looks_like_dolomites(destination):
         pool = _dolomites_attraction_templates()
     else:
         pool = [_generic_spot(destination, j) for j in range(max(n_attr, 12))]
-    existing = { _normalize_attraction_key(x.get("name", "")) for x in merged }
     for t in pool:
         if len(merged) >= n_attr:
             break
@@ -1019,7 +1075,6 @@ def _merge_google_with_region_templates(
         item = dict(t)
         item["id"] = f"attr_{len(merged) + 1:03d}"
         merged.append(item)
-    # 여전히 부족하면 풀 순환(이름에 변형 접미사)
     gi = 0
     while len(merged) < n_attr and _looks_like_dolomites(destination):
         base = dict(pool[gi % len(pool)])
@@ -1036,13 +1091,22 @@ def _merge_google_with_region_templates(
     return merged[:n_attr]
 
 
-def _place_passes_quality_filter(p: dict[str, Any], min_rating: float) -> bool:
+def _place_passes_quality_filter(
+    p: dict[str, Any],
+    min_rating: float,
+    *,
+    dolomites_lax: bool = False,
+) -> bool:
     rating = float(p.get("rating") or 0.0)
     reviews = int(p.get("user_ratings_total") or 0)
     if rating < min_rating:
         return False
     ptypes = set(p.get("types") or [])
     nature = ptypes.intersection({"natural_feature", "park", "campground"})
+    if dolomites_lax:
+        if nature:
+            return reviews >= 8 or (rating >= 4.4 and reviews >= 5)
+        return reviews >= 14 or (rating >= 4.5 and reviews >= 8)
     if nature:
         return reviews >= 15 or (rating >= 4.5 and reviews >= 8)
     return reviews >= 22
@@ -1215,6 +1279,12 @@ async def _fetch_top_attractions_from_google(
         ("natural_feature", "viewpoint"),
         ("point_of_interest", "panorama"),
     ]
+    if _looks_like_dolomites(destination):
+        type_keyword_pairs = type_keyword_pairs + [
+            ("tourist_attraction", "cable car"),
+            ("point_of_interest", "funivia"),
+            ("tourist_attraction", "Drei Zinnen"),
+        ]
     route_jobs: list[tuple[str, str, str]] = []
     dest_jobs: list[tuple[str, str, str]] = []
     for loc in route_points:
@@ -1232,6 +1302,11 @@ async def _fetch_top_attractions_from_google(
                 f"{head} lake hiking trail",
                 "Dolomites UNESCO scenic viewpoint",
                 "alpine lake rifugio hiking",
+                "Cadini di Misurina viewpoint trail",
+                "Lagazuoi cable car Passo Falzarego",
+                "Passo Pordoi Sass Pordoi funivia",
+                "Tofana Cortina Freccia nel Cielo cable car",
+                "Tre Cime di Lavaredo Auronzo",
             ]
         )
     else:
@@ -1295,6 +1370,8 @@ async def _fetch_top_attractions_from_google(
     route_res: list[list[dict[str, Any]]] = list(route_pages)
     dest_res: list[list[dict[str, Any]]] = list(dest_pages) + list(text_pages)
 
+    dolomites_lax = _looks_like_dolomites(destination)
+
     def ingest_pool(lists: list[list[dict]]) -> list[dict]:
         combined: list[dict] = []
         seen: set[str] = set()
@@ -1303,7 +1380,9 @@ async def _fetch_top_attractions_from_google(
                 pid = p.get("place_id")
                 if not pid or pid in seen:
                     continue
-                if not _place_passes_quality_filter(p, min_rating):
+                if not _place_passes_quality_filter(
+                    p, min_rating, dolomites_lax=dolomites_lax
+                ):
                     continue
                 ptypes = set(p.get("types", []))
                 if ptypes.intersection(bad_types):
@@ -1673,11 +1752,17 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     )
                     merged_pre_llm = _dedupe_attractions_by_canonical_name(merged_pre_llm)
                     out["attractions"] = merged_pre_llm
+                    dolomites_note = ""
+                    if _looks_like_dolomites(destination):
+                        dolomites_note = (
+                            " 돌로미티는 케이블카·전망 등 오프라인 명단을 앞에 두고 구글 후보와 합칩니다. "
+                            "텍스트 검색에 패소·푸니비아·라과초이 등 키워드를 추가했습니다."
+                        )
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(주변 검색·자연/공원/트레일 키워드)과 "
                         "목적지 반경 내 텍스트 검색으로 후보를 모은 뒤, 필요 시 지역별 오프라인 명소 풀(하이킹·호수 등)로 "
                         f"여행 일수×3(최대 {n_attr}곳)까지 보충합니다. 출발지~목적지 차량 동선과 목적지 주변을 약 1:4로 나눕니다."
-                    )
+                    ) + dolomites_note
 
             if self.settings.openai_api_key:
                 try:
