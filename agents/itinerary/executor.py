@@ -1294,9 +1294,12 @@ async def _fetch_top_attractions_from_google(
     end_date: str = "",
     max_count: int = 200,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Places Nearby + Text Search로 경로 1 : 목적지 4 비율.
-    4.3+·품질 통과를 우선하되, 부족 시 4.3 미만·리뷰 적은 장소도 평점 순(티어 5)으로 풀에 넣어
-    일반 템플릿 보충을 줄인다."""
+    """Places Nearby + Text Search. 동선·목적지 검색 결과를 합쳐 중복(place_id) 제거 후 정렬해 상위 max_count개.
+
+    예전에는 max_count를 동선:목적지 ≈1:4로 **고정 분배**해, 동선 쪽 풀이 짧으면
+    (예: 5+56=61) **목표 개수를 채우지 못하는** 기술적 결함이 있었음 → 한 풀에서 자름.
+    4.3+·품질 통과 우선, 부족 시 낮은 평점도 티어 5로 포함.
+    """
     import asyncio
     import httpx
     from urllib.parse import urlencode
@@ -1367,9 +1370,6 @@ async def _fetch_top_attractions_from_google(
 
     if not dest_points:
         return [], None
-
-    route_target = max_count // 5 if route_points else 0
-    dest_target = max_count - route_target
 
     bad_types = {
         "hospital",
@@ -1583,15 +1583,10 @@ async def _fetch_top_attractions_from_google(
         combined.sort(key=_place_itinerary_rank_key)
         return combined
 
-    pool_route = ingest_pool_tiered(route_res) if route_res else []
-    pool_dest = ingest_pool_tiered(dest_res) if dest_res else []
-
-    route_spots = pool_route[:route_target]
-    route_ids = {s.get("place_id") for s in route_spots}
-    dest_pool = [p for p in pool_dest if p.get("place_id") not in route_ids]
-    dest_spots = dest_pool[:dest_target]
-
-    results = route_spots + dest_spots
+    # route_res를 먼저 넣어 동선·목적지에 동일 place_id가 있으면 동선 쪽을 유지(첫 등장 우선).
+    all_query_lists: list[list[dict[str, Any]]] = list(route_res) + list(dest_res)
+    pool_all = ingest_pool_tiered(all_query_lists) if all_query_lists else []
+    results = pool_all[:max_count]
 
     out: list[dict[str, Any]] = []
     for i, p in enumerate(results):
@@ -1976,7 +1971,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         "부족하면 **4.3 미만·리뷰 적은 장소도 평점·리뷰 순(뒤쪽 티어)**으로 상한을 채웁니다. "
                         "지역 큐레이션 풀이 있으면 구글만으로 상한이 채워져도 대표 명소가 빠지지 않게 낮은 점수 후보와 교체·"
                         f"부족 시 오프라인 풀로 여행 일수×3(최대 {n_attr}곳)까지 보충합니다. "
-                        "출발지~목적지 차량 동선과 목적지 주변을 약 1:4로 나눕니다."
+                        "동선·목적지 검색을 합친 뒤 중복 제거·정렬하여 상위 후보를 고릅니다."
                     )
 
             if self.settings.openai_api_key:
