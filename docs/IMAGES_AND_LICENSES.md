@@ -7,7 +7,7 @@
 
 ## 이 앱에서 쓰는 방식 (실제 장소 위주)
 
-1. **Google Places API**: `.env`에 `GOOGLE_PLACES_API_KEY`가 설정되어 있으면 **Text Search**로 후보를 고른 뒤, 응답에 `photos`가 없거나 카드에 URL이 비어 있으면 **Place Details**(`fields=photos`)로 첫 장의 `photo_reference`를 받아 같은 Photo API URL을 씁니다. 매월 제공되는 $200 무료 크레딧 한도 내에서 사용합니다. ([발급 가이드](GOOGLE_PLACES_API_GUIDE.md))
+1. **Google Places API** (별도 “Photos API” 상품명은 없음): **Text Search**로 `place_id`를 고른 뒤, 응답에 `photos`가 비어 있어도 **Place Details**(`fields=photos`)로 `photo_reference`를 받고, **Place Photo**(미디어) 요청 URL(`.../place/photo?photoreference=...`)으로 카드에 붙입니다. 명소명에 한글 부제가 있으면 검색·매칭용으로 **라틴 지명 위주로 정리**한 뒤 검색합니다. 매월 제공되는 $200 무료 크레딧 한도 내에서 사용합니다. ([발급 가이드](GOOGLE_PLACES_API_GUIDE.md))
 2. **영문·이탈리아어 위키백과** API: 장소명으로 검색해 여러 후보 중 **문서 제목이 명소명과 충분히 겹치는 경우만** 대표 썸네일을 씁니다.
 3. **Wikimedia Commons** API: 파일 검색 후 **파일 제목이 명소와 관련되는 경우만** 스케일된 이미지 URL + 라이선스 메타(가능 시). 일부 지역명은 **키워드 고정 썸네일**(Commons URL)로 직접 보강합니다.
 4. **(선택)** `.env`에서 `PLACE_IMAGES_USE_SERPAPI=true` 이고 `SERPAPI_API_KEY`가 있으면 **SerpApi Google 이미지 검색**으로 보강합니다. **저작권은 원 게시자**에게 있으며, API 한도가 소모됩니다.

@@ -68,6 +68,26 @@ def _tokens(s: str) -> list[str]:
     return [w for w in s.split() if len(w) >= 3 and w not in _STOP]
 
 
+def _clean_name_for_places_search(name: str) -> str:
+    """Place Text Search·제목 매칭용: 한글 부제·전망 설명을 줄여 라틴 지명으로 검색·매칭하기 쉽게 한다."""
+    s = (name or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"（[^）]*）", " ", s)
+    s = re.sub(r"\([^)]*[가-힣][^)]*\)", " ", s)
+    for tail in (
+        "전망 포인트",
+        "전망포인트",
+        "뷰포인트",
+        "뷰 포인트",
+        "관망 포인트",
+        "전망대",
+    ):
+        s = s.replace(tail, " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:200]
+
+
 def _tokens_attraction_match(s: str) -> list[str]:
     """Places/Commons 제목과 비교할 때 명소명 쪽 토큰.
     한글·괄호 설명이 붙으면 토큰이 늘어 (cadini, misurina, 포인트…) 과반 일치 요구가 커져
@@ -364,29 +384,36 @@ async def fetch_google_places_unique(
         return None
     results = data.get("results") or []
     an = (attraction_name or "").strip()
+    details_attempts = 0
+    max_details_fallback = 5
     for res in results:
         pname = (res.get("name") or "").strip()
         if an and pname and not _title_relevant_to_attraction(pname, an):
             continue
+        place_id = (res.get("place_id") or "").strip()
         photos = res.get("photos") or []
-        if not photos:
-            continue
-        pref = photos[0].get("photo_reference")
-        if not pref:
-            continue
         title = (pname or q)[:80]
-        place_id = res.get("place_id") or ""
-        # redirect를 피하기 위해 maxwidth를 지정하여 이미지 URL 생성
-        photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
-        key = normalize_url_key(photo_url)
-        if key in exclude_url_keys:
-            continue
-        return {
-            "image_url": photo_url,
-            "image_credit": f"Google Maps · {title}",
-            "image_source": "google_places",
-            "place_id": place_id,
-        }
+        if photos:
+            pref = photos[0].get("photo_reference")
+            if pref:
+                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=960&photoreference={pref}&key={api_key}"
+                key = normalize_url_key(photo_url)
+                if key in exclude_url_keys:
+                    continue
+                return {
+                    "image_url": photo_url,
+                    "image_credit": f"Google Maps · {title}",
+                    "image_source": "google_places",
+                    "place_id": place_id,
+                }
+        # Text Search 응답에 photos가 비어 있어도 Place Details(photos) + Place Photo URL로 받을 수 있음
+        if place_id and details_attempts < max_details_fallback:
+            details_attempts += 1
+            r2 = await fetch_place_photo_from_place_details(
+                client, place_id, api_key, exclude_url_keys, maxwidth=960
+            )
+            if r2:
+                return r2
     return None
 
 
@@ -514,13 +541,14 @@ async def resolve_place_image(
     exclude_url_keys = exclude_url_keys or set()
     name = (name or "").strip()
     dest = (destination or "").strip()
-    attraction_name = name
-    q_full = f"{name} {dest}".strip() or name
-    q_short = name or dest
+    cleaned = _clean_name_for_places_search(name)
+    attraction_name = (cleaned if cleaned else name).strip()
+    q_full = f"{attraction_name} {dest}".strip() or name
+    q_short = attraction_name or name or dest
 
     headers = {"User-Agent": USER_AGENT}
     async with httpx.AsyncClient(timeout=20, headers=headers) as client:
-        # 1. Google Places API (가장 정확하고 무료 크레딧 활용 가능)
+        # 1. Google Places: Text Search → Place Photo URL, 또는 photos 없으면 Place Details(photos) → Place Photo
         if google_places_api_key:
             r = await fetch_google_places_unique(
                 client,
