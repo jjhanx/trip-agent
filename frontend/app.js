@@ -1582,6 +1582,21 @@ function stripRedundantGoogleMapsAfterMapsUrl(text, mapsUrl) {
   return (s.slice(0, after) + rest.slice(m[0].length)).replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function normalizeLineForMapsCheck(line) {
+  return String(line)
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
+/** 한 줄에 "Google Maps"만 공백으로 두 번 나온 경우 한 번으로 합침 */
+function collapseInlineDuplicateGoogleMaps(text) {
+  return String(text).replace(
+    /\bGoogle\s*Maps\b(\s*[.,;:!?])?\s+\bGoogle\s*Maps\b(\s*[.,;:!?])?/gi,
+    'Google Maps',
+  );
+}
+
 /**
  * 줄 전체가 "Google Maps"뿐인 경우 처리.
  * - 카드에 지도 링크가 있으면 그 줄은 링크 행과 중복이므로 모두 제거.
@@ -1591,12 +1606,13 @@ function stripRedundantGoogleMapsAfterMapsUrl(text, mapsUrl) {
 function stripStandaloneGoogleMapsLabelLines(text, mapsUrl) {
   if (text == null || text === '') return '';
   const hasMapLink = !!(mapsUrl && String(mapsUrl).trim());
-  const lines = String(text).split(/\r?\n/);
+  const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   let seenStandalone = false;
   const out = [];
+  const standaloneRe = /^[,;:\s]*Google\s*Maps\.?[,;:\s]*$/i;
   for (const line of lines) {
-    const t = line.trim();
-    const isStandalone = /^Google\s*Maps\.?$/i.test(t);
+    const t = normalizeLineForMapsCheck(line);
+    const isStandalone = standaloneRe.test(t);
     if (!isStandalone) {
       out.push(line);
       continue;
@@ -1613,7 +1629,10 @@ function stripStandaloneGoogleMapsLabelLines(text, mapsUrl) {
 }
 
 function prepareAttractionDescription(text, mapsUrl) {
-  return stripStandaloneGoogleMapsLabelLines(stripRedundantGoogleMapsAfterMapsUrl(text || '', mapsUrl), mapsUrl);
+  let s = stripRedundantGoogleMapsAfterMapsUrl(text || '', mapsUrl);
+  s = collapseInlineDuplicateGoogleMaps(s);
+  s = stripStandaloneGoogleMapsLabelLines(s, mapsUrl);
+  return s;
 }
 
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */

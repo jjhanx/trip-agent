@@ -17,6 +17,7 @@ from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
     enrich_attractions_with_place_details,
     polish_practical_details_with_llm,
+    sanitize_attraction_description_for_catalog,
     walking_hiking_clamp_smart,
 )
 from shared.place_images import enrich_attractions_images
@@ -1529,6 +1530,15 @@ async def postprocess_attraction_list_for_catalog(
             + " [대표 사진(https)을 확보한 명소만 남겼는데 후보가 비었습니다. "
             "목적지 표기를 바꿔 다시 시도하거나 Places 키를 확인해 주세요.]"
         )
+    for a in with_img:
+        if not isinstance(a, dict):
+            continue
+        desc = a.get("description")
+        if isinstance(desc, str) and desc.strip():
+            a["description"] = sanitize_attraction_description_for_catalog(
+                desc,
+                str(a.get("google_maps_url") or ""),
+            )
     return _renumber_attraction_ids(with_img)
 
 

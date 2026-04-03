@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from typing import Any
 
 import httpx
@@ -330,6 +331,79 @@ def _editorial_overview(details: dict[str, Any]) -> str:
     if isinstance(es, dict):
         return (es.get("overview") or "").strip()
     return ""
+
+
+def _normalize_desc_line_for_maps(s: str) -> str:
+    t = unicodedata.normalize("NFKC", s)
+    for z in ("\ufeff", "\u200b", "\u200c", "\u200d"):
+        t = t.replace(z, "")
+    return t.strip()
+
+
+def _strip_redundant_google_maps_after_maps_url(text: str, maps_url: str) -> str:
+    """설명 문자열에 maps_url과 동일한 URL이 있을 때, 그 직후 한 번 나오는 'Google Maps' 라벨만 제거."""
+    if not maps_url or not text:
+        return text
+    idx = text.find(maps_url)
+    if idx < 0:
+        return text
+    after = idx + len(maps_url)
+    rest = text[after:]
+    m = re.match(r"^\s*[,;:]?\s*Google\s*Maps(?:\s*[.,;:!?])?", rest, re.IGNORECASE)
+    if not m:
+        return text
+    tail = rest[m.end() :]
+    stripped = tail.lstrip()
+    if stripped and stripped[0].isalpha():
+        return text
+    new_text = text[:after] + tail
+    return re.sub(r"\n{3,}", "\n\n", new_text).strip()
+
+
+def _collapse_inline_duplicate_google_maps(text: str) -> str:
+    """한 줄 안에 'Google Maps'만 공백으로 구분되어 두 번 나온 경우 한 번으로 합침."""
+    return re.sub(
+        r"(?i)\bGoogle\s*Maps\b(\s*[.,;:!?])?\s+\bGoogle\s*Maps\b(\s*[.,;:!?])?",
+        "Google Maps",
+        text,
+    )
+
+
+_STANDALONE_GOOGLE_MAPS_LINE = re.compile(r"^[,;:\s]*Google\s*Maps\.?[,;:\s]*$", re.IGNORECASE)
+
+
+def _strip_standalone_google_maps_label_lines(text: str, has_map_link: bool) -> str:
+    """줄 전체가 'Google Maps'뿐인 줄: 지도 링크가 있으면 모두 제거, 없으면 첫 줄만 유지."""
+    if not text:
+        return ""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list[str] = []
+    seen_standalone = False
+    for line in lines:
+        t = _normalize_desc_line_for_maps(line)
+        if _STANDALONE_GOOGLE_MAPS_LINE.match(t):
+            if has_map_link:
+                continue
+            if not seen_standalone:
+                seen_standalone = True
+                out.append(line)
+            continue
+        out.append(line)
+    result = "\n".join(out)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
+def sanitize_attraction_description_for_catalog(description: str, google_maps_url: str) -> str:
+    """명소 카드용 description에서 지도 링크와 겹치는 'Google Maps' 잡음 제거(프론트와 동일 규칙)."""
+    if not isinstance(description, str):
+        return ""
+    text = description.replace("\r\n", "\n").replace("\r", "\n")
+    maps = (google_maps_url or "").strip()
+    text = _strip_redundant_google_maps_after_maps_url(text, maps)
+    text = _collapse_inline_duplicate_google_maps(text)
+    text = _strip_standalone_google_maps_label_lines(text, bool(maps))
+    return text
 
 
 def build_description_from_details(
