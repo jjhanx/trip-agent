@@ -187,6 +187,33 @@ def _sanitize_meta_instruction_practical(pr: dict[str, str]) -> None:
     _strip_duplicate_maps_line_from_reservation(pr)
 
 
+def _dedupe_attractions_by_place_id(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """동일 place_id만 제거. 유사 명칭은 유지해 부족분 채우기 풀을 넓힌다(canonical dedupe와 구분)."""
+    if not attractions:
+        return attractions
+    seen_pid: set[str] = set()
+    seen_noname: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for a in attractions:
+        if not isinstance(a, dict):
+            continue
+        pid = (a.get("place_id") or "").strip()
+        if pid:
+            if pid in seen_pid:
+                continue
+            seen_pid.add(pid)
+            out.append(dict(a))
+            continue
+        nk = _normalize_attraction_key((a.get("name") or "").strip())
+        if not nk:
+            continue
+        if nk in seen_noname:
+            continue
+        seen_noname.add(nk)
+        out.append(dict(a))
+    return out
+
+
 def _dedupe_attractions_by_canonical_name(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """동일·유사 명소명 중복 제거(정규화 키 + 토큰 유사도, place_id·image가 있는 쪽 우선)."""
     if not attractions:
@@ -1942,9 +1969,16 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
             out = _mock_attractions(destination, trip_days, preference)
             n_attr = _attraction_target_count(trip_days)
             merged_pre_llm: list[dict[str, Any]] = []
+            # canonical dedupe 전·후보 손실 시 메울 넉넉한 place_id 풀(postprocess fill에도 동일 소스 사용)
+            attraction_fill_pool: list[dict[str, Any]] | None = None
             location_bias: str | None = None
 
             if self.settings.google_places_api_key:
+                # 목표 n_attr개만 가져오면 canonical dedupe·LLM 후 손실 시 메울 여분이 없음 → 넉넉히 수집 후 place_id 풀 유지
+                fetch_cap = min(
+                    MAX_ITINERARY_ATTRACTION_CANDIDATES,
+                    max(n_attr + 100, n_attr * 2),
+                )
                 raw_google, location_bias = await _fetch_top_attractions_from_google(
                     origin,
                     destination,
@@ -1953,15 +1987,19 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     self.settings.google_places_api_key,
                     start_date=start_date,
                     end_date=end_date,
-                    max_count=n_attr,
+                    max_count=fetch_cap,
                 )
                 if raw_google:
+                    attraction_fill_pool = _dedupe_attractions_by_place_id(raw_google)
                     merged_pre_llm = _merge_google_with_region_templates(
                         raw_google, destination, n_attr
                     )
                     merged_pre_llm = _dedupe_attractions_by_canonical_name(merged_pre_llm)
                     merged_pre_llm = _fill_attraction_catalog_to_count(
-                        list(merged_pre_llm), n_attr, merged_pre_llm, destination
+                        list(merged_pre_llm),
+                        n_attr,
+                        attraction_fill_pool,
+                        destination,
                     )[:n_attr]
                     out["attractions"] = merged_pre_llm
                     out["design_notes"] = (
@@ -2089,7 +2127,12 @@ JSON 객체 하나만 출력:
                         if len(filtered) >= max(6, len(merged_ats) * 2 // 3):
                             merged_ats = filtered
                         merged_ats = _fill_attraction_catalog_to_count(
-                            merged_ats, n_attr, merged_pre_llm or None, destination
+                            merged_ats,
+                            n_attr,
+                            attraction_fill_pool
+                            if attraction_fill_pool is not None
+                            else (merged_pre_llm or None),
+                            destination,
                         )
                         merged_ats = merged_ats[:n_attr]
                         out["attractions"] = merged_ats
@@ -2099,7 +2142,12 @@ JSON 객체 하나만 출력:
             atts = out.get("attractions")
             if not isinstance(atts, list):
                 atts = []
-            atts = _fill_attraction_catalog_to_count(atts, n_attr, merged_pre_llm or None, destination)
+            _fill_src = (
+                attraction_fill_pool
+                if attraction_fill_pool is not None
+                else (merged_pre_llm or None)
+            )
+            atts = _fill_attraction_catalog_to_count(atts, n_attr, _fill_src, destination)
             atts = atts[:n_attr]
             out["trip_days"] = trip_days
             if atts:
@@ -2109,7 +2157,7 @@ JSON 객체 하나만 출력:
                     destination=destination,
                     start_date=start_date,
                     end_date=end_date,
-                    merged_pre_llm=merged_pre_llm if merged_pre_llm else None,
+                    merged_pre_llm=_fill_src,
                     location_bias=location_bias,
                     response_out=out,
                     target_count=n_attr,
