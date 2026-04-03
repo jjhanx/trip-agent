@@ -49,6 +49,9 @@ def _date_list(start_date: str, end_date: str) -> list[str]:
     return out
 
 
+# 여행 일수×3 후보 상한(과도한 Places·LLM 부하 방지). 21일×3=63 등은 이 한도 안에서 허용.
+MAX_ITINERARY_ATTRACTION_CANDIDATES = 90
+
 PRACTICAL_DETAIL_KEYS: tuple[str, ...] = (
     "parking",
     "cable_car_lift",
@@ -229,16 +232,19 @@ def _renumber_attraction_ids(attractions: list[dict[str, Any]]) -> list[dict[str
     return out
 
 
-def _filter_attractions_with_images_only(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """대표 사진(https)이 없으면 후보에서 제외(저작권 안전한 출처 확보 후만 노출)."""
-    out: list[dict[str, Any]] = []
+def _order_attractions_https_image_first(attractions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """https 대표 이미지가 있는 카드를 앞에 두되, 후보 개수는 줄이지 않는다(없으면 빈 이미지·플레이스홀더)."""
+    with_h: list[dict[str, Any]] = []
+    without: list[dict[str, Any]] = []
     for a in attractions:
         if not isinstance(a, dict):
             continue
         u = str(a.get("image_url") or "").strip()
         if u.startswith("https://"):
-            out.append(a)
-    return out
+            with_h.append(a)
+        else:
+            without.append(a)
+    return with_h + without
 
 
 def _ensure_attraction_record(a: dict[str, Any], idx: int, destination: str) -> dict[str, Any]:
@@ -856,7 +862,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _mock_attractions(destination: str, trip_days: int, preference: dict) -> dict[str, Any]:
-    n = min(trip_days * 3, 42)
+    n = min(trip_days * 3, MAX_ITINERARY_ATTRACTION_CANDIDATES)
     attractions = _build_mock_attraction_list(destination, n)
     return {
         "itinerary_step": "select_attractions",
@@ -1176,7 +1182,7 @@ async def _fetch_top_attractions_from_google(
     start_date: str = "",
     end_date: str = "",
     min_rating: float = 4.3,
-    max_count: int = 42,
+    max_count: int = 90,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Places Nearby + Text Search로 경로 1 : 목적지 4 비율. 전망·케이블카·자연·호수 포함, 전역 리뷰 수 완화."""
     import asyncio
@@ -1587,15 +1593,8 @@ async def postprocess_attraction_list_for_catalog(
         location_bias=location_bias,
     )
     ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
-    with_img = _filter_attractions_with_images_only(ats_enriched)
-    if not with_img and ats_enriched and response_out is not None:
-        dn = (response_out.get("design_notes") or "").strip()
-        response_out["design_notes"] = (
-            dn
-            + " [대표 사진(https)을 확보한 명소만 남겼는데 후보가 비었습니다. "
-            "목적지 표기를 바꿔 다시 시도하거나 Places 키를 확인해 주세요.]"
-        )
-    for a in with_img:
+    catalog_ordered = _order_attractions_https_image_first(ats_enriched)
+    for a in catalog_ordered:
         if not isinstance(a, dict):
             continue
         desc = a.get("description")
@@ -1604,7 +1603,7 @@ async def postprocess_attraction_list_for_catalog(
                 desc,
                 str(a.get("google_maps_url") or ""),
             )
-    return _renumber_attraction_ids(with_img)
+    return _renumber_attraction_ids(catalog_ordered)
 
 
 def _finalize_merge(
@@ -1716,8 +1715,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
         if phase == "attractions":
             out = _mock_attractions(destination, trip_days, preference)
             n_attr = trip_days * 3
-            if n_attr > 45:
-                n_attr = 45 # 너무 방대한 데이터 방지
+            if n_attr > MAX_ITINERARY_ATTRACTION_CANDIDATES:
+                n_attr = MAX_ITINERARY_ATTRACTION_CANDIDATES
             merged_pre_llm: list[dict[str, Any]] = []
             location_bias: str | None = None
 
