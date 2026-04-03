@@ -491,14 +491,17 @@ class SessionExecutor(BaseAgentExecutor):
             )
             lt_payload = _build_local_transport_payload(selected_flight, travel, start_d, end_d)
             route_origin = lt_payload.get("transit_origin") or travel.origin
-            
+
+            # 일정·명소 일수는 폼이 아니라 선택 항공의 도착·귀국 출발일을 우선(유연일·초기 폼과 불일치 방지).
+            it_start, it_end = start_d, end_d
+
             it_payload = {
                 "destination": travel.destination,
                 "origin": route_origin,
                 "local_transport": travel.local_transport.value,
                 "multi_cities": multi_cities,
-                "start_date": travel.start_date.isoformat(),
-                "end_date": travel.end_date.isoformat(),
+                "start_date": it_start,
+                "end_date": it_end,
                 "preference": travel.preference.model_dump(),
                 "selected_flight": selected_flight,
             }
@@ -528,9 +531,7 @@ class SessionExecutor(BaseAgentExecutor):
                     postprocess_attraction_list_for_catalog,
                 )
 
-                trip_days = _trip_inclusive_days(
-                    travel.start_date.isoformat(), travel.end_date.isoformat()
-                )
+                trip_days = _trip_inclusive_days(it_start, it_end)
                 fallback = _mock_attractions(
                     travel.destination, trip_days, travel.preference.model_dump()
                 )
@@ -542,8 +543,8 @@ class SessionExecutor(BaseAgentExecutor):
                             atts_fb,
                             settings=self.settings,
                             destination=travel.destination,
-                            start_date=travel.start_date.isoformat(),
-                            end_date=travel.end_date.isoformat(),
+                            start_date=it_start,
+                            end_date=it_end,
                             merged_pre_llm=None,
                             location_bias=None,
                             response_out=fallback,

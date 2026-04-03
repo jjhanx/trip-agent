@@ -23,6 +23,43 @@ function syncTravelInputFromForm() {
   return state.travelInput;
 }
 
+/** 선택 항공과 동일한 기준으로 여행 시작·종료일(YYYY-MM-DD). 세션 `_extract_rental_dates_from_flight`와 맞춤. */
+function tripDatesFromSelectedFlight() {
+  const sf = buildSelectedFlight();
+  if (!sf) return null;
+  const dateOnly = (s) => (s && typeof s === 'string' && s.length >= 10) ? s.slice(0, 10) : null;
+  const tt = state.trip_type || $('#trip_type_select')?.value || 'round_trip';
+  if (tt === 'multi_city' && Array.isArray(sf.legs) && sf.legs.length > 0) {
+    const first = sf.legs[0];
+    const last = sf.legs[sf.legs.length - 1];
+    return {
+      start: dateOnly(first.arrival || first.departure),
+      end: dateOnly(last.departure || last.arrival),
+    };
+  }
+  const ob = sf.outbound;
+  if (!ob) return null;
+  const start = dateOnly(ob.arrival);
+  let end = null;
+  if (tt === 'round_trip' && sf.return) {
+    end = dateOnly(sf.return.departure);
+  }
+  return { start, end };
+}
+
+/** 항공 확정 후 폼의 출발·귀환일을 실제 편 일정에 맞춤(초기 폼 6/25 vs 편 6/23 등). */
+function applyFlightDatesToTravelForm() {
+  const d = tripDatesFromSelectedFlight();
+  if (!d) return;
+  const fs = $('#travel-form');
+  if (!fs) return;
+  if (d.start && fs.start_date) fs.start_date.value = d.start;
+  if (d.end && fs.end_date) fs.end_date.value = d.end;
+  try {
+    saveFormToStorage();
+  } catch (_) { /* ignore */ }
+}
+
 const API_BASE = window.location.origin + '/a2a/';
 const API_PLANS = window.location.origin + '/api';
 const STORAGE_KEY = 'trip-agent-form';
@@ -1243,6 +1280,7 @@ function isLocalTransportSelectionComplete() {
 
 /** 항공 확정 후 세션에 렌트카/대중교통 검색 요청 → step-rental 등. */
 async function advanceToLocalTransportStep() {
+  applyFlightDatesToTravelForm();
   state.travelInput = buildTravelInput();
   state.selectedFlight = buildSelectedFlight();
   if (!state.selectedFlight) {
