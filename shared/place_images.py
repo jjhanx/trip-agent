@@ -1,4 +1,5 @@
-"""명소별 이미지: Wikipedia·Commons·선택 SerpApi. URL 중복·부정확 매칭 억제, 실패 시 사진 생략."""
+"""명소별 이미지: Wikipedia·Commons·선택 SerpApi. URL 중복·부정확 매칭 억제.
+사진이 비면 별도 검색 단계로 보강한다(빈 카드보다 중복 URL 허용)."""
 
 from __future__ import annotations
 
@@ -221,6 +222,8 @@ async def fetch_commons_unique_thumbnail(
     attraction_name: str,
     exclude_url_keys: set[str],
     srlimit: int = 15,
+    *,
+    require_file_relevance: bool = True,
 ) -> dict[str, str] | None:
     q = search_query.strip()[:300]
     if len(q) < 2:
@@ -244,7 +247,7 @@ async def fetch_commons_unique_thumbnail(
         title = h.get("title")
         if not title or not title.startswith("File:"):
             continue
-        if not _commons_file_relevant(title, attraction_name):
+        if require_file_relevance and not _commons_file_relevant(title, attraction_name):
             continue
         data2 = await _get_json(
             client,
@@ -308,6 +311,7 @@ async def fetch_serpapi_google_image_unique(
     max_results: int = 10,
     *,
     attraction_name: str = "",
+    skip_region_filter: bool = False,
 ) -> dict[str, str] | None:
     if not api_key.strip():
         return None
@@ -342,7 +346,11 @@ async def fetch_serpapi_google_image_unique(
         if key in exclude_url_keys:
             continue
         title = (im.get("title") or "")[:200]
-        if _serpapi_title_likely_wrong_region(title, attraction_name):
+        tlow = title.lower()
+        if skip_region_filter:
+            if any(x in tlow for x in ("마트", "창동", "하나로", "hanaro", "emart", "이마트", "쿠팡", "배달")):
+                continue
+        elif _serpapi_title_likely_wrong_region(title, attraction_name):
             continue
         return {
             "image_url": str(u),
@@ -602,6 +610,79 @@ async def resolve_place_image(
     return _empty_result()
 
 
+async def _extra_search_image_when_missing(
+    name: str,
+    destination: str,
+    *,
+    serpapi_key: str,
+    use_serpapi: bool,
+    google_places_api_key: str,
+    location_bias: str | None,
+) -> dict[str, str]:
+    """1차 파이프라인에서 사진이 비었을 때만: SerpApi·Places·Commons 추가 검색(필터 완화)."""
+    cleaned = _clean_name_for_places_search(name)
+    attraction = (cleaned if cleaned else name).strip()
+    dest = (destination or "").strip()
+
+    fb = _wikimedia_commons_fallback(name)
+    if fb and str(fb.get("image_url") or "").startswith("https://"):
+        return fb
+
+    if use_serpapi and serpapi_key.strip():
+        queries: list[str] = []
+        if dest:
+            queries.append(f"{attraction} {dest} Dolomites Italy")
+        queries.extend(
+            [
+                f"{attraction} Dolomites Italy",
+                f"{attraction} Dolomites",
+                f"{attraction} Italy landscape",
+            ]
+        )
+        seen_q: set[str] = set()
+        for q in queries:
+            qn = q.strip()
+            if len(qn) < 3 or qn in seen_q:
+                continue
+            seen_q.add(qn)
+            r = await fetch_serpapi_google_image_unique(
+                qn,
+                serpapi_key,
+                set(),
+                attraction_name=name,
+                skip_region_filter=True,
+            )
+            if r and str(r.get("image_url") or "").startswith("https://"):
+                return r
+
+    if google_places_api_key.strip():
+        async with httpx.AsyncClient(timeout=22, headers={"User-Agent": USER_AGENT}) as client:
+            r = await fetch_google_places_unique(
+                client,
+                f"{attraction} {dest}".strip() or attraction,
+                google_places_api_key,
+                set(),
+                attraction_name=attraction,
+                location_bias=location_bias,
+            )
+            if r and str(r.get("image_url") or "").startswith("https://"):
+                return r
+
+    if attraction:
+        async with httpx.AsyncClient(timeout=22, headers={"User-Agent": USER_AGENT}) as client:
+            r = await fetch_commons_unique_thumbnail(
+                client,
+                attraction,
+                attraction,
+                set(),
+                require_file_relevance=False,
+            )
+            if r and str(r.get("image_url") or "").startswith("https://"):
+                return r
+
+    return _empty_result()
+
+
 async def enrich_attractions_images(
     attractions: list[dict[str, Any]],
     destination: str,
@@ -676,10 +757,19 @@ async def enrich_attractions_images(
                         item["image_source"] = res.get("image_source", "")
                         if res.get("place_id"):
                             item["place_id"] = res["place_id"]
+                    elif k:
+                        # 동일 URL이 앞선 카드에 이미 있어도 빈 카드보다는 표시
+                        item["image_url"] = u
+                        item["image_credit"] = res.get("image_credit", "")
+                        item["image_source"] = (res.get("image_source") or "") + "_dup"
+                        if res.get("place_id"):
+                            item["place_id"] = res["place_id"]
                     else:
-                        item["image_url"] = ""
-                        item["image_credit"] = NO_IMAGE_CREDIT_KO
-                        item["image_source"] = "duplicate_skipped"
+                        item["image_url"] = u
+                        item["image_credit"] = res.get("image_credit", "")
+                        item["image_source"] = res.get("image_source", "")
+                        if res.get("place_id"):
+                            item["place_id"] = res["place_id"]
                 else:
                     item["image_url"] = ""
                     item["image_credit"] = res.get("image_credit", NO_IMAGE_CREDIT_KO)
@@ -691,4 +781,32 @@ async def enrich_attractions_images(
                 item["image_source"] = "error"
             out.append(item)
 
-    return out
+    patched: list[dict[str, Any]] = []
+    for item in out:
+        u = str(item.get("image_url") or "").strip()
+        if u.startswith("https://"):
+            patched.append(item)
+            continue
+        nm = item.get("name") or ""
+        extra = await _extra_search_image_when_missing(
+            nm,
+            destination,
+            serpapi_key=serpapi_key or "",
+            use_serpapi=use_serpapi,
+            google_places_api_key=google_places_api_key or "",
+            location_bias=location_bias,
+        )
+        eu = str(extra.get("image_url") or "").strip()
+        if eu.startswith("https://"):
+            it = dict(item)
+            it["image_url"] = eu
+            it["image_credit"] = extra.get("image_credit", "")
+            src = extra.get("image_source") or "none"
+            it["image_source"] = f"{src}_extra_search" if not str(src).endswith("_extra_search") else src
+            if extra.get("place_id"):
+                it["place_id"] = extra["place_id"]
+            patched.append(it)
+        else:
+            patched.append(item)
+
+    return patched
