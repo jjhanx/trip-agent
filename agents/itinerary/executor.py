@@ -1064,7 +1064,9 @@ def _merge_google_with_region_templates(
                 if any(_names_likely_same(tn, x.get("name", "")) for x in g_sorted):
                     continue
                 missing.append(dict(t))
-            k_max = min(len(missing), max(2, min(8, n_attr // 4)))
+            # 구글 상한을 이미 채운 경우에도 지역 큐레이션(케이블카·패스 등)이 빠지지 않게
+            # 최악 구글 후보와 교체. 예전 상한 min(8, n_attr//4)은 8곳뿐이라 랜드마크 9개 이상이 밀릴 수 있음.
+            k_max = min(len(missing), max(12, min(n_attr // 3, 48)))
             if k_max > 0:
                 base = [dict(x) for x in g_sorted[:n_attr]]
                 worst_idx = sorted(

@@ -95,6 +95,36 @@ _WARM_SEASON_NO_SKI_MONTHS = frozenset({5, 6, 7, 8, 9})
 # Places 타입: 스키장 단지
 _SKI_PRIMARY_TYPES = frozenset({"ski_resort"})
 
+
+def _name_suggests_summer_mountain_lift_or_viewpoint(name: str | None) -> bool:
+    """돌로미티 등: Funivia·Marmolada·Tofana 등은 ski_resort 태그여도 여름 명소로 유지."""
+    raw = (name or "").strip()
+    if not raw:
+        return False
+    n = raw.lower()
+    needles = (
+        "funivia",
+        "funicular",
+        "telecabina",
+        "gondola",
+        "seilbahn",
+        "bergbahn",
+        "freccia nel cielo",
+        "marmolada",
+        "tofana",
+        "sassolungo",
+        "sasso lungo",
+        "langkofel",
+        "passo pordoi",
+        "lagazuoi",
+        "cinque torri",
+        "col raiser",
+        "seceda",
+        "alpe di siusi",
+        "seiser alm",
+    )
+    return any(x in n for x in needles)
+
 # 박물관·전시 등 이름에 'ski'가 있어도 제외하지 않음
 _SKIP_SKI_NAME_FILTER_TYPES = frozenset(
     {
@@ -166,6 +196,7 @@ def should_exclude_warm_season_ski_place(
     """
     따뜻한 계절(5~9월) 여행에 스키장·스키 학교 등 겨울 전용 시설이면 True(후보 제외).
     겨울 스키 목적 여행(기간이 5~9월과 안 겹침)에는 적용하지 않는다.
+    Places가 케이블카·빙하역을 ski_resort로만 태그하는 경우가 있어, Funivia·Marmolada 등 이름은 제외하지 않는다.
     """
     if not trip_overlaps_warm_season_no_ski_months(trip_start, trip_end):
         return False
@@ -175,6 +206,9 @@ def should_exclude_warm_season_ski_place(
         return False
 
     if tset.intersection(_SKI_PRIMARY_TYPES):
+        # Places가 리프트역을 ski_resort로만 태그하는 경우가 많아 이름으로 여름 명소 여부를 완화
+        if _name_suggests_summer_mountain_lift_or_viewpoint(name):
+            return False
         return True
 
     raw = (name or "").strip()
