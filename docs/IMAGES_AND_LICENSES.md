@@ -17,7 +17,7 @@
 8. 그다음 **최종 패스**에서도 `https`가 없으면 알려진 지명에 대해 **Wikimedia Commons 고정 썸네일 URL**을 한 번 더 시도합니다(출처 필드에 `_final` 접미). 일정 병합 단계에서 **같은 명소가 두 장**이면 **사진 있는 카드가 대표**가 되도록 점수를 매깁니다(설명만 긴 복제가 이기지 않게 함).
 9. 위 과정 후에도 **확실한 매칭이 없으면** `image_url`을 비우고 `image_credit`에 안내합니다. **Unsplash 일반 풍경 폴백은 사용하지 않습니다.**
 
-구현: `shared/place_images.py` (`enrich_attractions_images`).
+구현: `shared/place_images.py` (`enrich_attractions_images`). 브라우저에서는 `image_url`이 비어 있어도 동일 랜드마크 규칙으로 **클라이언트 보강**(`frontend/app.js` · `applyKnownAttractionImageFallbacks`)합니다.
 
 ## Unsplash
 
