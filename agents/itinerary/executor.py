@@ -15,7 +15,9 @@ from agents.base_agent import BaseAgentExecutor
 from config import Settings
 from shared.attraction_filters import (
     filter_attractions_drop_guide_services,
+    filter_attractions_warm_season_no_ski,
     is_guide_or_tour_operator_place,
+    should_exclude_warm_season_ski_place,
 )
 from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
@@ -959,21 +961,6 @@ def _mock_route_and_restaurants(
     }
 
 
-def _month_from_iso_date(iso: str) -> int | None:
-    if not iso or not isinstance(iso, str) or len(iso) < 7:
-        return None
-    try:
-        return int(iso[5:7])
-    except ValueError:
-        return None
-
-
-def _is_northern_summer_month(m: int | None) -> bool:
-    if m is None:
-        return False
-    return m in (6, 7, 8, 9)
-
-
 def _normalize_attraction_key(name: str) -> str:
     """괄호 별칭 제거 후 정규화 — 'Tre Cime … (Drei Zinnen)' vs 'Tre Cime …' 중복 병합용."""
     s = name or ""
@@ -1061,19 +1048,6 @@ def _place_passes_quality_filter(p: dict[str, Any], min_rating: float) -> bool:
     return reviews >= 22
 
 
-def _place_is_ski_only_summer(p: dict[str, Any], start_date: str) -> bool:
-    """여름철에는 스키장만을 위한 POI는 제외(케이블카 전망 등은 타입으로 구분 어려워 키워드 보조)."""
-    if not _is_northern_summer_month(_month_from_iso_date(start_date)):
-        return False
-    types = set(p.get("types") or [])
-    if "ski_resort" in types:
-        return True
-    name = (p.get("name") or "").lower()
-    if "ski" in name and any(x in name for x in ("piste", "slalom", "snow", "ski school")):
-        return True
-    return False
-
-
 def _match_google_attraction_row(name: str, catalog: list[dict[str, Any]]) -> dict[str, Any] | None:
     """LLM이 약간 바꾼 명소명도 구글 메타(place_id·사진)와 연결."""
     if not catalog:
@@ -1133,6 +1107,7 @@ async def _fetch_top_attractions_from_google(
     multi_cities: list,
     api_key: str,
     start_date: str = "",
+    end_date: str = "",
     min_rating: float = 4.3,
     max_count: int = 42,
 ) -> tuple[list[dict[str, Any]], str | None]:
@@ -1335,7 +1310,12 @@ async def _fetch_top_attractions_from_google(
                     continue
                 if is_guide_or_tour_operator_place(p.get("name"), p.get("types")):
                     continue
-                if _place_is_ski_only_summer(p, start_date):
+                if should_exclude_warm_season_ski_place(
+                    p.get("name"),
+                    p.get("types"),
+                    start_date,
+                    end_date or start_date,
+                ):
                     continue
                 seen.add(pid)
                 combined.append(p)
@@ -1420,8 +1400,9 @@ async def postprocess_attraction_list_for_catalog(
         if isinstance(a, dict):
             atts[i] = _ensure_attraction_record(a, i, destination)
     atts = filter_attractions_drop_guide_services(atts)
+    atts = filter_attractions_warm_season_no_ski(atts, start_date, end_date)
     if not atts:
-        logger.warning("명소 후보가 가이드·투어 업체 필터로 모두 제외되었습니다.")
+        logger.warning("명소 후보가 가이드·투어 업체 또는 계절 필터로 모두 제외되었습니다.")
         return []
     if merged_pre_llm:
         for a in atts:
@@ -1443,9 +1424,10 @@ async def postprocess_attraction_list_for_catalog(
             destination,
         )
         atts = filter_attractions_drop_guide_services(atts)
+        atts = filter_attractions_warm_season_no_ski(atts, start_date, end_date)
         if not atts:
             logger.warning(
-                "Places 상세 후 가이드·투어 업체 필터로 명소가 모두 제외되었습니다."
+                "Places 상세 후 가이드·투어 또는 계절 필터로 명소가 모두 제외되었습니다."
             )
             return []
     else:
@@ -1682,6 +1664,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     multi_cities,
                     self.settings.google_places_api_key,
                     start_date=start_date,
+                    end_date=end_date,
                     max_count=n_attr,
                 )
                 if raw_google:
@@ -1737,7 +1720,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 - **[절대 금지] 프롬프트 지시문 복사**: "…명시한다" "…채운다" "€ 또는 현지 통화로 명시" 같은 **메타 문구**를 응답에 넣지 말 것. **실제 도시명·€ 금액·분·시간**만 적는다.
 - **[이름] 위 명소 리스트가 있으면 `name`은 반드시 그 목록의 문자열을 **글자 단위로 그대로** 복사한다(번역·축약·치환 금지).
 - **[설명 description]**: "구글맵 평점 기반" 같은 메타 문구는 절대 쓰지 말 것. 각 장소마다 **지명·지형·대표 루트·다른 명소와의 관계·역사·감상 포인트**를 바탕으로 2~4문장으로 **직접 조사한 것처럼** 구체적으로 서술한다(일반적인 관광 소개문 금지).
-- **[중요] 계절(시즌) 제한**: 여행 기간({start_date} ~ {end_date})의 월(계절)을 고려하여, **여름에 스키 슬로프·스키 학교만을 위한 시설**처럼 계절에 맞지 않는 명소는 누락한다. 여름 케이블카·전망·하이킹 리프트는 유지한다.
+- **[중요] 계절·여행 기간**: 일정 **{start_date} ~ {end_date}**에 포함된 **월**을 기준으로 추천한다. **5~9월(또는 그중 일부)이면** 스키장 단지(`ski_resort`)·스키 학교·스키 전용 슬로프·스노우파크 등 **겨울 스키 목적 시설은 넣지 않는다.** 여름에도 운영하는 **전망 케이블카·고산 호수·하이킹 트레일·리프지오** 등은 넣는다. **10~4월 위주 스키 여행**이면 스키 리조트가 핵심일 수 있으므로 그에 맞춘다.
 - **[중요] 내부 관람 필수형(박물관·오페라·극장·스칼라 등)**: 입장·공연 예약이 핵심인 곳은 `fees_other`와 `reservation_note`에 **요금·예약 경로·운영 시간**을 숫자와 절차로 구체적으로 적고, 불가능하면 목록에서 삭제한다. **외관만 보는 것으로 의미 없는 곳은 넣지 않는다.**
 - **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다. **총 1000자 이내**로 요약·정리한다(서버 보강 단계에서 방문자 리뷰 발췌가 있으면 잘라 붙이지 않고 요약해 넣는다).
 - **[중요] 답변 회피 금지**: "확인하십시오", "확인하세요", "현지 안내를 확인하세요", "공식 사이트에서 확인" 등 **사용자에게 확인을 떠넘기는** 문구는 **절대 금지**. 모르면 "관련 정보 없음"이라고 명시하되, 당신의 지식으로 **이미 조사한 것처럼** 구체적인 소요시간·거리·요금(숫자)·도시명을 적는다.
@@ -1804,6 +1787,9 @@ JSON 객체 하나만 출력:
                     if valid_json and merged_ats:
                         merged_ats = _dedupe_attractions_by_canonical_name(merged_ats)
                         merged_ats = filter_attractions_drop_guide_services(merged_ats)
+                        merged_ats = filter_attractions_warm_season_no_ski(
+                            merged_ats, start_date, end_date
+                        )
                         filtered = _filter_llm_attractions_require_indoor_details(merged_ats)
                         if len(filtered) >= max(6, len(merged_ats) * 2 // 3):
                             merged_ats = filtered

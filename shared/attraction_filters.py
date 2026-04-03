@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 # Places API types — 방문 명소가 아니라 예약·안내 업무가 본업인 경우
@@ -82,6 +83,139 @@ def filter_attractions_drop_guide_services(items: list[dict[str, Any]]) -> list[
         if is_guide_or_tour_operator_place(
             str(nm) if nm is not None else None,
             typ,
+        ):
+            continue
+        out.append(a)
+    return out
+
+
+# 따뜻한 계절(고산 하이킹·드라이브)에는 스키 전용 시설을 추천하지 않음 — 5~9월
+_WARM_SEASON_NO_SKI_MONTHS = frozenset({5, 6, 7, 8, 9})
+
+# Places 타입: 스키장 단지
+_SKI_PRIMARY_TYPES = frozenset({"ski_resort"})
+
+# 박물관·전시 등 이름에 'ski'가 있어도 제외하지 않음
+_SKIP_SKI_NAME_FILTER_TYPES = frozenset(
+    {
+        "museum",
+        "art_gallery",
+        "library",
+    }
+)
+
+_SKI_ONLY_NAME_RE = re.compile(
+    r"(?i)(\bski\s+(school|area|resort|station|park|rental|lesson|lessons)\b|"
+    r"\b(scuola|scuole)\s+sci\b|"
+    r"\bskischule\b|"
+    r"\bécole\s+(de\s+)?ski\b|"
+    r"\bsnow\s*park\b|"
+    r"\bimpianti\s+sciistici\b|"
+    r"\bcomprensorio\s+sciistico\b|"
+    r"\bpiste\s+da\s+sci\b|"
+    r"\bsci\s+club\b|"
+    r"스키장\b|"
+    r"스키\s*학교\b)"
+)
+
+
+def _months_in_trip_range(start_iso: str, end_iso: str) -> set[int]:
+    """여행 기간에 포함되는 달(1~12) 집합(시작~종료 월 사이 전부)."""
+    try:
+        d0 = date.fromisoformat((start_iso or "")[:10])
+        d1 = date.fromisoformat((end_iso or "")[:10])
+    except ValueError:
+        return set()
+    if d1 < d0:
+        d0, d1 = d1, d0
+    months: set[int] = set()
+    y, m = d0.year, d0.month
+    ey, em = d1.year, d1.month
+    while (y, m) <= (ey, em):
+        months.add(m)
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return months
+
+
+def trip_overlaps_warm_season_no_ski_months(start_iso: str, end_iso: str) -> bool:
+    """여행 일정이 5~9월 중 하루라도 겹치면 True (스키 전용 시설 필터 적용)."""
+    ts = (start_iso or "").strip()
+    te = (end_iso or "").strip() or ts
+    if not ts:
+        return False
+    months = _months_in_trip_range(ts, te)
+    return bool(months & _WARM_SEASON_NO_SKI_MONTHS)
+
+
+def should_exclude_warm_season_ski_place(
+    name: str | None,
+    types: list[str] | None,
+    trip_start: str,
+    trip_end: str,
+) -> bool:
+    """
+    따뜻한 계절(5~9월) 여행에 스키장·스키 학교 등 겨울 전용 시설이면 True(후보 제외).
+    겨울 스키 목적 여행(기간이 5~9월과 안 겹침)에는 적용하지 않는다.
+    """
+    if not trip_overlaps_warm_season_no_ski_months(trip_start, trip_end):
+        return False
+
+    tset = {str(x) for x in (types or []) if x}
+    if tset.intersection(_SKIP_SKI_NAME_FILTER_TYPES):
+        return False
+
+    if tset.intersection(_SKI_PRIMARY_TYPES):
+        return True
+
+    raw = (name or "").strip()
+    if not raw:
+        return False
+    if _SKI_ONLY_NAME_RE.search(raw):
+        return True
+
+    nl = raw.lower()
+    if "ski" in nl and any(
+        w in nl
+        for w in (
+            " school",
+            " scuola",
+            " lesson",
+            " lezione",
+            " rental",
+            " noleggio sci",
+            "skischule",
+        )
+    ):
+        return True
+    return False
+
+
+def filter_attractions_warm_season_no_ski(
+    items: list[dict[str, Any]],
+    trip_start: str,
+    trip_end: str,
+) -> list[dict[str, Any]]:
+    """여행 기간이 따뜻한 계절이면 스키 전용 시설 항목 제거."""
+    out: list[dict[str, Any]] = []
+    for a in items:
+        if not isinstance(a, dict):
+            continue
+        nm = a.get("name")
+        raw_typ = a.get("place_types") or a.get("types")
+        if isinstance(raw_typ, str):
+            typ: list[str] | None = [raw_typ]
+        elif isinstance(raw_typ, list):
+            typ = [str(x) for x in raw_typ]
+        else:
+            typ = None
+        if should_exclude_warm_season_ski_place(
+            str(nm) if nm is not None else None,
+            typ,
+            trip_start,
+            trip_end,
         ):
             continue
         out.append(a)
