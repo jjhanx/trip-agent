@@ -303,6 +303,7 @@ function loadPlanIntoState(data) {
   state.localTransport = normalizeLocalTransport(data.localTransport);
   state.selectedLocalTransport = data.selectedLocalTransport ?? null;
   validateDestinationAirportMatchesDestination();
+  applyDefaultDestinationAirportIfMissing();
   try {
     saveFormToStorage();
   } catch (_) { /* ignore */ }
@@ -2530,10 +2531,34 @@ function openCalendar(target) {
   $('#calendar-picker').classList.remove('hidden');
 }
 
-/** 목적지 문자열과 무관하게 남은 destination_airport_code(로컬스토리지·이전 계획) 제거 */
+/** 왕복/단일 구간의 목적지 도시명(멀티시티는 마지막 구간 목적지) */
+function getPrimaryDestinationTextForAirportValidation() {
+  const form = $('#travel-form');
+  if (!form) return '';
+  const type = form.trip_type?.value;
+  if (type === 'multi_city' && state.multi_cities?.length) {
+    const last = state.multi_cities[state.multi_cities.length - 1];
+    return (last?.destination || '').trim();
+  }
+  return (form.destination?.value || '').trim();
+}
+
+function getPrimaryOriginTextForAirportValidation() {
+  const form = $('#travel-form');
+  if (!form) return '';
+  const type = form.trip_type?.value;
+  if (type === 'multi_city' && state.multi_cities?.length) {
+    return (state.multi_cities[0].origin || '').trim();
+  }
+  return (form.origin?.value || '').trim();
+}
+
+/**
+ * 목적지 문자열과 맞지 않는 destination_airport_code만 제거(이전 여행 MXP 등).
+ * 목적지와 일치하는 저장값(FTE 등)은 유지한다.
+ */
 function validateDestinationAirportMatchesDestination() {
-  const destEl = $('#destination_input');
-  const dest = (destEl?.value || '').trim();
+  const dest = getPrimaryDestinationTextForAirportValidation();
   if (!dest || (typeof isAirportCode === 'function' && isAirportCode(dest))) return;
   const code = state.destination_airport_code;
   if (!code) return;
@@ -2544,6 +2569,48 @@ function validateDestinationAirportMatchesDestination() {
   }
   const ok = airports.some((a) => a.code === code);
   if (!ok) state.destination_airport_code = null;
+}
+
+/**
+ * 등록 도시인데 공항 미선택이면 출발지·마일리지 규칙으로 정렬된 목록의 첫 공항을 기본값으로 설정(검색 가능하게).
+ */
+function applyDefaultDestinationAirportIfMissing() {
+  const form = $('#travel-form');
+  if (!form) return;
+  const dest = getPrimaryDestinationTextForAirportValidation();
+  if (!dest || (typeof isAirportCode === 'function' && isAirportCode(dest))) return;
+  if (state.destination_airport_code) return;
+  if (typeof getAirportsForCity !== 'function' || !getAirportsForCity(dest)?.length) return;
+  const origin = getPrimaryOriginTextForAirportValidation();
+  const originCode = state.origin_airport_code || origin || '';
+  const routeContext = {
+    originInput: origin,
+    destInput: dest,
+    originAirportCode: state.origin_airport_code,
+    destAirportCode: null,
+    domesticRoute: typeof isDomesticRoute === 'function' && isDomesticRoute(
+      origin,
+      dest,
+      state.origin_airport_code,
+      null,
+    ),
+  };
+  const options = {
+    useMiles: form.use_miles?.checked ?? false,
+    mileageProgram: form.mileage_program?.value?.trim() || '',
+    routeContext,
+  };
+  let list = typeof getDestAirportsForOrigin === 'function'
+    ? getDestAirportsForOrigin(originCode, dest, options)
+    : null;
+  if (!list || !list.length) {
+    list = typeof getAirportsForPlaceWithGroundRules === 'function'
+      ? getAirportsForPlaceWithGroundRules(dest, 'destination', { routeContext })
+      : (typeof getAirportsForCity === 'function' ? getAirportsForCity(dest) : null);
+  }
+  if (Array.isArray(list) && list.length && list[0]?.code) {
+    state.destination_airport_code = list[0].code;
+  }
 }
 
 function initDestinationAirportSync() {
@@ -2560,12 +2627,20 @@ function initDestinationAirportSync() {
       } catch (_) { /* ignore */ }
     }
   });
+  el.addEventListener('blur', () => {
+    validateDestinationAirportMatchesDestination();
+    applyDefaultDestinationAirportIfMissing();
+    try {
+      saveFormToStorage();
+    } catch (_) { /* ignore */ }
+  });
 }
 
 function initStepIndicator() {
   show('step-input');
   loadFormFromStorage();
   validateDestinationAirportMatchesDestination();
+  applyDefaultDestinationAirportIfMissing();
   initDestinationAirportSync();
   initTripTypeUI();
   renderPlanUI();

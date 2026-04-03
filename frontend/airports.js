@@ -50,6 +50,22 @@ const CITY_AIRPORTS = {
     { code: 'INN', name: '인스부르크', drive_hours: 2, country: 'AT' },
     { code: 'MUC', name: '뮌헨', drive_hours: 4, country: 'DE' },
   ],
+  /** 남미 파타고니아(아르헨티나·칠레) — 이탈리아 공항과 혼동되지 않게 별도 키 */
+  /** drive_hours: 지역 중심(남부) 기준 대략적 접근성 — 정렬 시 ‘가까운’ 공항 우선(EZE·SCL은 허브) */
+  파타고니아: [
+    { code: 'FTE', name: '엘 칼라파테', drive_hours: 0.5, country: 'AR' },
+    { code: 'USH', name: '우수아이아', drive_hours: 1, country: 'AR' },
+    { code: 'PMC', name: '푸에르토 몬트', drive_hours: 2, country: 'CL' },
+    { code: 'EZE', name: '부에노스아이레스 에세이사', drive_hours: 5, country: 'AR' },
+    { code: 'SCL', name: '산티아고', drive_hours: 5, country: 'CL' },
+  ],
+  Patagonia: [
+    { code: 'FTE', name: 'El Calafate', drive_hours: 0.5, country: 'AR' },
+    { code: 'USH', name: 'Ushuaia', drive_hours: 1, country: 'AR' },
+    { code: 'PMC', name: 'Puerto Montt', drive_hours: 2, country: 'CL' },
+    { code: 'EZE', name: 'Buenos Aires Ezeiza', drive_hours: 5, country: 'AR' },
+    { code: 'SCL', name: 'Santiago', drive_hours: 5, country: 'CL' },
+  ],
 };
 
 /** 도시 키 → 국가(ISO2). 공항 선택 시 앵커 국가로 사용 */
@@ -57,6 +73,7 @@ const CITY_COUNTRY = {
   서울: 'KR', 인천: 'KR', 부산: 'KR', 제주: 'KR',
   오사카: 'JP', 도쿄: 'JP', 방콕: 'TH', 싱가포르: 'SG', 홍콩: 'HK',
   돌로미티: 'IT', 도로미티: 'IT',
+  파타고니아: 'AR', Patagonia: 'AR',
 };
 
 /**
@@ -102,9 +119,13 @@ function isAirportCode(str) {
 function findCityKey(name) {
   if (!name || typeof name !== 'string') return null;
   const t = name.trim();
-  return Object.keys(CITY_AIRPORTS).find(
-    (k) => t.includes(k) || k.includes(t),
-  ) || null;
+  if (!t) return null;
+  const tl = t.toLowerCase();
+  // 사용자 입력에 등록 도시명이 포함되는 경우만 (예: "돌로미티 3박") — k.includes(t)는 "도" 등 짧은 문자로 돌로미티 오인식 가능성이 있어 제외
+  return Object.keys(CITY_AIRPORTS).find((k) => {
+    const kl = k.toLowerCase();
+    return tl.includes(kl);
+  }) || null;
 }
 
 /** IATA → 국가(알려진 코드만). CITY_AIRPORTS에서 수집 */
