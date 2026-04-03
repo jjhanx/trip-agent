@@ -1713,7 +1713,7 @@ async def postprocess_attraction_list_for_catalog(
         location_bias=location_bias,
     )
     ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
-    if target_count and merged_pre_llm and len(ats_enriched) < target_count:
+    if target_count and len(ats_enriched) < target_count:
         ats_enriched = _fill_attraction_catalog_to_count(
             list(ats_enriched), target_count, merged_pre_llm, destination
         )
@@ -1740,6 +1740,13 @@ async def postprocess_attraction_list_for_catalog(
                 desc,
                 str(a.get("google_maps_url") or ""),
             )
+    # 이미지·중복 제거 후에도 일수×3 미달이면 merged_pre_llm 없이도 일반 템플릿으로 최종 채움
+    if target_count and len(catalog_ordered) < target_count:
+        catalog_ordered = _fill_attraction_catalog_to_count(
+            list(catalog_ordered), target_count, merged_pre_llm, destination
+        )
+        if len(catalog_ordered) > target_count:
+            catalog_ordered = catalog_ordered[:target_count]
     return _renumber_attraction_ids(catalog_ordered)
 
 
@@ -1871,6 +1878,9 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         raw_google, destination, n_attr
                     )
                     merged_pre_llm = _dedupe_attractions_by_canonical_name(merged_pre_llm)
+                    merged_pre_llm = _fill_attraction_catalog_to_count(
+                        list(merged_pre_llm), n_attr, merged_pre_llm, destination
+                    )[:n_attr]
                     out["attractions"] = merged_pre_llm
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(주변 검색·전망·케이블카·호수·트레일 등 키워드와 "
