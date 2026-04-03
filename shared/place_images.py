@@ -68,11 +68,24 @@ def _tokens(s: str) -> list[str]:
     return [w for w in s.split() if len(w) >= 3 and w not in _STOP]
 
 
+def _tokens_attraction_match(s: str) -> list[str]:
+    """Places/Commons 제목과 비교할 때 명소명 쪽 토큰.
+    한글·괄호 설명이 붙으면 토큰이 늘어 (cadini, misurina, 포인트…) 과반 일치 요구가 커져
+    Google/Commons 라틴 지명만 있는 제목과 매칭이 실패할 수 있음 → 라틴 지명 토큰을 우선한다."""
+    allw = _tokens(s)
+    latin = [w for w in allw if re.match(r"^[a-z]{3,}$", w)]
+    if len(latin) >= 2:
+        return latin
+    if len(latin) == 1:
+        return latin + [w for w in allw if w not in latin]
+    return allw
+
+
 def _title_relevant_to_attraction(article_title: str, attraction_name: str) -> bool:
     """문서/파일 제목이 명소 이름과 충분히 겹치는지(첫 검색 결과만 믿지 않음)."""
     if not attraction_name or not article_title:
         return False
-    nt = _tokens(attraction_name)
+    nt = _tokens_attraction_match(attraction_name)
     at = set(_tokens(article_title))
     if not nt:
         return True
@@ -452,6 +465,11 @@ def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
             "Wikimedia Commons · Cadini di Misurina",
         ),
         (
+            ("카디니", "미수리나"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
+            "Wikimedia Commons · Cadini di Misurina",
+        ),
+        (
             ("passo gardena",),
             "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2b/Passo_Gardena.jpg/800px-Passo_Gardena.jpg",
             "Wikimedia Commons · Passo Gardena",
@@ -594,6 +612,15 @@ async def enrich_attractions_images(
                     )
                     if r:
                         res = r
+
+                # 알려진 Wikimedia 정적 URL은 검색 실패·엄격한 제목 매칭보다 먼저(중복 키는 아래에서 걸러짐)
+                if not res or not (res.get("image_url") or "").strip().startswith("https://"):
+                    fb_early = _wikimedia_commons_fallback(name)
+                    if fb_early:
+                        u_e = (fb_early.get("image_url") or "").strip()
+                        k_e = normalize_url_key(u_e)
+                        if u_e.startswith("https://") and k_e and k_e not in used_keys:
+                            res = fb_early
 
                 if not res or not (res.get("image_url") or "").strip().startswith("https://"):
                     res = await resolve_place_image(
