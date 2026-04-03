@@ -24,15 +24,7 @@ ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 ITWIKI_API = "https://it.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
-# upload.wikimedia.org 직접 thumb 핫링크는 429·구버전 해시 404가 날 수 있음.
-# commons Special:FilePath?width= 는 공식 리다이렉트로 스케일된 JPEG를 돌려준다(브라우저 img src에 적합).
-COMMONS_FILEPATH_VAL_DI_FUNES = (
-    "https://commons.wikimedia.org/wiki/Special:FilePath/"
-    "Chiesetta_di_San_Giovanni_in_Ranui_(Val_di_Funes).jpg?width=800"
-)
-COMMONS_FILEPATH_CADINI_DI_MISURINA = (
-    "https://commons.wikimedia.org/wiki/Special:FilePath/Cadini_di_Misurina.jpg?width=800"
-)
+# Commons 썸네일은 하드코딩 URL이 아니라 API(imageinfo.thumburl)로 매 요청 시 해석한다(경로·429·엉뚱한 파일 방지).
 
 # 너무 흔한 조사·관사 (영·이·독 등)
 _STOP = frozenset({
@@ -138,6 +130,109 @@ def _commons_file_relevant(file_title: str, attraction_name: str) -> bool:
     return _title_relevant_to_attraction(base, attraction_name)
 
 
+def _reject_commons_file_title(file_title: str) -> bool:
+    """지도·로고 등 대표 풍경 사진으로 부적절한 파일 제목."""
+    t = (file_title or "").lower()
+    if any(
+        x in t
+        for x in (
+            "location map",
+            "locator map",
+            "position map",
+            "situation map",
+            "outline map",
+            "logo of",
+            "coat of arms",
+            "flag of",
+        )
+    ):
+        return True
+    if t.endswith(".svg") and any(x in t for x in ("map", "diagram", "scheme", "location")):
+        return True
+    return False
+
+
+def _score_commons_file_for_attraction(file_title: str, attraction_name: str) -> float:
+    """파일 제목과 명소명 정합성 점수(높을수록 적합). 음수면 후보에서 제외."""
+    if not file_title or not attraction_name:
+        return 0.0
+    if _reject_commons_file_title(file_title):
+        return -1.0
+    base = file_title.replace("File:", "")
+    base = re.sub(r"\.(jpg|jpeg|png|webp|tif|tiff|svg)$", "", base, flags=re.I)
+    base = base.replace("_", " ")
+    fn = base.lower()
+    nt = _tokens_attraction_match(attraction_name)
+    ft = set(_tokens(fn))
+    hits = sum(1 for w in nt if w in ft)
+    if not nt:
+        return 0.0
+    score = hits / max(len(nt), 1)
+    # 랜드마크 조합(파일명에 흔한 패턴) — 첫 검색 결과 한 장에 의존하지 않도록 가산
+    if "cadini" in fn and "misurina" in fn:
+        score += 0.55
+    if "val" in fn and "funes" in fn:
+        score += 0.5
+    if ("geisler" in fn or "odle" in fn or "odles" in fn) and (
+        "funes" in fn or "funes" in "".join(nt) or "villn" in fn or "villno" in fn
+    ):
+        score += 0.35
+    if ("san" in fn or "santa" in fn) and ("giovanni" in fn or "johann" in fn) and (
+        "ranui" in fn or "funes" in fn or "villn" in fn
+    ):
+        score += 0.35
+    if "passo" in fn and "gardena" in fn:
+        score += 0.4
+    if ("carezza" in fn or "karer" in fn) and ("lago" in fn or "see" in fn or "lake" in fn):
+        score += 0.35
+    return min(score, 4.0)
+
+
+def build_commons_extra_search_queries(name: str, destination: str) -> list[str]:
+    """랜드마크별로 Commons 검색어를 보강해 엉뚱한 첫 결과에 덜 의존하게 한다."""
+    raw = unicodedata.normalize("NFKC", (name or "")).strip()
+    raw = re.sub(r"^\s*\d+\s*[.．・]\s*", "", raw)
+    n = re.sub(r"\s+", " ", raw.lower())
+    dest = (destination or "").strip()
+    extra: list[str] = []
+    if ("cadini" in n and "misurina" in n) or ("카디니" in raw and "미수리나" in raw):
+        extra.extend(
+            [
+                "Cadini di Misurina Dolomites mountain peaks",
+                "Cadini group Misurina aerial",
+                "Cadinigruppe Drei Zinnen nature park",
+            ]
+        )
+    if (
+        "val di funes" in n
+        or ("funes" in n and "val" in n and "di" in n)
+        or ("푸네스" in raw and "계곡" in raw)
+        or ("푸네스" in raw and ("전망" in raw or "드라이브" in raw))
+        or ("funes" in n and "villn" in n)
+    ):
+        extra.extend(
+            [
+                "Geisler Odle Val di Funes panorama",
+                "Villnöß St Johann church Geisler",
+                "Funes valley Dolomites church meadow",
+            ]
+        )
+    if "passo" in n and "gardena" in n:
+        extra.append("Passo Gardena Dolomites scenic road")
+    if "carezza" in n or "karersee" in n or "karer" in n:
+        extra.append("Lago di Carezza Karersee Dolomites")
+    if dest:
+        extra = [f"{q} {dest}"[:300] for q in extra] + extra
+    out: list[str] = []
+    seen: set[str] = set()
+    for q in extra:
+        q = q.strip()
+        if len(q) >= 3 and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
 def _strip_html_credit(s: str) -> str:
     t = html_mod.unescape(s or "")
     t = re.sub(r"<[^>]+>", " ", t)
@@ -235,31 +330,76 @@ async def fetch_commons_unique_thumbnail(
     srlimit: int = 15,
     *,
     require_file_relevance: bool = True,
+    destination: str = "",
+    extra_queries: list[str] | None = None,
 ) -> dict[str, str] | None:
-    q = search_query.strip()[:300]
-    if len(q) < 2:
-        return None
-    data = await _get_json(
-        client,
-        COMMONS_API,
-        {
-            "action": "query",
-            "format": "json",
-            "list": "search",
-            "srsearch": q,
-            "srnamespace": 6,
-            "srlimit": srlimit,
-        },
-    )
-    if not data:
-        return None
-    hits = (data.get("query") or {}).get("search") or []
-    for h in hits:
-        title = h.get("title")
-        if not title or not title.startswith("File:"):
+    """Commons `list=search`로 여러 검색어·후보 파일을 모은 뒤 제목 점수로 정렬하고,
+    `imageinfo`가 돌려주는 thumburl(항상 최신 업로드 경로)만 사용한다. 고정 upload URL에 의존하지 않는다."""
+    q0 = search_query.strip()[:300]
+    cleaned = _clean_name_for_places_search(attraction_name)
+    base = (cleaned if cleaned else attraction_name or "").strip()
+    dest = (destination or "").strip()
+    queries: list[str] = []
+    if len(q0) >= 2:
+        queries.append(q0)
+    if base and base.lower() != q0.lower():
+        if dest:
+            queries.append(f"{base} {dest} Italy Dolomites"[:300])
+        queries.append(f"{base} Dolomites Italy"[:300])
+        queries.append(f"{base} Italy"[:300])
+    if extra_queries:
+        for eq in extra_queries:
+            eq = (eq or "").strip()[:300]
+            if len(eq) >= 2:
+                queries.append(eq)
+    queries.extend(build_commons_extra_search_queries(attraction_name, dest))
+    seen_q: set[str] = set()
+    unique_queries: list[str] = []
+    for x in queries:
+        x = x.strip()
+        if len(x) < 2 or x in seen_q:
             continue
-        if require_file_relevance and not _commons_file_relevant(title, attraction_name):
+        seen_q.add(x)
+        unique_queries.append(x)
+
+    cap = min(max(srlimit, 10), 28)
+    seen_titles: set[str] = set()
+    ranked: list[tuple[float, str]] = []
+    for sq in unique_queries[:14]:
+        data = await _get_json(
+            client,
+            COMMONS_API,
+            {
+                "action": "query",
+                "format": "json",
+                "list": "search",
+                "srsearch": sq,
+                "srnamespace": 6,
+                "srlimit": cap,
+            },
+        )
+        if not data:
             continue
+        for h in (data.get("query") or {}).get("search") or []:
+            title = h.get("title")
+            if not title or not title.startswith("File:"):
+                continue
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            if _reject_commons_file_title(title):
+                continue
+            sc = _score_commons_file_for_attraction(title, attraction_name)
+            if sc < 0:
+                continue
+            if require_file_relevance and not _commons_file_relevant(title, attraction_name):
+                if sc < 0.42:
+                    continue
+            elif sc < 0.2:
+                continue
+            ranked.append((sc, title))
+    ranked.sort(key=lambda x: -x[0])
+    for _sc, title in ranked[:20]:
         data2 = await _get_json(
             client,
             COMMONS_API,
@@ -268,7 +408,7 @@ async def fetch_commons_unique_thumbnail(
                 "format": "json",
                 "titles": title,
                 "prop": "imageinfo",
-                "iiprop": "url|extmetadata",
+                "iiprop": "url|extmetadata|mime",
                 "iiurlwidth": 960,
             },
         )
@@ -280,6 +420,9 @@ async def fetch_commons_unique_thumbnail(
             if not infos:
                 continue
             info = infos[0]
+            mime = (info.get("mime") or "").lower()
+            if mime.startswith("image/svg"):
+                continue
             thumburl = info.get("thumburl") or info.get("url")
             if not thumburl or not str(thumburl).startswith("https://"):
                 continue
@@ -502,79 +645,6 @@ def _strip_ui_list_prefix_for_image_match(s: str) -> str:
     return t
 
 
-def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
-    """명소명 키워드로 알려진 Wikimedia Commons 썸네일(라이선스 명시).
-    LLM이 붙인 한글·부제·유니코드 변형에도 걸리도록 NFKC·느슨한 부분 문자열로 판별한다."""
-    raw = _strip_ui_list_prefix_for_image_match(name or "")
-    n = re.sub(r"\s+", " ", raw.lower())
-
-    _VAL = (
-        COMMONS_FILEPATH_VAL_DI_FUNES,
-        "Wikimedia Commons · Val di Funes (San Giovanni in Ranui)",
-    )
-    _CADINI = (
-        COMMONS_FILEPATH_CADINI_DI_MISURINA,
-        "Wikimedia Commons · Cadini di Misurina",
-    )
-
-    # Cadini: misurina 생략·전망/뷰포인트만 붙은 명칭도 동일 대표 사진으로 매칭
-    if (
-        ("cadini" in n and "misurina" in n)
-        or ("카디니" in raw and "미수리나" in raw)
-        or ("cadini" in n and ("전망" in raw or "viewpoint" in n or "view point" in n))
-    ):
-        return {
-            "image_url": _CADINI[0],
-            "image_credit": _CADINI[1],
-            "image_source": "wikimedia_commons_fallback",
-        }
-
-    # Val di Funes: 영문·한글(푸네스 계곡 등) — UI에 (전망·드라이브)만 붙은 경우도 푸네스+전망/드라이브로 인정
-    if (
-        "val di funes" in n
-        or ("funes" in n and "val" in n and "di" in n)
-        or ("푸네스" in raw and "계곡" in raw)
-        or ("푸네스" in raw and ("전망" in raw or "드라이브" in raw))
-        or ("funes" in n and "villn" in n)
-    ):
-        return {
-            "image_url": _VAL[0],
-            "image_credit": _VAL[1],
-            "image_source": "wikimedia_commons_fallback",
-        }
-
-    rules: list[tuple[tuple[str, ...], str, str]] = [
-        (
-            ("passo gardena",),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2b/Passo_Gardena.jpg/800px-Passo_Gardena.jpg",
-            "Wikimedia Commons · Passo Gardena",
-        ),
-        (
-            ("lago", "carezza"),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
-            "Wikimedia Commons · Lago di Carezza",
-        ),
-        (
-            ("carezza", "karer"),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
-            "Wikimedia Commons · Lago di Carezza",
-        ),
-        (
-            ("karersee",),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Karersee_01.jpg/800px-Karersee_01.jpg",
-            "Wikimedia Commons · Karersee",
-        ),
-    ]
-    for keys, img_url, credit in rules:
-        if all(k in n for k in keys):
-            return {
-                "image_url": img_url,
-                "image_credit": credit,
-                "image_source": "wikimedia_commons_fallback",
-            }
-    return None
-
-
 async def resolve_place_image(
     name: str,
     destination: str,
@@ -630,9 +700,13 @@ async def resolve_place_image(
             if r:
                 return r
 
-        r = await fetch_commons_unique_thumbnail(client, q_full, attraction_name, exclude_url_keys)
+        r = await fetch_commons_unique_thumbnail(
+            client, q_full, attraction_name, exclude_url_keys, destination=dest
+        )
         if not r and q_short != q_full:
-            r = await fetch_commons_unique_thumbnail(client, q_short, attraction_name, exclude_url_keys)
+            r = await fetch_commons_unique_thumbnail(
+                client, q_short, attraction_name, exclude_url_keys, destination=dest
+            )
         if r:
             return r
 
@@ -663,10 +737,6 @@ async def _extra_search_image_when_missing(
     cleaned = _clean_name_for_places_search(name)
     attraction = (cleaned if cleaned else name).strip()
     dest = (destination or "").strip()
-
-    fb = _wikimedia_commons_fallback(name)
-    if fb and str(fb.get("image_url") or "").startswith("https://"):
-        return fb
 
     if use_serpapi and serpapi_key.strip():
         queries: list[str] = []
@@ -716,6 +786,7 @@ async def _extra_search_image_when_missing(
                 attraction,
                 set(),
                 require_file_relevance=False,
+                destination=dest,
             )
             if r and str(r.get("image_url") or "").startswith("https://"):
                 return r
@@ -756,14 +827,6 @@ async def enrich_attractions_images(
                         "image_source": item.get("image_source", "") or "catalog",
                     }
 
-                # 알려진 랜드마크 Commons URL은 Place Details·Text Search보다 먼저(토큰 매칭 실패·used_keys로 폴백 스킵 방지)
-                if not res or not (res.get("image_url") or "").strip().startswith("https://"):
-                    fb_landmark = _wikimedia_commons_fallback(name)
-                    if fb_landmark and str(fb_landmark.get("image_url") or "").strip().startswith(
-                        "https://"
-                    ):
-                        res = fb_landmark
-
                 if not res or not (res.get("image_url") or "").strip().startswith("https://"):
                     if pid and google_places_api_key and not existing.startswith("https://"):
                         r = await fetch_place_photo_from_place_details(
@@ -782,11 +845,6 @@ async def enrich_attractions_images(
                         google_places_api_key=google_places_api_key or "",
                         location_bias=location_bias,
                     )
-
-                if (not res.get("image_url") or not str(res.get("image_url")).strip().startswith("https://")):
-                    fb = _wikimedia_commons_fallback(name)
-                    if fb:
-                        res = fb
 
                 u = (res.get("image_url") or "").strip()
                 if u.startswith("https://"):
@@ -850,20 +908,4 @@ async def enrich_attractions_images(
         else:
             patched.append(item)
 
-    # 근본 보강: 검색·중복·병합 단계에서 URL이 빠졌어도 명칭만 맞으면 정적 Commons는 반드시 적용
-    final: list[dict[str, Any]] = []
-    for item in patched:
-        u = str(item.get("image_url") or "").strip()
-        if u.startswith("https://"):
-            final.append(item)
-            continue
-        fb = _wikimedia_commons_fallback(item.get("name") or "")
-        if fb and str(fb.get("image_url") or "").startswith("https://"):
-            it = dict(item)
-            it["image_url"] = fb["image_url"]
-            it["image_credit"] = fb["image_credit"]
-            it["image_source"] = (fb.get("image_source") or "wikimedia_commons_fallback") + "_final"
-            final.append(it)
-        else:
-            final.append(item)
-    return final
+    return patched

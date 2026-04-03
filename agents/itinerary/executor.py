@@ -26,11 +26,7 @@ from shared.google_place_details import (
     sanitize_attraction_description_for_catalog,
     walking_hiking_clamp_smart,
 )
-from shared.place_images import (
-    COMMONS_FILEPATH_CADINI_DI_MISURINA,
-    COMMONS_FILEPATH_VAL_DI_FUNES,
-    enrich_attractions_images,
-)
+from shared.place_images import enrich_attractions_images
 from shared.utils import new_agent_text_message
 
 logger = logging.getLogger(__name__)
@@ -347,8 +343,8 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "name": "Val di Funes (푸네스 계곡)",
             "category": "전망·드라이브",
             "description": "산타 마달레나 교회 등으로 유명한 사진 명소가 많은 계곡.",
-            "image_url": COMMONS_FILEPATH_VAL_DI_FUNES,
-            "image_credit": f"{w} · Val di Funes (San Giovanni in Ranui)",
+            "image_url": "",
+            "image_credit": "",
             "practical_details": {
                 "parking": "뷰포인트·교회 인근 유료·시간제 주차. 성수기 혼잡.",
                 "cable_car_lift": "",
@@ -392,8 +388,8 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
             "name": "Cadini di Misurina 전망 포인트",
             "category": "짧은 하이킹",
             "description": "짧은 오르막 후 드라마틱한 봉우리 전망을 보는 인기 포인트.",
-            "image_url": COMMONS_FILEPATH_CADINI_DI_MISURINA,
-            "image_credit": f"{w} · Cadini di Misurina",
+            "image_url": "",
+            "image_credit": "",
             "practical_details": {
                 "parking": "미수리나 또는 근처 주차 후 도보 접근.",
                 "cable_car_lift": "",

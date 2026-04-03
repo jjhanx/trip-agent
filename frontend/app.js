@@ -1651,58 +1651,6 @@ function prepareAttractionDescription(text, mapsUrl) {
   return s;
 }
 
-/** shared/place_images.py `_wikimedia_commons_fallback`와 동일 URL — 서버 미보강·저장 JSON·화면 재진입 시에도 카드에 표시 */
-const KNOWN_ATTRACTION_IMAGES = {
-  valDiFunes: {
-    url: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chiesetta_di_San_Giovanni_in_Ranui_(Val_di_Funes).jpg?width=800',
-    credit: 'Wikimedia Commons · Val di Funes (San Giovanni in Ranui)',
-  },
-  cadiniMisurina: {
-    url: 'https://commons.wikimedia.org/wiki/Special:FilePath/Cadini_di_Misurina.jpg?width=800',
-    credit: 'Wikimedia Commons · Cadini di Misurina',
-  },
-};
-
-function stripAttractionListPrefixForImage(name) {
-  if (!name || typeof name !== 'string') return '';
-  let s = name.normalize('NFKC').trim();
-  s = s.replace(/^\s*\d+\s*[.．・]\s*/u, '');
-  return s;
-}
-
-/** image_url이 비어 있을 때만, 명칭 키워드로 Commons 대표 썸네일 보강(서버와 동일 규칙) */
-function applyKnownAttractionImageFallbacks(a) {
-  if (!a || typeof a !== 'object') return;
-  const cur = (a.image_url && String(a.image_url).trim()) || '';
-  if (cur.startsWith('https://')) return;
-  const raw = stripAttractionListPrefixForImage(a.name || '');
-  const n = raw.toLowerCase().replace(/\s+/g, ' ');
-
-  const cadini =
-    (n.includes('cadini') && n.includes('misurina')) ||
-    (raw.includes('카디니') && raw.includes('미수리나')) ||
-    (n.includes('cadini') &&
-      (raw.includes('전망') || n.includes('viewpoint') || n.includes('view point')));
-  if (cadini) {
-    a.image_url = KNOWN_ATTRACTION_IMAGES.cadiniMisurina.url;
-    a.image_credit = KNOWN_ATTRACTION_IMAGES.cadiniMisurina.credit;
-    a.image_source = 'wikimedia_commons_fallback_client';
-    return;
-  }
-
-  const valFunes =
-    n.includes('val di funes') ||
-    (n.includes('funes') && n.includes('val') && n.includes('di')) ||
-    (raw.includes('푸네스') && raw.includes('계곡')) ||
-    (raw.includes('푸네스') && (raw.includes('전망') || raw.includes('드라이브'))) ||
-    (n.includes('funes') && n.includes('villn'));
-  if (valFunes) {
-    a.image_url = KNOWN_ATTRACTION_IMAGES.valDiFunes.url;
-    a.image_credit = KNOWN_ATTRACTION_IMAGES.valDiFunes.credit;
-    a.image_source = 'wikimedia_commons_fallback_client';
-  }
-}
-
 /** 서버 구버전·저장 JSON에 남은 잡음 제거. 로드·API 응답 시 in-place로 description 정리 */
 function sanitizeAttractionCatalogInPlace(catalog) {
   if (!Array.isArray(catalog)) return;
@@ -1711,7 +1659,6 @@ function sanitizeAttractionCatalogInPlace(catalog) {
     const gm = (a.google_maps_url && String(a.google_maps_url).trim()) || '';
     const cleaned = prepareAttractionDescription(a.description, gm);
     if (cleaned !== a.description) a.description = cleaned;
-    applyKnownAttractionImageFallbacks(a);
   }
 }
 
