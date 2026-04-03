@@ -629,6 +629,12 @@ button.secondary:hover {
   color: var(--muted);
 }
 
+.attraction-card__facts dd a {
+  color: var(--accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 /* 렌트카 카드 (상세 정보 + 사진) */
 .rental-select-hint {
   margin: 0.5rem 0 0.75rem;

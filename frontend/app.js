@@ -1563,6 +1563,20 @@ function linkifyUrlsInPlainText(text) {
   return out;
 }
 
+/** 카드 상단에 지도 링크가 있을 때 소개 본문에만 덩그러니 있는 'Google Maps' 줄 제거 */
+function stripStandaloneGoogleMapsLines(text) {
+  if (text == null || text === '') return '';
+  return String(text)
+    .split(/\r?\n/)
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true;
+      return !/^Google\s*Maps\.?$/i.test(t);
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
 function normalizeLocalTransport(lt) {
   if (Array.isArray(lt)) return lt;
@@ -1757,7 +1771,9 @@ function renderPracticalDetailsHtml(pd) {
   return Object.keys(PRACTICAL_DETAIL_LABELS).map((k) => {
     const v = pd[k];
     if (v == null || String(v).trim() === '') return '';
-    return `<dt>${escapeHtml(PRACTICAL_DETAIL_LABELS[k])}</dt><dd>${escapeHtml(String(v))}</dd>`;
+    const raw = String(v);
+    const dd = k === 'fees_other' ? linkifyUrlsInPlainText(raw) : escapeHtml(raw);
+    return `<dt>${escapeHtml(PRACTICAL_DETAIL_LABELS[k])}</dt><dd>${dd}</dd>`;
   }).join('');
 }
 
@@ -1868,7 +1884,7 @@ function renderItineraryWorkflow(data) {
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
-                <p class="attraction-card__desc">${linkifyUrlsInPlainText(a.description || '')}</p>
+                <p class="attraction-card__desc">${linkifyUrlsInPlainText(stripStandaloneGoogleMapsLines(a.description || ''))}</p>
                 ${linksRow}
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
