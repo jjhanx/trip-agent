@@ -6,6 +6,7 @@ from __future__ import annotations
 import html as html_mod
 import logging
 import re
+import unicodedata
 from typing import Any
 from urllib.parse import urlparse
 from urllib.parse import urlencode
@@ -485,25 +486,46 @@ async def fetch_place_photo_from_place_details(
 
 
 def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
-    """명소명 키워드로 알려진 Wikimedia Commons 썸네일(라이선스 명시)."""
-    n = (name or "").lower()
-    # (필요 키워드 튜플, url, credit)
+    """명소명 키워드로 알려진 Wikimedia Commons 썸네일(라이선스 명시).
+    LLM이 붙인 한글·부제·유니코드 변형에도 걸리도록 NFKC·느슨한 부분 문자열로 판별한다."""
+    raw = unicodedata.normalize("NFKC", (name or "")).strip()
+    n = re.sub(r"\s+", " ", raw.lower())
+
+    _VAL = (
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg",
+        "Wikimedia Commons · Val di Funes",
+    )
+    _CADINI = (
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
+        "Wikimedia Commons · Cadini di Misurina",
+    )
+
+    # Cadini: misurina 생략·전망/뷰포인트만 붙은 명칭도 동일 대표 사진으로 매칭
+    if (
+        ("cadini" in n and "misurina" in n)
+        or ("카디니" in raw and "미수리나" in raw)
+        or ("cadini" in n and ("전망" in raw or "viewpoint" in n or "view point" in n))
+    ):
+        return {
+            "image_url": _CADINI[0],
+            "image_credit": _CADINI[1],
+            "image_source": "wikimedia_commons_fallback",
+        }
+
+    # Val di Funes: 영문·한글(푸네스 계곡 등)
+    if (
+        "val di funes" in n
+        or ("funes" in n and "val" in n and "di" in n)
+        or ("푸네스" in raw and "계곡" in raw)
+        or ("funes" in n and "villn" in n)
+    ):
+        return {
+            "image_url": _VAL[0],
+            "image_credit": _VAL[1],
+            "image_source": "wikimedia_commons_fallback",
+        }
+
     rules: list[tuple[tuple[str, ...], str, str]] = [
-        (
-            ("val di funes", "funes"),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg",
-            "Wikimedia Commons · Val di Funes",
-        ),
-        (
-            ("cadini", "misurina"),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
-            "Wikimedia Commons · Cadini di Misurina",
-        ),
-        (
-            ("카디니", "미수리나"),
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
-            "Wikimedia Commons · Cadini di Misurina",
-        ),
         (
             ("passo gardena",),
             "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2b/Passo_Gardena.jpg/800px-Passo_Gardena.jpg",
@@ -809,4 +831,20 @@ async def enrich_attractions_images(
         else:
             patched.append(item)
 
-    return patched
+    # 근본 보강: 검색·중복·병합 단계에서 URL이 빠졌어도 명칭만 맞으면 정적 Commons는 반드시 적용
+    final: list[dict[str, Any]] = []
+    for item in patched:
+        u = str(item.get("image_url") or "").strip()
+        if u.startswith("https://"):
+            final.append(item)
+            continue
+        fb = _wikimedia_commons_fallback(item.get("name") or "")
+        if fb and str(fb.get("image_url") or "").startswith("https://"):
+            it = dict(item)
+            it["image_url"] = fb["image_url"]
+            it["image_credit"] = fb["image_credit"]
+            it["image_source"] = (fb.get("image_source") or "wikimedia_commons_fallback") + "_final"
+            final.append(it)
+        else:
+            final.append(item)
+    return final

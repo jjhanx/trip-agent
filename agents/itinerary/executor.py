@@ -186,10 +186,11 @@ def _dedupe_attractions_by_canonical_name(attractions: list[dict[str, Any]]) -> 
     if not attractions:
         return attractions
 
-    def score(x: dict[str, Any]) -> tuple[int, int]:
+    def score(x: dict[str, Any]) -> tuple[int, int, int]:
+        # 대표 사진이 있는 카드가 설명만 긴 카드보다 우선(이전에는 설명 길이만으로 이미지 없는 쪽이 남는 경우가 있었음)
+        has_img = 1 if str(x.get("image_url") or "").strip().startswith("https://") else 0
         pid = 1 if (x.get("place_id") or "").strip() else 0
-        img = 1 if str(x.get("image_url") or "").strip().startswith("https://") else 0
-        return (pid + img, len(str(x.get("description") or "")))
+        return (has_img, pid, len(str(x.get("description") or "")))
 
     merged: list[dict[str, Any]] = []
     for a in attractions:
@@ -218,6 +219,12 @@ def _dedupe_attractions_by_canonical_name(attractions: list[dict[str, Any]]) -> 
             merged[found] = new
         elif len(nm) > len((cur.get("name") or "")):
             merged[found]["name"] = nm
+            cu = str(merged[found].get("image_url") or "").strip()
+            au = str(a.get("image_url") or "").strip()
+            if not cu.startswith("https://") and au.startswith("https://"):
+                merged[found]["image_url"] = au
+                merged[found]["image_credit"] = a.get("image_credit", "")
+                merged[found]["image_source"] = a.get("image_source", "")
     return merged
 
 
