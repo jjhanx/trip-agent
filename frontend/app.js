@@ -1563,22 +1563,23 @@ function linkifyUrlsInPlainText(text) {
   return out;
 }
 
-/** 소개 본문에서 'Google Maps' 문구 제거(단독 줄·문장 안 모두). 상단 지도 링크와 중복 방지. */
-function stripGoogleMapsFromDescription(text) {
+/**
+ * 설명에 들어 있는 google_maps_url과 동일한 URL 직후에 붙은 중복 라벨 "Google Maps" 한 번만 제거.
+ * (카드 상단 지도 링크와 겹치는 경우만; "Google Maps 기준 …" 등 문장 안 표현은 유지)
+ */
+function stripRedundantGoogleMapsAfterMapsUrl(text, mapsUrl) {
   if (text == null || text === '') return '';
-  return String(text)
-    .split(/\r?\n/)
-    .map((line) =>
-      line
-        .replace(/Google\s*Maps/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .replace(/\s+([.,;:!?])/g, '$1')
-        .trim()
-    )
-    .filter((line) => line.length > 0)
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const s = String(text);
+  const u = mapsUrl && String(mapsUrl).trim();
+  if (!u) return s;
+  const idx = s.indexOf(u);
+  if (idx === -1) return s;
+  const after = idx + u.length;
+  const rest = s.slice(after);
+  const re = /^\s*[,;:]?\s*Google\s*Maps(?:\s*[.,;:!?])?(?!\s+\p{L})/u;
+  const m = rest.match(re);
+  if (!m) return s;
+  return (s.slice(0, after) + rest.slice(m[0].length)).replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
@@ -1888,7 +1889,7 @@ function renderItineraryWorkflow(data) {
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
-                <p class="attraction-card__desc">${linkifyUrlsInPlainText(stripGoogleMapsFromDescription(a.description || ''))}</p>
+                <p class="attraction-card__desc">${linkifyUrlsInPlainText(stripRedundantGoogleMapsAfterMapsUrl(a.description || '', gmRaw))}</p>
                 ${linksRow}
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
