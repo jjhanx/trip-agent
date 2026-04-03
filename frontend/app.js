@@ -302,6 +302,10 @@ function loadPlanIntoState(data) {
   state.selectedAccommodation = data.selectedAccommodation ?? null;
   state.localTransport = normalizeLocalTransport(data.localTransport);
   state.selectedLocalTransport = data.selectedLocalTransport ?? null;
+  validateDestinationAirportMatchesDestination();
+  try {
+    saveFormToStorage();
+  } catch (_) { /* ignore */ }
 }
 
 function getSavedPlans() {
@@ -2526,9 +2530,43 @@ function openCalendar(target) {
   $('#calendar-picker').classList.remove('hidden');
 }
 
+/** 목적지 문자열과 무관하게 남은 destination_airport_code(로컬스토리지·이전 계획) 제거 */
+function validateDestinationAirportMatchesDestination() {
+  const destEl = $('#destination_input');
+  const dest = (destEl?.value || '').trim();
+  if (!dest || (typeof isAirportCode === 'function' && isAirportCode(dest))) return;
+  const code = state.destination_airport_code;
+  if (!code) return;
+  const airports = typeof getAirportsForCity === 'function' ? getAirportsForCity(dest) : null;
+  if (!airports || !airports.length) {
+    state.destination_airport_code = null;
+    return;
+  }
+  const ok = airports.some((a) => a.code === code);
+  if (!ok) state.destination_airport_code = null;
+}
+
+function initDestinationAirportSync() {
+  const el = $('#destination_input');
+  if (!el) return;
+  let last = (el.value || '').trim();
+  el.addEventListener('input', () => {
+    const v = (el.value || '').trim();
+    if (v !== last) {
+      state.destination_airport_code = null;
+      last = v;
+      try {
+        saveFormToStorage();
+      } catch (_) { /* ignore */ }
+    }
+  });
+}
+
 function initStepIndicator() {
   show('step-input');
   loadFormFromStorage();
+  validateDestinationAirportMatchesDestination();
+  initDestinationAirportSync();
   initTripTypeUI();
   renderPlanUI();
   initPlanToolbar();
