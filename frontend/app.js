@@ -1565,7 +1565,7 @@ function linkifyUrlsInPlainText(text) {
 
 /**
  * 설명에 들어 있는 google_maps_url과 동일한 URL 직후에 붙은 중복 라벨 "Google Maps" 한 번만 제거.
- * (카드 상단 지도 링크와 겹치는 경우만; "Google Maps 기준 …" 등 문장 안 표현은 유지)
+ * (문장 안 "Google Maps 기준 …" 등은 유지)
  */
 function stripRedundantGoogleMapsAfterMapsUrl(text, mapsUrl) {
   if (text == null || text === '') return '';
@@ -1580,6 +1580,40 @@ function stripRedundantGoogleMapsAfterMapsUrl(text, mapsUrl) {
   const m = rest.match(re);
   if (!m) return s;
   return (s.slice(0, after) + rest.slice(m[0].length)).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 줄 전체가 "Google Maps"뿐인 경우 처리.
+ * - 카드에 지도 링크가 있으면 그 줄은 링크 행과 중복이므로 모두 제거.
+ * - 지도 링크가 없으면 첫 번째만 남기고 둘째 줄부터 제거(동일 라벨 중복).
+ * 문장 안 "Google Maps 기준 …" 는 줄 전체가 아니므로 유지.
+ */
+function stripStandaloneGoogleMapsLabelLines(text, mapsUrl) {
+  if (text == null || text === '') return '';
+  const hasMapLink = !!(mapsUrl && String(mapsUrl).trim());
+  const lines = String(text).split(/\r?\n/);
+  let seenStandalone = false;
+  const out = [];
+  for (const line of lines) {
+    const t = line.trim();
+    const isStandalone = /^Google\s*Maps\.?$/i.test(t);
+    if (!isStandalone) {
+      out.push(line);
+      continue;
+    }
+    if (hasMapLink) {
+      continue;
+    }
+    if (!seenStandalone) {
+      seenStandalone = true;
+      out.push(line);
+    }
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function prepareAttractionDescription(text, mapsUrl) {
+  return stripStandaloneGoogleMapsLabelLines(stripRedundantGoogleMapsAfterMapsUrl(text || '', mapsUrl), mapsUrl);
 }
 
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
@@ -1889,7 +1923,7 @@ function renderItineraryWorkflow(data) {
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
-                <p class="attraction-card__desc">${linkifyUrlsInPlainText(stripRedundantGoogleMapsAfterMapsUrl(a.description || '', gmRaw))}</p>
+                <p class="attraction-card__desc">${linkifyUrlsInPlainText(prepareAttractionDescription(a.description, gmRaw))}</p>
                 ${linksRow}
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
