@@ -353,7 +353,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 600s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
         proxy_connect_timeout 75s;
     }
 }
@@ -398,7 +399,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 600s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
         proxy_connect_timeout 75s;
     }
 }
@@ -518,7 +520,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 600s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
         proxy_connect_timeout 75s;
     }
 }
@@ -638,11 +641,12 @@ sudo tail -50 /var/log/nginx/error.log
 
 ### HTTP 504 Gateway Timeout (Nginx·프록시 사용 시)
 
-**원인**: 브라우저 → Nginx(또는 클라우드 로드밸런서) → Session(9000) 흐름에서, **업스트림 응답이 늦어지면** 프록시가 먼저 끊어 **504**를 반환합니다. 일정(itinerary) 단계는 Places·LLM·이미지 보강으로 **수 분** 걸릴 수 있습니다.
+**원인**: 브라우저 → Nginx(또는 클라우드 로드밸런서) → Session(9000) 흐름에서, **업스트림 응답이 늦어지면** 프록시가 먼저 끊어 **504**를 반환합니다. 일정(itinerary) 단계는 Places·LLM·이미지 보강으로 **수 분~15분 이상** 걸릴 수 있습니다. **앱 타임아웃(기본 900초)보다 프록시가 짧으면** 항상 504가 납니다.
 
-1. **Nginx** `server` 블록의 `location`에 **`proxy_read_timeout 600s;`**(이 저장소 예시와 동일)가 있는지 확인하고, 더 짧게 두었다면 늘리세요. 수정 후 `sudo nginx -t` → `sudo systemctl reload nginx`.
-2. **애플리케이션**: `.env`에서 `A2A_ITINERARY_TIMEOUT_SECONDS=600`(기본값) 이상으로 Session이 Itinerary A2A를 기다리도록 맞춥니다. 컨테이너 재시작 후 반영.
-3. **클라우드 ALB/API Gateway** 등은 별도 **idle timeout**(예: 60초)이 있으면 일정 단계에서 504가 날 수 있으니, 해당 제품 문서에 따라 **최소 300~600초**로 올리는 것을 검토하세요.
+1. **Nginx** `location`에 **`proxy_read_timeout 900s;`** 와 **`proxy_send_timeout 900s;`** 가 있는지 확인합니다(이 저장소 예시와 동일). `60s` 등으로 짧으면 늘린 뒤 `sudo nginx -t` → `sudo systemctl reload nginx`.
+2. **애플리케이션**: `.env`에서 `A2A_ITINERARY_TIMEOUT_SECONDS=900`(기본값) 이상으로 Session이 Itinerary A2A를 기다리도록 맞춥니다. 컨테이너 재시작 후 반영.
+3. **클라우드 ALB / NLB / API Gateway** 등은 **idle timeout**이 별도(예: 60초)이면 일정 단계에서 504가 날 수 있으니, 제품 문서에 따라 **최소 900초** 또는 그 이상으로 올립니다.
+4. **Cloudflare**(오렌지 구름)를 쓰는 경우: 무료/Pro 플랜은 **엔드유저↔Cloudflare** 구간에 **약 100초** 제한이 있어, 긴 일정 요청은 504가 나기 쉽습니다. **해당 서브도메인만 DNS만(회색 구름)** 으로 두거나, 긴 작업은 비동기 API·폴링 패턴을 검토합니다.
 
 ### 컨테이너가 바로 종료될 때 (Exited 1)
 
