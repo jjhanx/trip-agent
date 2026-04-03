@@ -522,6 +522,7 @@ class SessionExecutor(BaseAgentExecutor):
                         "목(mock) 명소로 폴백합니다. ITINERARY_AGENT_URL·itinerary 컨테이너·네트워크를 확인하세요."
                     )
                 from agents.itinerary.executor import (
+                    _attraction_target_count,
                     _mock_attractions,
                     _trip_inclusive_days,
                     postprocess_attraction_list_for_catalog,
@@ -536,6 +537,7 @@ class SessionExecutor(BaseAgentExecutor):
                 if phase == "attractions":
                     atts_fb = fallback.get("attractions")
                     if isinstance(atts_fb, list) and atts_fb:
+                        n_attr = _attraction_target_count(trip_days)
                         fallback["attractions"] = await postprocess_attraction_list_for_catalog(
                             atts_fb,
                             settings=self.settings,
@@ -545,6 +547,7 @@ class SessionExecutor(BaseAgentExecutor):
                             merged_pre_llm=None,
                             location_bias=None,
                             response_out=fallback,
+                            target_count=n_attr,
                         )
                 await event_queue.enqueue_event(
                     new_agent_text_message(json.dumps(fallback, ensure_ascii=False))

@@ -49,8 +49,13 @@ def _date_list(start_date: str, end_date: str) -> list[str]:
     return out
 
 
-# 여행 일수×3 후보 상한(과도한 Places·LLM 부하 방지). 21일×3=63 등은 이 한도 안에서 허용.
-MAX_ITINERARY_ATTRACTION_CANDIDATES = 90
+# 여행 일수×3 후보 상한(과도한 Places·LLM 부하 방지). 30일×3=90, 45일까지는 200까지 허용.
+MAX_ITINERARY_ATTRACTION_CANDIDATES = 200
+
+
+def _attraction_target_count(trip_days: int) -> int:
+    """명소 후보 목표 개수 = 포함 일수 × 3 (상한 적용)."""
+    return max(1, min(trip_days * 3, MAX_ITINERARY_ATTRACTION_CANDIDATES))
 
 PRACTICAL_DETAIL_KEYS: tuple[str, ...] = (
     "parking",
@@ -869,7 +874,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _mock_attractions(destination: str, trip_days: int, preference: dict) -> dict[str, Any]:
-    n = min(trip_days * 3, MAX_ITINERARY_ATTRACTION_CANDIDATES)
+    n = _attraction_target_count(trip_days)
     attractions = _build_mock_attraction_list(destination, n)
     return {
         "itinerary_step": "select_attractions",
@@ -1112,6 +1117,83 @@ def _merge_google_with_region_templates(
     return merged[:n_attr]
 
 
+def _place_itinerary_rank_key(p: dict[str, Any]) -> tuple[int, float, int]:
+    """Places 후보 정렬: 4.3+ 품질 통과(0) → 4.0대 → 3.5대 → 3.0대 → 2.5대(최후). 낮은 튜플이 우선."""
+    r = float(p.get("rating") or 0.0)
+    rev = int(p.get("user_ratings_total") or 0)
+    if r < 2.5:
+        return (99, 0.0, 0)
+    if r >= 4.3 and _place_passes_quality_filter(p, 4.3):
+        return (0, -r, -rev)
+    if r >= 4.0:
+        return (1, -r, -rev)
+    if r >= 3.5:
+        return (2, -r, -rev) if rev >= 2 else (99, 0.0, 0)
+    if r >= 3.0:
+        return (3, -r, -rev) if rev >= 3 else (99, 0.0, 0)
+    return (4, -r, -rev) if rev >= 8 else (99, 0.0, 0)
+
+
+def _fill_attraction_catalog_to_count(
+    current: list[dict[str, Any]],
+    n_target: int,
+    merged_pre_llm: list[dict[str, Any]] | None,
+    destination: str,
+) -> list[dict[str, Any]]:
+    """일수×3개가 되도록 merged_pre_llm(구글·템플릿)에서 부족분을 평점 순으로 채운다."""
+    if n_target <= 0:
+        return current
+    out = [dict(x) for x in current if isinstance(x, dict)]
+    if len(out) >= n_target:
+        return out[:n_target]
+
+    def _sort_key(row: dict[str, Any]) -> tuple[float, int]:
+        r = float(row.get("rating") or 0.0)
+        rev = int(row.get("user_ratings_total") or 0)
+        return (-r, -rev)
+
+    seen: set[str] = set()
+    for a in out:
+        nk = _normalize_attraction_key((a.get("name") or "").strip())
+        if nk:
+            seen.add(nk)
+
+    pool = sorted(
+        [dict(x) for x in (merged_pre_llm or []) if isinstance(x, dict)],
+        key=_sort_key,
+    )
+    for row in pool:
+        if len(out) >= n_target:
+            break
+        nm = (row.get("name") or "").strip()
+        nk = _normalize_attraction_key(nm)
+        if not nk or nk in seen:
+            continue
+        if any(_names_likely_same(nm, (o.get("name") or "").strip()) for o in out):
+            continue
+        seen.add(nk)
+        copy = dict(row)
+        copy["id"] = f"attr_{len(out) + 1:03d}"
+        out.append(_ensure_attraction_record(copy, len(out), destination))
+
+    gi = 0
+    while len(out) < n_target:
+        base = _generic_spot(destination, gi)
+        gi += 1
+        nm = (base.get("name") or "").strip()
+        nk = _normalize_attraction_key(nm)
+        if nk in seen:
+            base["name"] = (base.get("name") or "") + f" · 보충 {gi}"
+            nk = _normalize_attraction_key(base["name"])
+        seen.add(nk)
+        base["id"] = f"attr_{len(out) + 1:03d}"
+        out.append(_ensure_attraction_record(base, len(out), destination))
+        if gi > n_target * 3:
+            logger.warning("명소 목표 %d개 채우기에 제한 초과 — %d개에서 중단", n_target, len(out))
+            break
+    return out
+
+
 def _place_passes_quality_filter(p: dict[str, Any], min_rating: float) -> bool:
     """전역: 케이블카·전망·자연 등 고평점·대표 관광지가 리뷰 수만 적다고 제외되지 않게 완화."""
     rating = float(p.get("rating") or 0.0)
@@ -1188,10 +1270,10 @@ async def _fetch_top_attractions_from_google(
     api_key: str,
     start_date: str = "",
     end_date: str = "",
-    min_rating: float = 4.3,
-    max_count: int = 90,
+    max_count: int = 200,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Places Nearby + Text Search로 경로 1 : 목적지 4 비율. 전망·케이블카·자연·호수 포함, 전역 리뷰 수 완화."""
+    """Places Nearby + Text Search로 경로 1 : 목적지 4 비율.
+    4.3+ 품질 통과 장소를 우선하되, 상한 채우기에 부족하면 낮은 평점(높은 순)으로 보강한다."""
     import asyncio
     import httpx
     from urllib.parse import urlencode
@@ -1373,7 +1455,7 @@ async def _fetch_top_attractions_from_google(
     route_res: list[list[dict[str, Any]]] = list(route_pages)
     dest_res: list[list[dict[str, Any]]] = list(dest_pages) + list(text_pages)
 
-    def ingest_pool(lists: list[list[dict]]) -> list[dict]:
+    def ingest_pool_tiered(lists: list[list[dict]]) -> list[dict]:
         combined: list[dict] = []
         seen: set[str] = set()
         for lst in lists:
@@ -1381,7 +1463,7 @@ async def _fetch_top_attractions_from_google(
                 pid = p.get("place_id")
                 if not pid or pid in seen:
                     continue
-                if not _place_passes_quality_filter(p, min_rating):
+                if _place_itinerary_rank_key(p)[0] >= 99:
                     continue
                 ptypes = set(p.get("types", []))
                 if ptypes.intersection(bad_types):
@@ -1397,14 +1479,11 @@ async def _fetch_top_attractions_from_google(
                     continue
                 seen.add(pid)
                 combined.append(p)
-        combined.sort(
-            key=lambda x: (x.get("rating", 0.0), x.get("user_ratings_total", 0)),
-            reverse=True,
-        )
+        combined.sort(key=_place_itinerary_rank_key)
         return combined
 
-    pool_route = ingest_pool(route_res) if route_res else []
-    pool_dest = ingest_pool(dest_res) if dest_res else []
+    pool_route = ingest_pool_tiered(route_res) if route_res else []
+    pool_dest = ingest_pool_tiered(dest_res) if dest_res else []
 
     route_spots = pool_route[:route_target]
     route_ids = {s.get("place_id") for s in route_spots}
@@ -1454,6 +1533,8 @@ async def _fetch_top_attractions_from_google(
                 "image_credit": "Google Maps",
                 "practical_details": {"tips": ""},
                 "types": list(types or []),
+                "rating": float(r_val) if r_val is not None else 0.0,
+                "user_ratings_total": int(rc_val) if rc_val is not None else 0,
             }
         )
 
@@ -1470,18 +1551,29 @@ async def postprocess_attraction_list_for_catalog(
     merged_pre_llm: list[dict[str, Any]] | None = None,
     location_bias: str | None = None,
     response_out: dict[str, Any] | None = None,
+    target_count: int | None = None,
 ) -> list[dict[str, Any]]:
     """Places 상세 → LLM practical 보강 → 이미지. Session 폴백·Itinerary 본 경로 공통."""
     if not atts:
-        return atts
+        if target_count and merged_pre_llm:
+            atts = _fill_attraction_catalog_to_count([], target_count, merged_pre_llm, destination)
+        elif target_count:
+            atts = _fill_attraction_catalog_to_count([], target_count, None, destination)
+        if not atts:
+            return atts
     for i, a in enumerate(atts):
         if isinstance(a, dict):
             atts[i] = _ensure_attraction_record(a, i, destination)
     atts = filter_attractions_drop_guide_services(atts)
     atts = filter_attractions_warm_season_no_ski(atts, start_date, end_date)
     if not atts:
-        logger.warning("명소 후보가 가이드·투어 업체 또는 계절 필터로 모두 제외되었습니다.")
-        return []
+        if target_count and merged_pre_llm:
+            atts = _fill_attraction_catalog_to_count([], target_count, merged_pre_llm, destination)
+            atts = filter_attractions_drop_guide_services(atts)
+            atts = filter_attractions_warm_season_no_ski(atts, start_date, end_date)
+        if not atts:
+            logger.warning("명소 후보가 가이드·투어 업체 또는 계절 필터로 모두 제외되었습니다.")
+            return []
     if merged_pre_llm:
         for a in atts:
             if not isinstance(a, dict):
@@ -1591,6 +1683,13 @@ async def postprocess_attraction_list_for_catalog(
             _sanitize_meta_instruction_practical(pr)
             a["practical_details"] = pr
 
+    if target_count:
+        atts = _fill_attraction_catalog_to_count(
+            list(atts), target_count, merged_pre_llm, destination
+        )
+        if len(atts) > target_count:
+            atts = atts[:target_count]
+
     ats_enriched = await enrich_attractions_images(
         atts,
         destination,
@@ -1600,6 +1699,23 @@ async def postprocess_attraction_list_for_catalog(
         location_bias=location_bias,
     )
     ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
+    if target_count and merged_pre_llm and len(ats_enriched) < target_count:
+        ats_enriched = _fill_attraction_catalog_to_count(
+            list(ats_enriched), target_count, merged_pre_llm, destination
+        )
+        if len(ats_enriched) > target_count:
+            ats_enriched = ats_enriched[:target_count]
+        ats_enriched = await enrich_attractions_images(
+            ats_enriched,
+            destination,
+            serpapi_key=settings.serpapi_api_key or "",
+            use_serpapi=settings.place_images_use_serpapi,
+            google_places_api_key=settings.google_places_api_key or "",
+            location_bias=location_bias,
+        )
+        ats_enriched = _dedupe_attractions_by_canonical_name(ats_enriched)
+        if target_count and len(ats_enriched) > target_count:
+            ats_enriched = ats_enriched[:target_count]
     catalog_ordered = _order_attractions_https_image_first(ats_enriched)
     for a in catalog_ordered:
         if not isinstance(a, dict):
@@ -1721,9 +1837,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 
         if phase == "attractions":
             out = _mock_attractions(destination, trip_days, preference)
-            n_attr = trip_days * 3
-            if n_attr > MAX_ITINERARY_ATTRACTION_CANDIDATES:
-                n_attr = MAX_ITINERARY_ATTRACTION_CANDIDATES
+            n_attr = _attraction_target_count(trip_days)
             merged_pre_llm: list[dict[str, Any]] = []
             location_bias: str | None = None
 
@@ -1746,7 +1860,8 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     out["attractions"] = merged_pre_llm
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(주변 검색·전망·케이블카·호수·트레일 등 키워드와 "
-                        "목적지 반경 텍스트 검색으로 후보를 모은 뒤, 평점·리뷰 수로 정렬합니다. "
+                        "목적지 반경 텍스트 검색으로 후보를 모은 뒤, **4.3★ 이상·품질 통과**를 우선하고 "
+                        "부족하면 **낮은 평점(높은 순)**으로 상한을 채웁니다. "
                         "지역 큐레이션 풀이 있으면 구글만으로 상한이 채워져도 대표 명소가 빠지지 않게 낮은 점수 후보와 교체·"
                         f"부족 시 오프라인 풀로 여행 일수×3(최대 {n_attr}곳)까지 보충합니다. "
                         "출발지~목적지 차량 동선과 목적지 주변을 약 1:4로 나눕니다."
@@ -1794,7 +1909,7 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
 - **[이름] 위 명소 리스트가 있으면 `name`은 반드시 그 목록의 문자열을 **글자 단위로 그대로** 복사한다(번역·축약·치환 금지).
 - **[설명 description]**: "구글맵 평점 기반" 같은 메타 문구는 절대 쓰지 말 것. 각 장소마다 **지명·지형·대표 루트·다른 명소와의 관계·역사·감상 포인트**를 바탕으로 2~4문장으로 **직접 조사한 것처럼** 구체적으로 서술한다(일반적인 관광 소개문 금지).
 - **[중요] 계절·여행 기간**: 일정 **{start_date} ~ {end_date}**에 포함된 **월**을 기준으로 추천한다. **5~9월(또는 그중 일부)이면** 스키장 단지(`ski_resort`)·스키 학교·스키 전용 슬로프·스노우파크 등 **겨울 스키 목적 시설은 넣지 않는다.** 여름에도 운영하는 **전망 케이블카·고산 호수·하이킹 트레일·리프지오** 등은 넣는다. **10~4월 위주 스키 여행**이면 스키 리조트가 핵심일 수 있으므로 그에 맞춘다.
-- **[중요] 내부 관람 필수형(박물관·오페라·극장·스칼라 등)**: 입장·공연 예약이 핵심인 곳은 `fees_other`와 `reservation_note`에 **요금·예약 경로·운영 시간**을 숫자와 절차로 구체적으로 적고, 불가능하면 목록에서 삭제한다. **외관만 보는 것으로 의미 없는 곳은 넣지 않는다.**
+- **[중요] 내부 관람 필수형(박물관·오페라·극장·스칼라 등)**: 입장·공연 예약이 핵심인 곳은 `fees_other`와 `reservation_note`에 **요금·예약 경로·운영 시간**을 숫자와 절차로 구체적으로 적는다. 알 수 없으면 "관련 정보 없음". **외관만 보는 것으로 의미 없는 곳은 넣지 않는다.**
 - **[중요] 도보/하이킹·호수(예: Lago di Sorapis, Cadini, 고산 루프)**: 주차(또는 셔틀)·트레일 초입부터 왕복 시간·난이도·철제 구간 여부를 `walking_hiking`에 필수 기재한다. **총 1000자 이내**로 요약·정리한다(서버 보강 단계에서 방문자 리뷰 발췌가 있으면 잘라 붙이지 않고 요약해 넣는다).
 - **[중요] 답변 회피 금지**: "확인하십시오", "확인하세요", "현지 안내를 확인하세요", "공식 사이트에서 확인" 등 **사용자에게 확인을 떠넘기는** 문구는 **절대 금지**. 모르면 "관련 정보 없음"이라고 명시하되, 당신의 지식으로 **이미 조사한 것처럼** 구체적인 소요시간·거리·요금(숫자)·도시명을 적는다.
 
@@ -1807,7 +1922,7 @@ JSON 객체 하나만 출력:
 - trip_days: {trip_days}
 - time_ratio_note: (첫 번째 Chunk에만 작성 요망, 나머지는 빈 문자열)
 - design_notes: (첫 번째 Chunk에만 작성)
-- attractions: 최대 {target_n}개 배열 (조건 미달 시 제외시켜 수가 적어도 됨). 각 항목 필수:
+- attractions: **정확히 {target_n}개** 배열(청크별로 개수를 맞출 것. **덜 채우거나 넘기면 안 됨**). 각 항목 필수:
   - id: attr_{chunk_idx}_001 형식의 고유 순번
   - name: 위 필수 리스트가 있으면 그대로 복사. 없으면 공식에 가까운 명소명(한글 병기 가능)
   - category: 짧은 분류
@@ -1866,12 +1981,21 @@ JSON 객체 하나만 출력:
                         filtered = _filter_llm_attractions_require_indoor_details(merged_ats)
                         if len(filtered) >= max(6, len(merged_ats) * 2 // 3):
                             merged_ats = filtered
+                        merged_ats = _fill_attraction_catalog_to_count(
+                            merged_ats, n_attr, merged_pre_llm or None, destination
+                        )
+                        merged_ats = merged_ats[:n_attr]
                         out["attractions"] = merged_ats
                         out["trip_days"] = trip_days
                 except Exception:
                     pass
             atts = out.get("attractions")
-            if isinstance(atts, list) and atts:
+            if not isinstance(atts, list):
+                atts = []
+            atts = _fill_attraction_catalog_to_count(atts, n_attr, merged_pre_llm or None, destination)
+            atts = atts[:n_attr]
+            out["trip_days"] = trip_days
+            if atts:
                 out["attractions"] = await postprocess_attraction_list_for_catalog(
                     atts,
                     settings=self.settings,
@@ -1881,7 +2005,10 @@ JSON 객체 하나만 출력:
                     merged_pre_llm=merged_pre_llm if merged_pre_llm else None,
                     location_bias=location_bias,
                     response_out=out,
+                    target_count=n_attr,
                 )
+            else:
+                out["attractions"] = []
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
