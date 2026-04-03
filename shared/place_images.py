@@ -485,10 +485,17 @@ async def fetch_place_photo_from_place_details(
     }
 
 
+def _strip_ui_list_prefix_for_image_match(s: str) -> str:
+    """목록 번호(3. / ３． 등)만 제거 — 카드 제목과 폴백 키워드 매칭을 맞춘다."""
+    t = unicodedata.normalize("NFKC", (s or "")).strip()
+    t = re.sub(r"^\s*\d+\s*[.．・]\s*", "", t)
+    return t
+
+
 def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
     """명소명 키워드로 알려진 Wikimedia Commons 썸네일(라이선스 명시).
     LLM이 붙인 한글·부제·유니코드 변형에도 걸리도록 NFKC·느슨한 부분 문자열로 판별한다."""
-    raw = unicodedata.normalize("NFKC", (name or "")).strip()
+    raw = _strip_ui_list_prefix_for_image_match(name or "")
     n = re.sub(r"\s+", " ", raw.lower())
 
     _VAL = (
@@ -512,11 +519,12 @@ def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
             "image_source": "wikimedia_commons_fallback",
         }
 
-    # Val di Funes: 영문·한글(푸네스 계곡 등)
+    # Val di Funes: 영문·한글(푸네스 계곡 등) — UI에 (전망·드라이브)만 붙은 경우도 푸네스+전망/드라이브로 인정
     if (
         "val di funes" in n
         or ("funes" in n and "val" in n and "di" in n)
         or ("푸네스" in raw and "계곡" in raw)
+        or ("푸네스" in raw and ("전망" in raw or "드라이브" in raw))
         or ("funes" in n and "villn" in n)
     ):
         return {
@@ -737,21 +745,22 @@ async def enrich_attractions_images(
                         "image_credit": item.get("image_credit", "") or "Google Maps",
                         "image_source": item.get("image_source", "") or "catalog",
                     }
-                elif pid and google_places_api_key and not existing.startswith("https://"):
-                    r = await fetch_place_photo_from_place_details(
-                        details_client, pid, google_places_api_key, used_keys
-                    )
-                    if r:
-                        res = r
 
-                # 알려진 Wikimedia 정적 URL은 검색 실패·엄격한 제목 매칭보다 먼저(중복 키는 아래에서 걸러짐)
+                # 알려진 랜드마크 Commons URL은 Place Details·Text Search보다 먼저(토큰 매칭 실패·used_keys로 폴백 스킵 방지)
                 if not res or not (res.get("image_url") or "").strip().startswith("https://"):
-                    fb_early = _wikimedia_commons_fallback(name)
-                    if fb_early:
-                        u_e = (fb_early.get("image_url") or "").strip()
-                        k_e = normalize_url_key(u_e)
-                        if u_e.startswith("https://") and k_e and k_e not in used_keys:
-                            res = fb_early
+                    fb_landmark = _wikimedia_commons_fallback(name)
+                    if fb_landmark and str(fb_landmark.get("image_url") or "").strip().startswith(
+                        "https://"
+                    ):
+                        res = fb_landmark
+
+                if not res or not (res.get("image_url") or "").strip().startswith("https://"):
+                    if pid and google_places_api_key and not existing.startswith("https://"):
+                        r = await fetch_place_photo_from_place_details(
+                            details_client, pid, google_places_api_key, used_keys
+                        )
+                        if r:
+                            res = r
 
                 if not res or not (res.get("image_url") or "").strip().startswith("https://"):
                     res = await resolve_place_image(
