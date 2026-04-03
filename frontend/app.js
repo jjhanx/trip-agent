@@ -1544,6 +1544,25 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** 일반 텍스트를 이스케이프한 뒤 http(s) URL을 새 탭 링크로 감싼다. */
+function linkifyUrlsInPlainText(text) {
+  if (text == null || text === '') return '';
+  const s = String(text);
+  const re = /(https?:\/\/[^\s<]+)/gi;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    out += escapeHtml(s.slice(last, m.index));
+    const url = m[1];
+    const href = escapeHtml(url);
+    out += `<a href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>`;
+    last = m.index + url.length;
+  }
+  out += escapeHtml(s.slice(last));
+  return out;
+}
+
 /** 세션이 local_transport를 문자열·BOM·앞뒤 잡음과 함께 줄 때도 배열로 복원 */
 function normalizeLocalTransport(lt) {
   if (Array.isArray(lt)) return lt;
@@ -1849,7 +1868,7 @@ function renderItineraryWorkflow(data) {
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
-                <p class="attraction-card__desc">${escapeHtml(a.description || '')}</p>
+                <p class="attraction-card__desc">${linkifyUrlsInPlainText(a.description || '')}</p>
                 ${linksRow}
                 ${credit}
                 ${pHtml ? `<dl class="attraction-card__facts">${pHtml}</dl>` : ''}
