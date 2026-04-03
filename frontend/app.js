@@ -1654,11 +1654,11 @@ function prepareAttractionDescription(text, mapsUrl) {
 /** shared/place_images.py `_wikimedia_commons_fallback`와 동일 URL — 서버 미보강·저장 JSON·화면 재진입 시에도 카드에 표시 */
 const KNOWN_ATTRACTION_IMAGES = {
   valDiFunes: {
-    url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg',
-    credit: 'Wikimedia Commons · Val di Funes',
+    url: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chiesetta_di_San_Giovanni_in_Ranui_(Val_di_Funes).jpg?width=800',
+    credit: 'Wikimedia Commons · Val di Funes (San Giovanni in Ranui)',
   },
   cadiniMisurina: {
-    url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg',
+    url: 'https://commons.wikimedia.org/wiki/Special:FilePath/Cadini_di_Misurina.jpg?width=800',
     credit: 'Wikimedia Commons · Cadini di Misurina',
   },
 };

@@ -24,6 +24,16 @@ ENWIKI_API = "https://en.wikipedia.org/w/api.php"
 ITWIKI_API = "https://it.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
+# upload.wikimedia.org 직접 thumb 핫링크는 429·구버전 해시 404가 날 수 있음.
+# commons Special:FilePath?width= 는 공식 리다이렉트로 스케일된 JPEG를 돌려준다(브라우저 img src에 적합).
+COMMONS_FILEPATH_VAL_DI_FUNES = (
+    "https://commons.wikimedia.org/wiki/Special:FilePath/"
+    "Chiesetta_di_San_Giovanni_in_Ranui_(Val_di_Funes).jpg?width=800"
+)
+COMMONS_FILEPATH_CADINI_DI_MISURINA = (
+    "https://commons.wikimedia.org/wiki/Special:FilePath/Cadini_di_Misurina.jpg?width=800"
+)
+
 # 너무 흔한 조사·관사 (영·이·독 등)
 _STOP = frozenset({
     "the", "and", "for", "with", "from", "near", "that", "this", "are", "was",
@@ -499,11 +509,11 @@ def _wikimedia_commons_fallback(name: str) -> dict[str, str] | None:
     n = re.sub(r"\s+", " ", raw.lower())
 
     _VAL = (
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/St._Johann_in_Ranui_mit_Geislergruppe.jpg/800px-St._Johann_in_Ranui_mit_Geislergruppe.jpg",
-        "Wikimedia Commons · Val di Funes",
+        COMMONS_FILEPATH_VAL_DI_FUNES,
+        "Wikimedia Commons · Val di Funes (San Giovanni in Ranui)",
     )
     _CADINI = (
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Cadini_di_Misurina.jpg/800px-Cadini_di_Misurina.jpg",
+        COMMONS_FILEPATH_CADINI_DI_MISURINA,
         "Wikimedia Commons · Cadini di Misurina",
     )
 
