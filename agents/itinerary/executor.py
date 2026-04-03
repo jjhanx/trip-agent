@@ -1408,14 +1408,31 @@ async def _fetch_top_attractions_from_google(
         ("point_of_interest", "panorama"),
         ("tourist_attraction", "scenic"),
     ]
-    route_jobs: list[tuple[str, str, str]] = []
-    dest_jobs: list[tuple[str, str, str]] = []
+    # type 없이 keyword만: 리프트역이 establishment·ski_resort 등으로만 잡혀 tourist_attraction+cable car에서 빠지는 경우 보완(전역).
+    lift_keyword_only_nearby = (
+        "cable car",
+        "funivia",
+        "seilbahn",
+        "bergbahn",
+        "gondola",
+        "funicular",
+        "ropeway",
+        "chairlift",
+        "aerial tram",
+        "ski lift",
+    )
+    route_jobs: list[tuple[str, str | None, str]] = []
+    dest_jobs: list[tuple[str, str | None, str]] = []
     for loc in route_points:
         for typ, kw in type_keyword_pairs[:8]:
             route_jobs.append((loc, typ, kw))
+        for kw in lift_keyword_only_nearby[:6]:
+            route_jobs.append((loc, None, kw))
     for loc in dest_points:
         for typ, kw in type_keyword_pairs:
             dest_jobs.append((loc, typ, kw))
+        for kw in lift_keyword_only_nearby:
+            dest_jobs.append((loc, None, kw))
 
     text_queries: list[str] = []
     head = dest_places[0]
@@ -1429,6 +1446,9 @@ async def _fetch_top_attractions_from_google(
             f"{head} lookout point",
             f"{head} panorama viewpoint",
             f"{head} ropeway",
+            f"{head} funivia",
+            f"{head} seilbahn",
+            f"{head} ski lift",
             f"{head} famous lake",
             f"{head} hiking trail",
             f"{head} nature hiking scenic",
@@ -1437,27 +1457,46 @@ async def _fetch_top_attractions_from_google(
     )
 
     async def nearby_one(
-        client: httpx.AsyncClient, loc: str, typ: str, kw: str
+        client: httpx.AsyncClient, loc: str, typ: str | None, kw: str
     ) -> list[dict[str, Any]]:
+        """Nearby Search. type+keyword 조합은 Places primary type에 걸러질 수 있어, typ=None·keyword만 요청을 별도로 둔다.
+        keyword-only 요청은 고유 place_id 확보를 위해 next_page_token으로 2페이지까지(요청당 최대 20→약 40)."""
         params: dict[str, str] = {
             "location": loc,
             "radius": "45000",
-            "type": typ,
             "key": api_key,
             "language": "en",
         }
+        if typ:
+            params["type"] = typ
         if kw:
             params["keyword"] = kw
-        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" + urlencode(params)
+        if not typ and not kw:
+            return []
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
         try:
-            r = await client.get(url, timeout=15)
-            if r.status_code == 200:
-                return r.json().get("results", [])
+            r = await client.get(url, params=params, timeout=20)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            results: list[dict[str, Any]] = list(data.get("results") or [])
+            token = data.get("next_page_token")
+            if token and not typ and kw:
+                await asyncio.sleep(2.25)
+                r2 = await client.get(
+                    url,
+                    params={"pagetoken": token, "key": api_key},
+                    timeout=20,
+                )
+                if r2.status_code == 200:
+                    results.extend(r2.json().get("results") or [])
+            return results
         except Exception:
             pass
         return []
 
     async def text_search_one(client: httpx.AsyncClient, query: str, loc: str) -> list[dict[str, Any]]:
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
         params = {
             "query": query,
             "location": loc,
@@ -1465,11 +1504,39 @@ async def _fetch_top_attractions_from_google(
             "key": api_key,
             "language": "en",
         }
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json?" + urlencode(params)
         try:
-            r = await client.get(url, timeout=15)
-            if r.status_code == 200:
-                return r.json().get("results", [])
+            r = await client.get(url, params=params, timeout=20)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            results: list[dict[str, Any]] = list(data.get("results") or [])
+            qlow = query.lower()
+            token = data.get("next_page_token")
+            if token and any(
+                x in qlow
+                for x in (
+                    "cable",
+                    "funicular",
+                    "ropeway",
+                    "tram",
+                    "funivia",
+                    "seilbahn",
+                    "lift",
+                    "lookout",
+                    "viewpoint",
+                    "observation",
+                    "panorama",
+                )
+            ):
+                await asyncio.sleep(2.25)
+                r2 = await client.get(
+                    url,
+                    params={"pagetoken": token, "key": api_key},
+                    timeout=20,
+                )
+                if r2.status_code == 200:
+                    results.extend(r2.json().get("results") or [])
+            return results
         except Exception:
             pass
         return []
