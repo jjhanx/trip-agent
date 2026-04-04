@@ -90,6 +90,113 @@ def _looks_like_dolomites(destination: str) -> bool:
     return any(k in d for k in keys)
 
 
+def _looks_like_patagonia(destination: str) -> bool:
+    d = (destination or "").lower()
+    keys = (
+        "patagonia",
+        "파타고니아",
+        "patagon",
+        "calafate",
+        "칼라파테",
+        "perito moreno",
+        "페리토 모레노",
+        "ushuaia",
+        "우수아이아",
+        "tierra del fuego",
+        "티에라 델 푸에고",
+        "torres del paine",
+        "토레스 델 파이네",
+        "puerto natales",
+        "푸에르토 나탈레스",
+        "el chalt",
+        "elchalten",
+        "fitz roy",
+        "핏츠 로이",
+        "chalten",
+        "샬텐",
+        "bariloche",
+        "바리로체",
+        "nahuel huapi",
+        "나우엘 우아피",
+        "punta arenas",
+        "푼타 아레나스",
+        "punta tombo",
+        "los glaciares",
+        "글라시아레스",
+        "puerto madryn",
+        "마드린",
+        "peninsula valdes",
+        "발데스",
+        "beagle channel",
+        "비글 해협",
+        "petrohue",
+        "페트로휘",
+        "torres del",
+        "paine",
+        "파이네",
+    )
+    return any(k in d for k in keys)
+
+
+def _patagonia_geocode_query(place: str) -> str:
+    """목적지 문자열이 파타고니아일 때 남미 앵커로 고정(지오코딩이 한국·미국 등으로 흐르는 것 방지)."""
+    p = (place or "").strip()
+    if not _looks_like_patagonia(p):
+        return p
+    pl = p.lower()
+    if "ushuaia" in pl or "우수아이아" in p:
+        return "Ushuaia, Tierra del Fuego, Argentina"
+    if "natales" in pl or "torres" in pl or "토레스" in p or "paine" in pl or "파이네" in p:
+        return "Puerto Natales, Magallanes, Chile"
+    if "chalt" in pl or "fitz" in pl or "핏츠" in p or "샬텐" in p:
+        return "El Chaltén, Santa Cruz, Argentina"
+    if "bariloche" in pl or "바리로체" in p or "nahuel" in pl:
+        return "San Carlos de Bariloche, Río Negro, Argentina"
+    if "punta arenas" in pl or "푼타 아레나스" in p:
+        return "Punta Arenas, Magallanes, Chile"
+    if "madryn" in pl or "valdes" in pl or "발데스" in p:
+        return "Puerto Madryn, Chubut, Argentina"
+    return "El Calafate, Santa Cruz, Argentina"
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    import math
+
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _formatted_address_suspicious_for_patagonia(addr: str) -> bool:
+    """파타고니아 일정인데 다른 대륙·유명 오탐 지명이 주소에 있으면 제외."""
+    if not addr:
+        return False
+    a = addr.lower()
+    bad = (
+        "south korea",
+        "대한민국",
+        "korea",
+        "italy",
+        "italia",
+        "united states",
+        "wyoming",
+        "yellowstone",
+        "japan",
+        "china",
+        "germany",
+        "france",
+        "팔공산",
+        "대구",
+        "dolomit",
+        "tuscany",
+        "dolomiten",
+    )
+    return any(x in a for x in bad)
+
+
 def _merge_practical_details(raw: Any) -> dict[str, str]:
     base = {k: "" for k in PRACTICAL_DETAIL_KEYS}
     if isinstance(raw, dict):
@@ -849,6 +956,242 @@ def _dolomites_attraction_templates() -> list[dict[str, Any]]:
     return result
 
 
+def _patagonia_attraction_templates() -> list[dict[str, Any]]:
+    """남미 파타고니아 대표 명소(오프라인 큐레이션). 구글 오탐·부족 시 본문·실무 칸을 채운다."""
+    return [
+        {
+            "name": "페리토 모레노 빙하 (Perito Moreno Glacier)",
+            "category": "빙하·국립공원",
+            "description": "로스 글라시아레스 국립공원의 상징. 유난히 활동적인 빙하 전면부가 끊임없이 꺾이고 떨어지는 장관을 볼 수 있습니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "엘 칼라파테에서 셔틀·렌트로 국립공원 매표소·전망 데크까지. 성수기 주차 혼잡.",
+                "cable_car_lift": "",
+                "walking_hiking": "전망 데크·짧은 숲길 1~2시간 또는 빙하 가까이 보트 투어(별도 예약·요금).",
+                "fees_other": "국립공원 입장료·보트 투어는 시즌별 상이.",
+                "reservation_note": "성수기 입장·투어 예약은 사전 확인.",
+                "tips": "방풍·선글라스·빙하 바람 대비.",
+            },
+        },
+        {
+            "name": "토레스 델 파이네 국립공원 (Torres del Paine)",
+            "category": "하이킹·국립공원",
+            "description": "화강암 봉우리와 터쿼이즈 호수로 유명한 칠레 최남단의 대표 트레킹 구역입니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "푸에르토 나탈레스에서 셔틀·투어 진입이 일반적.",
+                "walking_hiking": "W·O 서킷 등 며칠 코스부터 당일 왕복 트레킹까지 다양.",
+                "fees_other": "공원 입장·셔틀·캠핑 예약은 공식 사이트 기준.",
+                "reservation_note": "성수기 캠핑·레푸지오는 수개월 전 예약이 필요할 수 있음.",
+                "tips": "날씨 급변·강풍 대비, 레이어 착용.",
+            },
+        },
+        {
+            "name": "엘 샬텐 · 피츠 로이 (El Chaltén, Monte Fitz Roy)",
+            "category": "하이킹·산악",
+            "description": "핏츠 로이와 세로 토레를 조망하는 트레킹 거점 마을. ‘트레킹 수도’로 불립니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "마을·트레일 헤드 주차. 인기 코스는 이른 출발 권장.",
+                "walking_hiking": "라구나 데 로스 트레스 등 왕복 8~10시간 코스가 대표.",
+                "fees_other": "무료 구간 많음, 가이드 투어는 별도.",
+                "reservation_note": "기상 악화 시 등산로 폐쇄 가능.",
+                "tips": "등산화·물·간식·두꺼운 바람막이.",
+            },
+        },
+        {
+            "name": "우수아이아 (Ushuaia) · 비글 해협",
+            "category": "도시·크루즈",
+            "description": "세계 최남단 도시로 불리는 항구. 비글 해협 크루즈·펭귄 섬 투어가 인기입니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "시내 유료 주차, 항구는 크루즈 시간에 맞춰 이동.",
+                "fees_other": "해협 크루즈·마르티요 섬 펭귄 투어는 별도 요금.",
+                "reservation_note": "크루즈·투어는 전일정 예약 권장(성수기).",
+                "tips": "바람이 강함. 멀미약·방한.",
+            },
+        },
+        {
+            "name": "나우엘 우아피 호수 (Nahuel Huapi) · 바리로체",
+            "category": "호수·마을",
+            "description": "안데스 산맥과 호수가 어우러진 리오 네그로 주의 대표 휴양지.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "바리로체 시내·호숫가 유료 주차.",
+                "fees_other": "페리·케이블카(세로 오토) 등은 별도.",
+                "reservation_note": "스키 시즌과 여름 시즌 시설 상이.",
+                "tips": "호수 주변 드라이브와 단거리 트레킹 병행.",
+            },
+        },
+        {
+            "name": "푼타 톰보 (Punta Tombo) · 마젤란 펭귄",
+            "category": "야생동물",
+            "description": "브이대 마젤란 펭귄 번식지로 유명한 해안 보호구역(접근은 지정 동선).",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "보호구역 매표소 인근 주차 후 지정 산책로.",
+                "fees_other": "입장료·가이드 투어 별도.",
+                "reservation_note": "번식 시즌(대략 9~4월 전후)만 개방되는 경우가 많음.",
+                "tips": "펭귄에게 가까이 가지 말 것. 바람·모래바람 대비.",
+            },
+        },
+        {
+            "name": "발데스 반도 (Península Valdés) · 고래·바다사자",
+            "category": "자연·해양",
+            "description": "남우고래·바다사자·펭귄 등 해양 포유류 관찰로 유네스코 자연유산으로 지정된 반도.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "푸에르토 피라미데스·입구 게이트별 주차.",
+                "fees_other": "반도 입장료·고래 워칭 보트는 별도.",
+                "reservation_note": "고래 시즌(대략 6~12월)과 투어 업체 예약.",
+                "tips": "멀미·방풍. 망원경 유용.",
+            },
+        },
+        {
+            "name": "페트로휘 폭포 (Saltos del Petrohué)",
+            "category": "폭포·국립공원",
+            "description": "오소르노 화산 인근 푸에르토 바라스에서 당일 방문 가능한 에메랄드빛 급류와 폭포.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "국립공원 입구 주차 후 산책로.",
+                "fees_other": "공원 입장료.",
+                "walking_hiking": "데크 산책 30분~1시간.",
+                "tips": "바리로체·푸에르토 몬트 동선과 묶기 좋음.",
+            },
+        },
+        {
+            "name": "푼타 아레나스 (Punta Arenas) · 마가야네스",
+            "category": "도시·관문",
+            "description": "파타고니아 남부와 남극 크루즈의 관문 항구 도시.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "시내 유료 주차.",
+                "fees_other": "박물관·묘지 산책 등 도보 관광.",
+                "tips": "토레스·남극 크루즈 환승 시 하루 묶기.",
+            },
+        },
+        {
+            "name": "엘 칼라파테 (El Calafate) 마을",
+            "category": "베이스 타운",
+            "description": "페리토 모레노와 국립공원으로 가는 숙소·식당·렌트 거점.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "시내·숙소 주차.",
+                "fees_other": "식당·기념품.",
+                "reservation_note": "성수기 숙소 조기 예약.",
+                "tips": "공항과 가깝고 국립공원 일정과 동선 맞추기.",
+            },
+        },
+        {
+            "name": "로스 글라시아레스 국립공원 (Los Glaciares)",
+            "category": "국립공원",
+            "description": "페리토 모레노 외에도 스파가치니 등 여러 빙하 전망 포인트가 있는 광대한 공원.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "구역별 매표소·셔틀.",
+                "fees_other": "입장료·보트.",
+                "tips": "하루에 한 구역씩 집중 방문이 현실적.",
+            },
+        },
+        {
+            "name": "세로 카스틸로 (Cerro Castillo) 트레킹",
+            "category": "하이킹",
+            "description": "푸에르토 나탈레스 근처의 라군·암벽 전망 트레킹 코스.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "트레일 헤드 주차.",
+                "walking_hiking": "왕복 반나절~하루.",
+                "tips": "토레스 일정과 별도로 날씨 확인.",
+            },
+        },
+        {
+            "name": "티에라 델 푸에고 국립공원 (Tierra del Fuego)",
+            "category": "국립공원",
+            "description": "우수아이아 근처 숲·호수·남극 쪽 원시 자연.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "공원 입구.",
+                "fees_other": "입장료.",
+                "walking_hiking": "짧은 루프 트레일.",
+                "tips": "우수아이아 체류 시 반나절 코스.",
+            },
+        },
+        {
+            "name": "푸에르토 나탈레스 (Puerto Natales) 항구 마을",
+            "category": "베이스 타운",
+            "description": "토레스 델 파이네로 가기 전 마지막 보급·숙소 거점.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "시내 주차.",
+                "fees_other": "장비 대여·식량 보급.",
+                "tips": "장거리 트레킹 전 장비 점검.",
+            },
+        },
+        {
+            "name": "라고 아르헨티노 (Lago Argentino)",
+            "category": "호수",
+            "description": "엘 칼라파테 옆 거대 빙河湖. 일부 크루즈로 빙하 접근.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "마을·부두.",
+                "fees_other": "크루즈·카약 별도.",
+                "tips": "일몰·빙하 유람선 일정 확인.",
+            },
+        },
+        {
+            "name": "세로 토레 (Cerro Torre) 전망 트레일",
+            "category": "하이킹",
+            "description": "엘 샬텐에서 토레 타워 전망까지 이어지는 인기 당일 코스.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "샬텐 출발 도보.",
+                "walking_hiking": "라구나 토레 왕복 수 시간.",
+                "tips": "안개 많은 날은 시야 없을 수 있음.",
+            },
+        },
+        {
+            "name": "케마다 델 티에라 델 푸에고 (Fuegian Andes) 숲길",
+            "category": "자연",
+            "description": "우수아이아 주변 남극 성단풍 숲과 호수.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "트레일별.",
+                "walking_hiking": "가벼운 산책부터 반나절.",
+                "tips": "날씨 변덕 대비.",
+            },
+        },
+        {
+            "name": "칠레 파타고니아 피오르드 뷰포인트 (Puerto Río Tranquilo)",
+            "category": "빙하·호수",
+            "description": "카요네스 일반 칠레 파타고니아에서 마블 동굴·호수 투어가 있는 조용한 마을.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "마을·부두.",
+                "fees_other": "카약·보트 투어 별도.",
+                "tips": "산티아고·코이하이크에서 국내선·버스 연계.",
+            },
+        },
+    ]
+
+
 def _generic_spot(destination: str, i: int) -> dict[str, Any]:
     """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드. 사진은 enrich에서만 붙이거나 비움."""
     return {
@@ -871,6 +1214,8 @@ def _generic_spot(destination: str, i: int) -> dict[str, Any]:
 def _build_mock_attraction_list(destination: str, n: int) -> list[dict[str, Any]]:
     if _looks_like_dolomites(destination):
         pool = _dolomites_attraction_templates()
+    elif _looks_like_patagonia(destination):
+        pool = _patagonia_attraction_templates()
     else:
         pool = [_generic_spot(destination, j) for j in range(max(n, 12))]
     out: list[dict[str, Any]] = []
@@ -878,6 +1223,8 @@ def _build_mock_attraction_list(destination: str, n: int) -> list[dict[str, Any]
         base = dict(pool[i % len(pool)])
         base["id"] = f"attr_{i + 1:03d}"
         if _looks_like_dolomites(destination) and i >= len(pool):
+            base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
+        elif _looks_like_patagonia(destination) and i >= len(pool):
             base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
         out.append(_ensure_attraction_record(base, i, destination))
     return out
@@ -1049,6 +1396,8 @@ def _region_curated_attraction_templates(destination: str) -> list[dict[str, Any
     """목적지별 큐레이션 오프라인 풀(있을 때만). 검색어가 아니라 병합·보충용."""
     if _looks_like_dolomites(destination):
         return _dolomites_attraction_templates()
+    if _looks_like_patagonia(destination):
+        return _patagonia_attraction_templates()
     return []
 
 
@@ -1226,8 +1575,14 @@ def _fill_attraction_catalog_to_count(
         out.append(_ensure_attraction_record(copy, len(out), destination))
 
     gi = 0
+    pat_pool = _patagonia_attraction_templates() if _looks_like_patagonia(destination) else None
     while len(out) < n_target:
-        base = _generic_spot(destination, gi)
+        if pat_pool:
+            base = dict(pat_pool[gi % len(pat_pool)])
+            if gi >= len(pat_pool):
+                base["name"] = (base.get("name") or "") + f" · 동선 {gi // len(pat_pool)}"
+        else:
+            base = _generic_spot(destination, gi)
         gi += 1
         nm = (base.get("name") or "").strip()
         nk = _normalize_attraction_key(nm)
@@ -1348,10 +1703,15 @@ async def _fetch_top_attractions_from_google(
     dest_points: list[str] = []
     primary_bias: str | None = None
 
-    async def get_lat_lng(client: httpx.AsyncClient, addr: str) -> str | None:
+    async def get_lat_lng(
+        client: httpx.AsyncClient, addr: str, *, for_destination: bool = False
+    ) -> str | None:
         try:
+            q = addr
+            if for_destination and _looks_like_patagonia(destination):
+                q = _patagonia_geocode_query(addr)
             url = "https://maps.googleapis.com/maps/api/geocode/json?" + urlencode(
-                {"address": addr, "key": api_key}
+                {"address": q, "key": api_key}
             )
             r = await client.get(url, timeout=10)
             if r.status_code == 200:
@@ -1385,13 +1745,34 @@ async def _fetch_top_attractions_from_google(
         return []
 
     async with httpx.AsyncClient(timeout=15) as client:
-        d_locs = await asyncio.gather(*(get_lat_lng(client, p) for p in dest_places))
+        d_locs = await asyncio.gather(
+            *(get_lat_lng(client, p, for_destination=True) for p in dest_places)
+        )
         for loc in d_locs:
             if loc:
                 dest_points.append(loc)
+        # 아르헨티나 앵커만 있으면 45km Nearby가 칠레 파타고니아(토레스 델 파이네 등)를 못 잡음 → 나탈레스 2차 앵커
+        if dest_points and _looks_like_patagonia(destination):
+            natales = await get_lat_lng(
+                client, "Puerto Natales, Magallanes, Chile", for_destination=True
+            )
+            if natales and natales not in dest_points:
+                dest_points.append(natales)
         if dest_points:
             primary_bias = dest_points[0]
-        if local_transport == "rental_car" and origin:
+        # 서울→파타고니아 등 대륙 간 이동: Directions 경유지마다 Nearby 검색 시 한국·유럽·미국 명소가 섞임 → 경유 검색 생략
+        skip_long_haul_route = False
+        if local_transport == "rental_car" and origin and dest_points:
+            o_ll = await get_lat_lng(client, origin, for_destination=False)
+            if o_ll and dest_points[0]:
+                try:
+                    oa, ob = map(float, o_ll.split(","))
+                    da, db = map(float, dest_points[0].split(","))
+                    if _haversine_km(oa, ob, da, db) > 1200:
+                        skip_long_haul_route = True
+                except (ValueError, TypeError):
+                    pass
+        if local_transport == "rental_car" and origin and not skip_long_haul_route:
             wpts = await get_route_waypoints(client, origin, dest_places[0])
             route_points.extend(wpts)
 
@@ -1435,19 +1816,30 @@ async def _fetch_top_attractions_from_google(
         ("point_of_interest", "panorama"),
         ("tourist_attraction", "scenic"),
     ]
-    # type 없이 keyword만: 리프트역이 establishment·ski_resort 등으로만 잡혀 tourist_attraction+cable car에서 빠지는 경우 보완(전역).
-    lift_keyword_only_nearby = (
-        "cable car",
-        "funivia",
-        "seilbahn",
-        "bergbahn",
-        "gondola",
-        "funicular",
-        "ropeway",
-        "chairlift",
-        "aerial tram",
-        "ski lift",
-    )
+    # type 없이 keyword만: 리프트역 보완. funivia/seilbahn 등은 유럽 편향 → 파타고니아에서는 남미·영어 키워드만.
+    if _looks_like_patagonia(destination):
+        lift_keyword_only_nearby = (
+            "cable car",
+            "teleferico",
+            "aerial tram",
+            "gondola",
+            "ropeway",
+            "chairlift",
+            "aerial tramway",
+        )
+    else:
+        lift_keyword_only_nearby = (
+            "cable car",
+            "funivia",
+            "seilbahn",
+            "bergbahn",
+            "gondola",
+            "funicular",
+            "ropeway",
+            "chairlift",
+            "aerial tram",
+            "ski lift",
+        )
     route_jobs: list[tuple[str, str | None, str]] = []
     dest_jobs: list[tuple[str, str | None, str]] = []
     for loc in route_points:
@@ -1463,25 +1855,44 @@ async def _fetch_top_attractions_from_google(
 
     text_queries: list[str] = []
     head = dest_places[0]
-    text_queries.extend(
-        [
-            f"{head} observation deck",
-            f"{head} scenic viewpoint",
-            f"{head} cable car",
-            f"{head} aerial tram",
-            f"{head} funicular",
-            f"{head} lookout point",
-            f"{head} panorama viewpoint",
-            f"{head} ropeway",
-            f"{head} funivia",
-            f"{head} seilbahn",
-            f"{head} ski lift",
-            f"{head} famous lake",
-            f"{head} hiking trail",
-            f"{head} nature hiking scenic",
-            f"{head} tourist viewpoint",
-        ]
-    )
+    if _looks_like_patagonia(destination):
+        # 한글·모호한 "Patagonia"만으로는 전 세계 오탐 → 남미 지명을 쿼리에 포함
+        head_q = "Patagonia Argentina Chile"
+        text_queries.extend(
+            [
+                f"{head_q} national park glacier",
+                f"{head_q} hiking trail scenic",
+                f"{head_q} viewpoint mirador",
+                f"{head_q} lake laguna",
+                f"Los Glaciares National Park Argentina",
+                f"Torres del Paine Chile hiking",
+                f"El Calafate Perito Moreno",
+                f"El Chalten Fitz Roy trail",
+                f"Ushuaia Beagle Channel",
+                f"Nahuel Huapi Bariloche",
+                f"Patagonia scenic overlook nature",
+            ]
+        )
+    else:
+        text_queries.extend(
+            [
+                f"{head} observation deck",
+                f"{head} scenic viewpoint",
+                f"{head} cable car",
+                f"{head} aerial tram",
+                f"{head} funicular",
+                f"{head} lookout point",
+                f"{head} panorama viewpoint",
+                f"{head} ropeway",
+                f"{head} funivia",
+                f"{head} seilbahn",
+                f"{head} ski lift",
+                f"{head} famous lake",
+                f"{head} hiking trail",
+                f"{head} nature hiking scenic",
+                f"{head} tourist viewpoint",
+            ]
+        )
 
     async def nearby_one(
         client: httpx.AsyncClient, loc: str, typ: str | None, kw: str
@@ -1583,6 +1994,9 @@ async def _fetch_top_attractions_from_google(
     route_res: list[list[dict[str, Any]]] = list(route_pages)
     dest_res: list[list[dict[str, Any]]] = list(dest_pages) + list(text_pages)
 
+    anchor_ll_str = dest_points[0] if dest_points else None
+    patagonia_trip = _looks_like_patagonia(destination)
+
     def ingest_pool_tiered(lists: list[list[dict]]) -> list[dict]:
         combined: list[dict] = []
         seen: set[str] = set()
@@ -1605,6 +2019,22 @@ async def _fetch_top_attractions_from_google(
                     end_date or start_date,
                 ):
                     continue
+                addr_line = f"{p.get('formatted_address') or ''} {p.get('vicinity') or ''}"
+                if patagonia_trip and _formatted_address_suspicious_for_patagonia(addr_line):
+                    continue
+                geom = p.get("geometry") or {}
+                loc = geom.get("location") if isinstance(geom, dict) else None
+                if anchor_ll_str and isinstance(loc, dict):
+                    try:
+                        plat = float(loc.get("lat"))
+                        plng = float(loc.get("lng"))
+                        alat, alng = map(float, anchor_ll_str.split(","))
+                        km = _haversine_km(plat, plng, alat, alng)
+                        max_km = 2400.0 if patagonia_trip else 4000.0
+                        if km > max_km:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
                 seen.add(pid)
                 combined.append(p)
         combined.sort(key=_place_itinerary_rank_key)
