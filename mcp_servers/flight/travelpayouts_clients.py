@@ -5,6 +5,7 @@ https://api.travelpayouts.com/documentation
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -44,8 +45,51 @@ _AIRPORT_IATA_TO_CITY_IATA: dict[str, str] = {
 }
 
 
-def _tp_city_code_for_api(airport_or_city: str) -> str:
-    c = (airport_or_city or "").strip().upper()[:3]
+def _normalize_travelpayouts_endpoint(raw: str) -> str | None:
+    """
+    Travelpayouts/Aviasales는 origin·destination에 IATA 3자를 기대합니다.
+    자유 입력 문자열에 대해 `[:3]`만 쓰면 'Grand Circle' → 'GRA'처럼 엉뚱한 코드가 됩니다.
+    - 정확히 3글자 라틴 IATA 또는 선행 토큰(ICN …)은 그대로 사용
+    - 알려진 지역 묶음(Grand Circle, Patagonia 등)은 프론트와 맞춰 게이트웨이 공항으로 매핑
+    - 공백이 있는 미해석 구문은 잘못된 3글자 추출을 막기 위해 None
+    - 한 단어 도시명 등은 기존처럼 연속 라틴 문자에서 앞 3자(Paris→PAR)
+    """
+    if not raw or not str(raw).strip():
+        return None
+    s = str(raw).strip()
+    if re.fullmatch(r"[A-Za-z]{3}", s):
+        return s.upper()
+    # \b 만 쓰면 "New York" 의 "New" 가 IATA로 오인됨 → 구분자·괄호·끝만 허용
+    m = re.match(r"^([A-Za-z]{3})(?:\s*[-–—/]|\s*\(|$)", s)
+    if m:
+        return m.group(1).upper()
+    low = s.lower()
+    if "grand" in low and "circle" in low:
+        return "LAS"
+    if "patagonia" in low:
+        return "FTE"
+    if "그랜드" in s and ("서클" in s or "써클" in s):
+        return "LAS"
+    if "파타고니아" in s:
+        return "FTE"
+    if re.search(r"\s", s):
+        return None
+    letters_only = re.sub(r"[^A-Za-z]", "", s)
+    if len(letters_only) >= 3:
+        return letters_only[:3].upper()
+    return None
+
+
+def _legacy_latin_three_letter(raw: str) -> str:
+    """딥링크 등에서만 사용: 정규화 실패 시 단일 토큰 도시명 근사(Paris→PAR)."""
+    letters = re.sub(r"[^A-Za-z]", "", raw or "")
+    return letters[:3].upper() if len(letters) >= 3 else "XXX"
+
+
+def _tp_city_code_for_api(airport_iata: str) -> str:
+    c = (airport_iata or "").strip().upper()
+    if len(c) != 3:
+        return c[:3] if len(c) >= 3 else c
     return _AIRPORT_IATA_TO_CITY_IATA.get(c, c)
 
 
@@ -193,8 +237,8 @@ def build_aviasales_search_url(
     currency: str = "KRW",
 ) -> str:
     """Aviasales 검색 딥링크 (marker=제휴 마커)."""
-    o = (origin or "").upper()[:3]
-    d = (destination or "").upper()[:3]
+    o = _normalize_travelpayouts_endpoint(origin or "") or _legacy_latin_three_letter(origin or "")
+    d = _normalize_travelpayouts_endpoint(destination or "") or _legacy_latin_three_letter(destination or "")
     dep = (depart_date or "")[:10]
     ret = (return_date or "")[:10] if return_date else ""
     if one_way or not ret:
@@ -267,10 +311,14 @@ async def search_travelpayouts_flights(
     cheap 또는 direct 엔드포인트 호출 → SerpApi와 유사한 flight / round_trip dict 목록.
     """
     warnings: list[str] = []
-    o_user = (origin or "").strip().upper()[:3]
-    d_user = (destination or "").strip().upper()[:3]
-    if len(o_user) != 3 or len(d_user) != 3:
-        return [], ["Travelpayouts: 출발/도착은 IATA 코드 3자리여야 합니다."]
+    o_user = _normalize_travelpayouts_endpoint(origin or "")
+    d_user = _normalize_travelpayouts_endpoint(destination or "")
+    if not o_user or not d_user:
+        return [], [
+            "Travelpayouts: 출발/도착을 공항 IATA 3자로 해석할 수 없습니다. "
+            f"(origin={origin!r} → {o_user!r}, destination={destination!r} → {d_user!r}). "
+            "지역명(예: Grand Circle)은 목적지 공항을 선택하거나, 알려진 지역 묶음만 자동 매핑됩니다."
+        ]
 
     if not (token or "").strip():
         return [], []
