@@ -913,7 +913,11 @@ function renderDestAirports() {
   const mileageKey = typeof normalizeMileageProgram === 'function' ? normalizeMileageProgram(options.mileageProgram) : '';
   const list = $('#destination-airports-list');
   const sortedCodes = airports.map(a => a.code);
-  list.innerHTML = airports.map((a, i) => {
+  const regionHint =
+    typeof isRegionCollectionDestination === 'function' && isRegionCollectionDestination(dest)
+      ? '<p class="airport-region-hint" style="margin:0 0 10px;font-size:0.9em;color:#444;line-height:1.45;">이 목적지는 <strong>여러 관광지가 묶인 지역</strong>입니다. 항공 검색용 도착 공항은 <strong>출발 공항 기준 비행 거리가 가까운 순</strong>으로 정렬했습니다. 현지에서는 렌트 등으로 루프 동선을 짜면 됩니다.</p>'
+      : '';
+  list.innerHTML = regionHint + airports.map((a, i) => {
     const fa = info[a.code] || {};
     const badges = [];
     if (fa.direct) badges.push('<span class="airport-badge direct">직항</span>');

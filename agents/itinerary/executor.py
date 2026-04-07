@@ -159,6 +159,38 @@ def _patagonia_geocode_query(place: str) -> str:
     return "El Calafate, Santa Cruz, Argentina"
 
 
+def _looks_like_grand_circle(destination: str) -> bool:
+    d = (destination or "").lower()
+    return any(k in d for k in ("grand circle", "그랜드 서클", "그랜드써클"))
+
+
+def _grand_circle_geocode_query(place: str) -> str:
+    """Grand Circle(미국 서부 국립공원 루프) — 지오코딩을 유타/애리조나 권으로 고정."""
+    p = (place or "").strip()
+    if not _looks_like_grand_circle(p):
+        return p
+    pl = p.lower()
+    if "vegas" in pl or "라스베이거스" in p or "las vegas" in pl:
+        return "Las Vegas Nevada USA"
+    if "zion" in pl or "자이언" in p:
+        return "Springdale Utah USA"
+    if "grand canyon" in pl or "그랜드 캐년" in p:
+        return "Grand Canyon Village Arizona USA"
+    return "Springdale Utah USA"
+
+
+def _grand_circle_geocode_seeds() -> tuple[str, ...]:
+    """대표 구간별 Places 앵커(자이언·브라이스·페이지·캐년·모뉴먼트)."""
+    return (
+        "Las Vegas Nevada USA",
+        "Springdale Utah USA",
+        "Bryce Canyon National Park Utah USA",
+        "Page Arizona USA",
+        "Grand Canyon Village Arizona USA",
+        "Monument Valley Navajo Tribal Park Utah",
+    )
+
+
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     import math
 
@@ -1192,6 +1224,165 @@ def _patagonia_attraction_templates() -> list[dict[str, Any]]:
     ]
 
 
+def _grand_circle_attraction_templates() -> list[dict[str, Any]]:
+    """미국 서부 Grand Circle(자이언·브라이스·앤텔로프·그랜드캐년 등) 오프라인 큐레이션."""
+    return [
+        {
+            "name": "Zion National Park (자이언 국립공원)",
+            "category": "하이킹·협곡",
+            "description": "붉은 암벽과 버진 강이 만드는 협곡. 에인절스 랜딩 등 대표 트레일이 있습니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "성수기 셔틀·예약제 구간. 스프링데일·숙소 연계 확인.",
+                "walking_hiking": "리버워크·에인절스 랜딩 등 난이도별 코스.",
+                "fees_other": "입장료·셔틀·캐시리스.",
+                "reservation_note": "성수기 셔틀·트레일 사전 예약.",
+                "tips": "물·모자·번개·홍수 경보 확인.",
+            },
+        },
+        {
+            "name": "Bryce Canyon National Park (브라이스 캐니언)",
+            "category": "전망·하이킹",
+            "description": "후드 기둥이 밀집한 원형극장 같은 암석 경관.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "뷰포인트·트레일 헤드 주차. 일출 인파.",
+                "walking_hiking": "림 트레일·퀸즈 가든 루프 등.",
+                "fees_other": "국립공원 입장료.",
+                "tips": "고도·기온 차·일출 전망.",
+            },
+        },
+        {
+            "name": "Antelope Canyon (앤텔로프 캐니언)",
+            "category": "슬롯 캐니언",
+            "description": "빛이 들어오는 좁은 협곡. 나바호 가이드 동반 투어가 일반적입니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "투어 집합지·페이지 인근.",
+                "fees_other": "가이드 투어 요금·시간대별 상이.",
+                "reservation_note": "사전 예약 필수.",
+                "tips": "모래·삼각대 예절(일부 구간 제한).",
+            },
+        },
+        {
+            "name": "Horseshoe Bend (호스슈 벤드)",
+            "category": "전망",
+            "description": "콜로라도강이 굽이친 말굽 모양 절경. 짧은 산책로로 접근.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "유료 주차장 후 도보 약 20분.",
+                "walking_hiking": "평지 산책, 난간·절벽 주의.",
+                "fees_other": "주차·입장.",
+                "tips": "해질녘 인파·날씨.",
+            },
+        },
+        {
+            "name": "Grand Canyon South Rim (그랜드 캐년 남쪽 림)",
+            "category": "전망·드라이브",
+            "description": "세계적인 대협곡 전망. 허미츠 레스트·모하비 포인트 등 드라이브 포인트가 많습니다.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "뷰포인트·방문자센터 주차.",
+                "walking_hiking": "림 트레일 일부 구간만.",
+                "fees_other": "공원 입장료.",
+                "tips": "일출·일몰 시간대, 물.",
+            },
+        },
+        {
+            "name": "Monument Valley (모뉴먼트 밸리)",
+            "category": "전망·드라이브",
+            "description": "나바호족 땅의 독수리탑 모양 암주. 셀프 드라이브 또는 가이드 투어.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "방문자센터·루프 드라이브.",
+                "fees_other": "입장·투어 별도.",
+                "reservation_note": "황사·폐쇄 가능.",
+                "tips": "연료·물 보충.",
+            },
+        },
+        {
+            "name": "Arches National Park (아치스 국립공원)",
+            "category": "하이킹",
+            "description": "델리케이트 아치 등 자연석 아치가 밀집한 모압 지대.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "성수기 입장 시간대 예약(시즌별).",
+                "walking_hiking": "짧은 트레일 다수.",
+                "fees_other": "공원 입장료.",
+                "tips": "더위·물.",
+            },
+        },
+        {
+            "name": "Valley of Fire State Park (밸리 오브 파이어)",
+            "category": "주립공원",
+            "description": "라스베이거스 근교 붉은 바위와 사막 풍경.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "구역별 주차.",
+                "walking_hiking": "짧은 전망 산책.",
+                "fees_other": "주립공원 입장료.",
+                "tips": "LAS·렌트 동선과 묶기 좋음.",
+            },
+        },
+        {
+            "name": "Lake Powell / Glen Canyon (글렌 캐니언)",
+            "category": "호수·크루즈",
+            "description": "댐으로 만든 인공 호수. 보트·크루즈·페이지 연계.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "마리나·크루즈 터미널.",
+                "fees_other": "크루즈·카약 별도.",
+                "tips": "수위·시즌 확인.",
+            },
+        },
+        {
+            "name": "Dead Horse Point State Park",
+            "category": "전망",
+            "description": "캐년랜즈와 이어지는 절벽 전망. 일몰 명소.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "전망대 주차.",
+                "walking_hiking": "짧은 산책.",
+                "fees_other": "주립공원 요금.",
+            },
+        },
+        {
+            "name": "Canyonlands National Park (아일랜드 인 더 스카이)",
+            "category": "전망·드라이브",
+            "description": "광활한 캐니언랜즈의 메사 전망.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "메사 엣지 주차.",
+                "walking_hiking": "평지 위주.",
+                "tips": "모압·그랜드 서클 동선과 병행.",
+            },
+        },
+        {
+            "name": "Las Vegas Strip (라스베이거스 스트립)",
+            "category": "도시",
+            "description": "입국·출국·쇼핑·식사 거점. 그랜드 서클 렌트 전후 체류에 활용.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "호텔·유료 주차.",
+                "fees_other": "쇼·티켓.",
+                "tips": "LAS 공항 접근·연료.",
+            },
+        },
+    ]
+
+
 def _generic_spot(destination: str, i: int) -> dict[str, Any]:
     """목적지 일반: 구체적 이름 대신 실무 항목을 채운 예시 카드. 사진은 enrich에서만 붙이거나 비움."""
     return {
@@ -1216,6 +1407,8 @@ def _build_mock_attraction_list(destination: str, n: int) -> list[dict[str, Any]
         pool = _dolomites_attraction_templates()
     elif _looks_like_patagonia(destination):
         pool = _patagonia_attraction_templates()
+    elif _looks_like_grand_circle(destination):
+        pool = _grand_circle_attraction_templates()
     else:
         pool = [_generic_spot(destination, j) for j in range(max(n, 12))]
     out: list[dict[str, Any]] = []
@@ -1225,6 +1418,8 @@ def _build_mock_attraction_list(destination: str, n: int) -> list[dict[str, Any]
         if _looks_like_dolomites(destination) and i >= len(pool):
             base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
         elif _looks_like_patagonia(destination) and i >= len(pool):
+            base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
+        elif _looks_like_grand_circle(destination) and i >= len(pool):
             base["name"] = base.get("name", "") + f" (코스 변형 {i // len(pool) + 1})"
         out.append(_ensure_attraction_record(base, i, destination))
     return out
@@ -1398,6 +1593,8 @@ def _region_curated_attraction_templates(destination: str) -> list[dict[str, Any
         return _dolomites_attraction_templates()
     if _looks_like_patagonia(destination):
         return _patagonia_attraction_templates()
+    if _looks_like_grand_circle(destination):
+        return _grand_circle_attraction_templates()
     return []
 
 
@@ -1576,11 +1773,16 @@ def _fill_attraction_catalog_to_count(
 
     gi = 0
     pat_pool = _patagonia_attraction_templates() if _looks_like_patagonia(destination) else None
+    gc_pool = _grand_circle_attraction_templates() if _looks_like_grand_circle(destination) else None
     while len(out) < n_target:
         if pat_pool:
             base = dict(pat_pool[gi % len(pat_pool)])
             if gi >= len(pat_pool):
                 base["name"] = (base.get("name") or "") + f" · 동선 {gi // len(pat_pool)}"
+        elif gc_pool:
+            base = dict(gc_pool[gi % len(gc_pool)])
+            if gi >= len(gc_pool):
+                base["name"] = (base.get("name") or "") + f" · 동선 {gi // len(gc_pool)}"
         else:
             base = _generic_spot(destination, gi)
         gi += 1
@@ -1710,6 +1912,8 @@ async def _fetch_top_attractions_from_google(
             q = addr
             if for_destination and _looks_like_patagonia(destination):
                 q = _patagonia_geocode_query(addr)
+            elif for_destination and _looks_like_grand_circle(destination):
+                q = _grand_circle_geocode_query(addr)
             url = "https://maps.googleapis.com/maps/api/geocode/json?" + urlencode(
                 {"address": q, "key": api_key}
             )
@@ -1758,6 +1962,11 @@ async def _fetch_top_attractions_from_google(
             )
             if natales and natales not in dest_points:
                 dest_points.append(natales)
+        if dest_points and _looks_like_grand_circle(destination) and not _looks_like_patagonia(destination):
+            for seed in _grand_circle_geocode_seeds():
+                loc = await get_lat_lng(client, seed, for_destination=False)
+                if loc and loc not in dest_points:
+                    dest_points.append(loc)
         if dest_points:
             primary_bias = dest_points[0]
         # 서울→파타고니아 등 대륙 간 이동: Directions 경유지마다 Nearby 검색 시 한국·유럽·미국 명소가 섞임 → 경유 검색 생략
@@ -1871,6 +2080,21 @@ async def _fetch_top_attractions_from_google(
                 f"Ushuaia Beagle Channel",
                 f"Nahuel Huapi Bariloche",
                 f"Patagonia scenic overlook nature",
+            ]
+        )
+    elif _looks_like_grand_circle(destination):
+        text_queries.extend(
+            [
+                "Zion National Park Utah hiking scenic",
+                "Bryce Canyon National Park Utah hoodoos",
+                "Antelope Canyon Page Arizona",
+                "Horseshoe Bend Page Arizona",
+                "Grand Canyon South Rim Arizona scenic",
+                "Monument Valley Utah scenic drive",
+                "Arches National Park Moab Utah",
+                "Canyonlands National Park Utah Island in the Sky",
+                "Valley of Fire State Park Nevada",
+                "Lake Powell Glen Canyon Arizona",
             ]
         )
     else:

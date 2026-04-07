@@ -68,13 +68,58 @@ const CITY_AIRPORTS = {
   ],
 };
 
+/** 미국 서부 Grand Circle 등 — 여러 국립공원 묶음. 항공편은 출발 공항과의 대원거리로 가장 가까운 공항 우선 */
+const _grandCircleAirports = [
+  { code: 'LAS', name: 'Harry Reid / 라스베이거스', drive_hours: 2.5, country: 'US' },
+  { code: 'SLC', name: '솔트레이크시티', drive_hours: 3, country: 'US' },
+  { code: 'PHX', name: '피닉스 스카이하버', drive_hours: 4, country: 'US' },
+  { code: 'DEN', name: '덴버', drive_hours: 6, country: 'US' },
+  { code: 'FLG', name: '플래그스태프 (그랜드 캐년 근접)', drive_hours: 1.5, country: 'US' },
+];
+
+CITY_AIRPORTS['Grand Circle'] = _grandCircleAirports;
+CITY_AIRPORTS['그랜드 서클'] = _grandCircleAirports;
+
 /** 도시 키 → 국가(ISO2). 공항 선택 시 앵커 국가로 사용 */
 const CITY_COUNTRY = {
   서울: 'KR', 인천: 'KR', 부산: 'KR', 제주: 'KR',
   오사카: 'JP', 도쿄: 'JP', 방콕: 'TH', 싱가포르: 'SG', 홍콩: 'HK',
   돌로미티: 'IT', 도로미티: 'IT',
   파타고니아: 'AR', Patagonia: 'AR',
+  'Grand Circle': 'US', '그랜드 서클': 'US',
 };
+
+/** IATA 공항 좌표(대원거리 비교). 지역 묶음(Grand Circle 등)일 때 출발 공항 기준 가장 가까운 도착 공항 우선 */
+const AIRPORT_COORDS = {
+  ICN: { lat: 37.469, lng: 126.451 },
+  GMP: { lat: 37.558, lng: 126.791 },
+  PUS: { lat: 35.179, lng: 129.075 },
+  CJU: { lat: 33.506, lng: 126.493 },
+  LAS: { lat: 36.084, lng: -115.153 },
+  SLC: { lat: 40.789, lng: -111.979 },
+  PHX: { lat: 33.434, lng: -112.013 },
+  DEN: { lat: 39.856, lng: -104.674 },
+  FLG: { lat: 35.138, lng: -111.671 },
+};
+
+const REGION_COLLECTION_KEYS = new Set(['Grand Circle', '그랜드 서클']);
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const toR = (d) => (d * Math.PI) / 180;
+  const dLat = toR(lat2 - lat1);
+  const dLng = toR(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Grand Circle 등 여러 국립공원 묶음 목적지인지 */
+function isRegionCollectionDestination(destCityName) {
+  const key = findCityKey(destCityName || '');
+  return !!(key && REGION_COLLECTION_KEYS.has(key));
+}
 
 /**
  * 출발 공항 → 목적지 공항별 운항 정보
@@ -92,6 +137,11 @@ const FLIGHT_INFO = {
     CJU: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] },
     MXP: { hours: 12, direct: true, mileage: ['skypass'] },
     MUC: { hours: 11, direct: true, mileage: ['skypass', 'miles_and_more'] },
+    LAS: { hours: 12, direct: false, mileage: ['skypass'] },
+    SLC: { hours: 12, direct: false, mileage: [] },
+    PHX: { hours: 12, direct: false, mileage: [] },
+    DEN: { hours: 13, direct: false, mileage: [] },
+    FLG: { hours: 12, direct: false, mileage: [] },
     VCE: { hours: 12, direct: false, mileage: [] },
     VRN: { hours: 13, direct: false, mileage: [] },
     INN: { hours: 11, direct: false, mileage: [] },
@@ -107,6 +157,11 @@ const FLIGHT_INFO = {
     VCE: { hours: 12, direct: false, mileage: [] },
     MUC: { hours: 11, direct: false, mileage: [] },
     MXP: { hours: 12, direct: false, mileage: [] },
+    LAS: { hours: 12, direct: false, mileage: ['skypass'] },
+    SLC: { hours: 12, direct: false, mileage: [] },
+    PHX: { hours: 12, direct: false, mileage: [] },
+    DEN: { hours: 13, direct: false, mileage: [] },
+    FLG: { hours: 12, direct: false, mileage: [] },
   },
   PUS: { ICN: { hours: 1, direct: true, mileage: ['skypass', 'asiana'] }, GMP: { hours: 1, direct: true, mileage: [] }, KIX: { hours: 2, direct: true, mileage: [] }, CJU: { hours: 1, direct: true, mileage: [] } },
 };
@@ -245,8 +300,22 @@ function getDestAirportsForOrigin(originCode, destCityName, options) {
   const mileageKey = normalizeMileageProgram(options?.mileageProgram);
   const ctx = options?.routeContext || {};
   const anchor = resolveAnchorCountry(destCityName, ctx.destAirportCode);
+  const oc = (originCode || '').toString().trim().toUpperCase().slice(0, 3);
+  const originGeo = AIRPORT_COORDS[oc];
+  const regionKey = findCityKey(destCityName || '');
+  const sortByOriginProximity =
+    originGeo && regionKey && REGION_COLLECTION_KEYS.has(regionKey);
 
   return [...dest].sort((a, b) => {
+    if (sortByOriginProximity) {
+      const ca = AIRPORT_COORDS[a.code];
+      const cb = AIRPORT_COORDS[b.code];
+      if (ca && cb) {
+        const dkm = haversineKm(originGeo.lat, originGeo.lng, ca.lat, ca.lng) -
+          haversineKm(originGeo.lat, originGeo.lng, cb.lat, cb.lng);
+        if (Math.abs(dkm) > 30) return dkm;
+      }
+    }
     const sa = anchor && a.country === anchor ? 0 : 1;
     const sb = anchor && b.country === anchor ? 0 : 1;
     if (sa !== sb) return sa - sb;
