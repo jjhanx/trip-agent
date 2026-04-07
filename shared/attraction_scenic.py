@@ -72,7 +72,7 @@ def place_has_scenic_lift_priority(p: dict[str, Any]) -> bool:
     자연 지형·공원·전망형 POI와 이름상 전망·리프트류를 넓게 포함한다.
     """
     types = {str(x).lower() for x in (p.get("types") or [])}
-    if types.intersection({"natural_feature", "park"}):
+    if types.intersection({"natural_feature", "park", "national_park"}):
         return True
     if name_suggests_viewpoint_cable_or_lift(p.get("name")):
         return True

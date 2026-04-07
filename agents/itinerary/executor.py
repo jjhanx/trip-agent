@@ -1807,7 +1807,7 @@ def _place_passes_quality_filter(p: dict[str, Any], min_rating: float) -> bool:
     if rating < min_rating:
         return False
     ptypes = set(p.get("types") or [])
-    nature = ptypes.intersection({"natural_feature", "park", "campground"})
+    nature = ptypes.intersection({"natural_feature", "park", "campground", "national_park"})
     scenic = ptypes.intersection({"tourist_attraction", "point_of_interest"})
     if nature:
         return reviews >= 10 or (rating >= 4.5 and reviews >= 6)
@@ -2007,8 +2007,10 @@ async def _fetch_top_attractions_from_google(
         "gas_station",
     }
 
-    # 경로 구간은 앞 8개만 쓰므로 전망·케이블카·룩아웃류를 먼저 둔다(지역 무관 공통 영어 키워드).
+    # 경로 구간은 앞 8개만 쓰므로 국립공원·자연공원을 맨 앞에 두고, 이어서 전망·케이블카 등(지역 무관).
     type_keyword_pairs = [
+        ("national_park", ""),
+        ("park", "national park"),
         ("tourist_attraction", "viewpoint"),
         ("natural_feature", "viewpoint"),
         ("point_of_interest", "observation deck"),
@@ -2100,6 +2102,10 @@ async def _fetch_top_attractions_from_google(
     else:
         text_queries.extend(
             [
+                f"{head} national park",
+                f"{head} national park scenic",
+                f"{head} state park scenic",
+                f"{head} famous landmark",
                 f"{head} observation deck",
                 f"{head} scenic viewpoint",
                 f"{head} cable car",
@@ -2188,6 +2194,9 @@ async def _fetch_top_attractions_from_google(
                     "viewpoint",
                     "observation",
                     "panorama",
+                    "national park",
+                    "state park",
+                    "landmark",
                 )
             ):
                 await asyncio.sleep(2.25)
@@ -2275,7 +2284,9 @@ async def _fetch_top_attractions_from_google(
         address = p.get("formatted_address", "")
         types = p.get("types", [])
         category = "명소"
-        if "natural_feature" in types or "park" in types:
+        if "national_park" in types:
+            category = "국립·자연공원"
+        elif "natural_feature" in types or "park" in types:
             category = "자연·공원"
         elif "museum" in types:
             category = "박물관"
@@ -2658,12 +2669,13 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                     out["attractions"] = merged_pre_llm
                     out["design_notes"] = (
                         f"{destination} 일정: 구글 Places(목적지·동선 주변 검색과 텍스트 검색)에서 "
-                        "**전망·케이블카·룩아웃·자연 지형** 후보를 먼저 넓게 모은 뒤, "
+                        "**국립공원·자연공원·전망·케이블카·룩아웃** 후보를 먼저 넓게 모은 뒤, "
                         "**4.3★ 이상·품질 통과**를 우선하고 "
                         "부족하면 **4.3 미만·리뷰 적은 장소도 평점·리뷰 순(뒤쪽 티어)**으로 상한을 채웁니다. "
                         "지역 큐레이션 풀이 있으면 구글만으로 상한이 채워져도 대표 명소가 빠지지 않게 낮은 점수 후보와 교체·"
                         f"부족 시 오프라인 풀로 여행 일수×3(최대 {n_attr}곳)까지 보충합니다. "
-                        "동선·목적지 검색을 합친 뒤 중복 제거·정렬하여 상위 후보를 고릅니다."
+                        "동선·목적지 검색을 합친 뒤 중복 제거·정렬하여 상위 후보를 고릅니다. "
+                        "LLM 단계에서는 경로 인근 국립공원 우선과 대표 유명 명소 3곳 이상 명시를 안내합니다."
                     )
 
             if self.settings.openai_api_key:
@@ -2698,9 +2710,19 @@ class ItineraryPlannerExecutor(BaseAgentExecutor):
                         route_hint = ""
                         if local_transport == "rental_car":
                             route_hint = f"\n- **렌트카 이동 동선 주의**: 출발지({origin})에서 주요 거점({destination})들을 오가는 경로 상에 위치한 명소와 목적지 내부 명소를 포함한다."
+                        parks_hint = (
+                            "\n- **국립공원·자연공원**: 후보에 국립공원·국가 보호 구역·대표 자연공원이 있으면 **동선·거리상 가까운 편을 우선** 포함하는 것이 자연스럽다. "
+                            "각 해당 명소의 description에 **주요 관광 도로·루프와의 위치**를 한 문장이라도 넣는다."
+                        )
+                        first_chunk_design = ""
+                        if chunk_idx == 0:
+                            first_chunk_design = (
+                                "\n- **[design_notes·첫 Chunk만]** `design_notes`에 **경로 인근 국립공원·대표 자연구역**을 우선 넣는 취지를 한두 문장으로 적고, "
+                                "**지역 대표 유명 명소**는 구체적 이름으로 **최소 3곳 이상** 짚어 추천한다는 문장을 반드시 넣는다(구글 후보 목록에 없어도 알려진 대표지명은 서술 가능)."
+                            )
 
                         prompt = f"""당신은 여행 일정 설계 전문가입니다. (Chunk {chunk_idx+1}/{len(all_chunks)})
-- 목적지 주변 실제 방문 가능한 구체적 명소만 나열한다.{route_hint}{req_names}
+- 목적지 주변 실제 방문 가능한 구체적 명소만 나열한다.{route_hint}{parks_hint}{first_chunk_design}{req_names}
 - **[중요] 투어·여행사·현지 가이드 업체·아웃도어 예약만 하는 상점 등은 명소가 아니다.** 산·호수·전망·산장·박물관·마을 등 **실제로 이동해 볼 수 있는 장소**만 넣는다(이름에 Outdoor/Guide/Tour agency만 있는 업체 제외).
 - 각 명소는 사용자가 비용·시간·예약을 비교해 고를 수 있게 실무 정보를 반드시 채운다. **입장료·개방·운영 시간·주차 요금·예약 필요 여부**는 빠지면 안 된다(미확인 시 "관련 정보 없음").
 - **[parking의 목적]** 사용자는 **전체 일정·숙소**를 정할 때 **어느 거점 도시에서 몇 분 거리인지**를 근거로 삼는다. **내비 검색어만** 적는 것은 **허용하지 않는다**. 반드시 **가장 가까운 인구 3천 이상 거점 지명·인구·승용차 ○분**을 적는다.
