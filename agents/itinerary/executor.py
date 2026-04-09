@@ -25,9 +25,13 @@ from shared.attraction_geo import (
     min_km_to_anchor_strings,
 )
 from shared.attraction_scenic import scenic_rank_bias
-from shared.grand_circle_places import (
-    build_grand_circle_loop_points,
-    grand_circle_corridor_max_km,
+from shared.route_corridor_places import (
+    build_round_trip_loop_points,
+    corridor_max_km,
+    find_airport_candidates_near_latlng,
+    find_airport_candidates_textsearch_fallback,
+    GC_LOOP_WAYPOINT_ADDRESSES,
+    pick_gateway_ll_closest_to_origin,
     pick_grand_circle_gateway_ll,
 )
 from shared.directions_parking import enrich_attractions_parking_directions
@@ -1882,8 +1886,9 @@ async def _fetch_top_attractions_from_google(
     (예: 5+56=61) **목표 개수를 채우지 못하는** 기술적 결함이 있었음 → 한 풀에서 자름.
     4.3+·품질 통과 우선, 부족 시 낮은 평점도 티어 5로 포함.
 
-    수집된 POI는 `shared/attraction_geo.py` 기준으로 **목적지·경로·(지역 구간 시) 출발지 앵커**까지의
-    최단 거리가 상한 이내인지 거른다(특정 지역 전용 박스 대신 일반 규칙). 설계는 docs/ATTRACTION_PIPELINE.md 참고.
+    기본은 `shared/route_corridor_places.py`로 **게이트웨이 공항 → 목적지 루프(Directions) → 루프 주변 Places**이며,
+    실패 시 `shared/attraction_geo.py` 기준 **목적지·경로·(지역 구간 시) 출발지 앵커**까지의 최단 거리로 거른다.
+    설계는 docs/ATTRACTION_PIPELINE.md 참고.
     """
     import asyncio
     import httpx
@@ -1907,7 +1912,7 @@ async def _fetch_top_attractions_from_google(
     primary_bias: str | None = None
     origin_ll_for_anchors: str | None = None
     skip_long_haul_route = False
-    gc_route_mode = False
+    corridor_route_mode = False
 
     async def get_lat_lng(
         client: httpx.AsyncClient, addr: str, *, for_destination: bool = False
@@ -1953,30 +1958,60 @@ async def _fetch_top_attractions_from_google(
         return []
 
     async with httpx.AsyncClient(timeout=45) as client:
-        if _looks_like_grand_circle(destination) and not _looks_like_patagonia(destination):
-            # 게이트웨이 공항(LAX/LAS/PHX/SLC 중 출발지와 가장 가까운 곳) → 대표 공원 고정 루프 → 루프 주변만 검색
-            gc_route_mode = True
-            gw = await pick_grand_circle_gateway_ll(client, origin or "", api_key)
-            if gw:
-                dest_points, route_points = await build_grand_circle_loop_points(client, api_key, gw)
-            skip_long_haul_route = True
-            origin_ll_for_anchors = None
-            primary_bias = dest_points[0] if dest_points else None
-        else:
-            d_locs = await asyncio.gather(
-                *(get_lat_lng(client, p, for_destination=True) for p in dest_places)
+        base_dest_lls: list[str] = []
+        d_locs = await asyncio.gather(
+            *(get_lat_lng(client, p, for_destination=True) for p in dest_places)
+        )
+        for loc in d_locs:
+            if loc:
+                base_dest_lls.append(loc)
+        if base_dest_lls and _looks_like_patagonia(destination):
+            natales = await get_lat_lng(
+                client, "Puerto Natales, Magallanes, Chile", for_destination=True
             )
-            for loc in d_locs:
-                if loc:
-                    dest_points.append(loc)
-            if dest_points and _looks_like_patagonia(destination):
-                natales = await get_lat_lng(
-                    client, "Puerto Natales, Magallanes, Chile", for_destination=True
-                )
-                if natales and natales not in dest_points:
-                    dest_points.append(natales)
+            if natales and natales not in base_dest_lls:
+                base_dest_lls.append(natales)
+
+        if base_dest_lls and (api_key or "").strip():
+            center_ll = base_dest_lls[0]
+            gw: str | None = None
+            waypoint_addrs: list[str] = []
+            try:
+                if _looks_like_grand_circle(destination) and not _looks_like_patagonia(destination):
+                    gw = await pick_grand_circle_gateway_ll(client, origin or "", api_key)
+                    waypoint_addrs = list(GC_LOOP_WAYPOINT_ADDRESSES)
+                else:
+                    cands = await find_airport_candidates_near_latlng(client, api_key, center_ll)
+                    if not cands and dest_places:
+                        cands = await find_airport_candidates_textsearch_fallback(
+                            client, api_key, center_ll, dest_places[0]
+                        )
+                    if cands:
+                        gw = await pick_gateway_ll_closest_to_origin(
+                            client, api_key, origin or "", cands
+                        )
+                    waypoint_addrs = [p.strip() for p in dest_places if (p or "").strip()][
+                        :23
+                    ]
+                if gw and waypoint_addrs:
+                    dest_points, route_points = await build_round_trip_loop_points(
+                        client, api_key, gw, waypoint_addrs
+                    )
+                    corridor_route_mode = True
+                    skip_long_haul_route = True
+                    origin_ll_for_anchors = None
+                    primary_bias = dest_points[0] if dest_points else base_dest_lls[0]
+            except Exception as e:
+                logger.warning("corridor route mode failed: %s", e)
+                corridor_route_mode = False
+
+        if not corridor_route_mode:
+            dest_points = list(base_dest_lls)
             if dest_points:
                 primary_bias = dest_points[0]
+            origin_ll_for_anchors = None
+            skip_long_haul_route = False
+            route_points = []
             if local_transport == "rental_car" and origin and dest_points:
                 o_ll = await get_lat_lng(client, origin, for_destination=False)
                 if o_ll:
@@ -2008,8 +2043,8 @@ async def _fetch_top_attractions_from_google(
         ),
     )
     max_km_places = (
-        grand_circle_corridor_max_km()
-        if gc_route_mode
+        corridor_max_km()
+        if corridor_route_mode
         else default_max_km_for_places_filter(patagonia_trip)
     )
 
@@ -2053,7 +2088,7 @@ async def _fetch_top_attractions_from_google(
         ("tourist_attraction", "scenic"),
     ]
     pairs_for_jobs = type_keyword_pairs
-    if gc_route_mode:
+    if corridor_route_mode:
         pairs_for_jobs = [
             x
             for x in type_keyword_pairs
@@ -2157,7 +2192,7 @@ async def _fetch_top_attractions_from_google(
             ]
         )
 
-    gc_nearby_radius = "50000" if gc_route_mode else "45000"
+    corridor_nearby_radius = "50000" if corridor_route_mode else "45000"
 
     async def nearby_one(
         client: httpx.AsyncClient, loc: str, typ: str | None, kw: str
@@ -2166,7 +2201,7 @@ async def _fetch_top_attractions_from_google(
         keyword-only 요청은 고유 place_id 확보를 위해 next_page_token으로 2페이지까지(요청당 최대 20→약 40)."""
         params: dict[str, str] = {
             "location": loc,
-            "radius": gc_nearby_radius,
+            "radius": corridor_nearby_radius,
             "key": api_key,
             "language": "en",
         }
@@ -2203,7 +2238,7 @@ async def _fetch_top_attractions_from_google(
         params = {
             "query": query,
             "location": loc,
-            "radius": gc_nearby_radius,
+            "radius": corridor_nearby_radius,
             "key": api_key,
             "language": "en",
         }
@@ -2302,7 +2337,7 @@ async def _fetch_top_attractions_from_google(
                 seen.add(pid)
                 combined.append(p)
         combined.sort(key=_place_itinerary_rank_key)
-        if gc_route_mode:
+        if corridor_route_mode:
             combined.sort(
                 key=lambda p: (
                     -float(p.get("rating") or 0),

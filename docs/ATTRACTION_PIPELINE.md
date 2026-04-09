@@ -5,24 +5,19 @@
 ## 1. 목적: 어디로 가든 경로·목적지 주변 명소 (구글 평점 중심)
 
 - **지오코딩**: 목적지 문자열(쉼표로 여러 개 가능)을 위도·경도로 바꿉니다. 모호한 문자열(예: 광역 자연권)은 `_patagonia_geocode_query` / `_grand_circle_geocode_query`로 **한 지점으로 고정**해 검색이 엉뚱한 대륙으로 가지 않게 합니다.
-- **렌트카 + 지역 구간(출발~목적 대원거리 ≤ 약 1200km)**: Google **Directions**로 출발지→목적지 경로의 **중간 샘플 좌표**를 뽑아, 그 주변에 **Nearby Search**를 돌립니다. (대륙 간 편도는 경로 검색을 끄고 목적지 주변만 검색 — 한국·유럽·미국 POI가 섞이는 문제 방지)
-- **목적지 주변**: 동일한 type·keyword 조합으로 **여러 앵커**(목적지 좌표 + 필요 시 추가 시드)에서 Nearby + Text Search.
-- **정렬**: `shared/attraction_scenic.py`의 `scenic_rank_bias` 등으로 **국립공원·전망·케이블카**류가 밀리지 않도록 티어·가중치 적용 후 `ingest_pool_tiered`에서 합칩니다.
+- **게이트웨이·루프(기본)**: `shared/route_corridor_places.py` — 목적지를 지오코딩한 뒤 **목적지 중심 근처 공항**(Places Nearby `type=airport`, 실패 시 Text Search 보강) 후보 중 **출발지와 대원거리가 가장 짧은** 좌표를 게이트웨이로 선택합니다(직항 스케줄 API 없이 **지리적 프록시**). **Grand Circle**만 예외적으로 서부 허브(LAX/LAS/PHX/SLC) + 고정 국립공원 루프를 유지합니다. Google **Directions**로 `게이트웨이 → 목적지 문자열들(최대 23개) → 게이트웨이` 루프를 만들고, 각 leg의 step 끝점을 샘플해 그 **도로 주변**에만 Nearby(최대 반경 50km) + Text Search를 돌립니다. 해외 출발지 좌표는 앵커에 넣지 않아 **다른 대륙·도심 전망대 오탐**을 줄입니다.
+- **폴백(루프 실패 또는 `GOOGLE_PLACES_API_KEY` 없음)**: 예전과 같이 **목적지 지오코드**만 앵커로 쓰고, 렌트카이며 출발~목적이 **≤ 약 1200km**이면 출발지→목적지 Directions **중간 샘플**을 추가합니다. 대륙 간이면 출발지 경로는 생략합니다.
+- **정렬(루프 성공 시)**: 지리 필터 후 **평점·리뷰 수** 내림차순을 한 번 더 적용합니다. 루프가 아닐 때는 `shared/attraction_scenic.py`의 `scenic_rank_bias` 티어 정렬이 우선입니다.
 
 ### 왜 “지역별 오프라인 큐레이션”이 아직 있나?
 
 - Places만으로 **목표 개수(일수×3)** 를 항상 채우기 어렵고, **이름만 있는 광역 목적지**는 지오코딩이 한 점에 고정되어 주변 풀이 짧을 수 있습니다.
 - `_region_curated_attraction_templates` / `_merge_google_with_region_templates`는 **구글 풀이 부족할 때** 대표 랜드마크가 빠지지 않게 **보충·교체**하는 용도입니다.
 
-### Grand Circle 전용 (`shared/grand_circle_places.py`)
+### 지리 필터 (`shared/attraction_geo.py`)
 
-- 출발지를 지오코딩한 뒤 **LAX / LAS / PHX / SLC** 중 **대원거리가 가장 짧은** 공항을 게이트웨이로 선택합니다.
-- Google **Directions**로 게이트웨이 → 그랜드캐년(남림) → 자이언 → 브라이스 → 페이지 → 모뉴먼트 밸리 → 아치스 → 게이트웨이 **루프**를 만들고, 각 leg의 step 끝점을 샘플해 루프 주변에만 **Nearby**(최대 반경 50km) + Text Search.
-- POI는 루프 앵커까지 직선 **약 110km** 이내만 남기고, **평점·리뷰 수** 내림차순 정렬합니다.
-
-### 그 외 목적지: 지리 필터 (`shared/attraction_geo.py`)
-
-- **목적지·경로 샘플·(지역 구간일 때) 출발지** 좌표를 **앵커 집합**으로 두고, 각 POI는 **어느 앵커에든 가까우면** 통과합니다. 상한은 기본 **1000km**, 파타고니아 등 광역 자연권은 **2400km**.
+- **루프 모드 성공 시**: 앵커는 게이트웨이·루프 샘플·목적지 지점이며, POI는 **어느 앵커에든 직선 약 110km** 이내면 통과합니다.
+- **루프 모드가 아닐 때**: **목적지·경로 샘플·(지역 구간일 때) 출발지** 좌표를 앵커로 두고, 상한은 기본 **1000km**, 파타고니아 등 광역 자연권은 **2400km**.
 
 ## 2. 거점 도시·승용차 시간 (숙소·일정 참고)
 
@@ -44,6 +39,7 @@
 | 단계 | 주요 모듈 |
 |------|-----------|
 | Places 수집·필터 | `agents/itinerary/executor.py` → `_fetch_top_attractions_from_google` |
+| 게이트웨이·루프 | `shared/route_corridor_places.py` |
 | 앵커·거리 상한 | `shared/attraction_geo.py` |
 | 거점·주행분 | `shared/directions_parking.py` |
 | Details·폴리시 | `shared/google_place_details.py` |
