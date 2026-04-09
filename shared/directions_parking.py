@@ -346,6 +346,9 @@ async def enrich_attractions_parking_directions(
             if not display:
                 display = _places_name
 
+            a["nearest_hub_display_name"] = display
+            a["drive_minutes_from_nearest_hub"] = int(mins)
+
             old_pk = str((a.get("practical_details") or {}).get("parking") or "")
             toll = _extract_toll_snippet(old_pk)
             line = _build_parking_line_real_city(display, mins, toll)

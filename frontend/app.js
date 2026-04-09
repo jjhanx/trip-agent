@@ -2183,11 +2183,17 @@ function renderItineraryWorkflow(data) {
             const linksRow = (web || gmap)
               ? `<p class="attraction-card__links muted" style="font-size:0.88rem;">${[web, gmap].filter(Boolean).join(' · ')}</p>`
               : '';
+            const hubNm = a.nearest_hub_display_name && String(a.nearest_hub_display_name).trim();
+            const hubMin = a.drive_minutes_from_nearest_hub;
+            const hubRow = hubNm && hubMin != null && hubMin !== ''
+              ? `<p class="attraction-card__hub muted" style="font-size:0.9rem;margin:0.25rem 0 0;">숙소·일정 참고: <strong>${escapeHtml(hubNm)}</strong>에서 승용차 약 ${escapeHtml(String(hubMin))}분 (서버 Directions 기준)</p>`
+              : '';
             return `<label class="attraction-card option-item">
               <div class="attraction-card__pick"><input type="checkbox" class="attr-pick" value="${id}" ${checked} /></div>
               ${img}
               <div class="attraction-card__body">
                 <h3 class="attraction-card__title">${index + 1}. ${escapeHtml(a.name || '')} <span class="muted">(${escapeHtml(a.category || '')})</span></h3>
+                ${hubRow}
                 <p class="attraction-card__desc">${linkifyUrlsInPlainText(prepareAttractionDescription(a.description, gmRaw))}</p>
                 ${linksRow}
                 ${credit}

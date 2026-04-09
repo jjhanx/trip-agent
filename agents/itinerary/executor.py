@@ -19,6 +19,11 @@ from shared.attraction_filters import (
     is_guide_or_tour_operator_place,
     should_exclude_warm_season_ski_place,
 )
+from shared.attraction_geo import (
+    build_places_anchors,
+    default_max_km_for_places_filter,
+    min_km_to_anchor_strings,
+)
 from shared.attraction_scenic import scenic_rank_bias
 from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
@@ -190,64 +195,6 @@ def _grand_circle_geocode_seeds() -> tuple[str, ...]:
         "Grand Canyon Village Arizona USA",
         "Monument Valley Navajo Tribal Park Utah",
     )
-
-
-def _point_in_grand_circle_region(lat: float, lng: float) -> bool:
-    """미국 서남부 그랜드 서클(UT/AZ/NV·네바다·북애리조나). 일리노이·중서부 도심 전망대 좌표 제외."""
-    try:
-        latf = float(lat)
-        lngf = float(lng)
-    except (TypeError, ValueError):
-        return False
-    if latf < 34.3 or latf > 43.5:
-        return False
-    # 서경 약 108.4°W ~ 116.6°W (라스베이거스 ~ 모압·페이지). 시카고(~87°W) 등은 범위 밖.
-    if lngf > -108.4 or lngf < -116.6:
-        return False
-    return True
-
-
-def _formatted_address_suspicious_for_grand_circle(addr: str) -> bool:
-    """그랜드 서클 일정인데 주소가 미국 중동부·동부 등이면 제외."""
-    if not addr:
-        return False
-    a = addr.lower()
-    bad = (
-        "illinois",
-        "chicago",
-        "michigan",
-        "ohio",
-        "indiana",
-        "wisconsin",
-        "minnesota",
-        "missouri",
-        "iowa",
-        "nebraska",
-        "kansas",
-        "kentucky",
-        "tennessee",
-        "new york",
-        "florida",
-        "georgia",
-        "massachusetts",
-        "virginia",
-        "pennsylvania",
-        "north carolina",
-        "south carolina",
-    )
-    return any(x in a for x in bad)
-
-
-def _name_out_of_scope_for_grand_circle(name: str | None) -> bool:
-    """도심 전망대·중서부 랜드마크 등 그랜드 서클과 무관한 유명 POI 이름."""
-    nl = (name or "").lower()
-    if not nl:
-        return False
-    if "chicago" in nl or "willis tower" in nl:
-        return True
-    if "skydeck" in nl and any(x in nl for x in ("chicago", "willis", "illinois", "wacker")):
-        return True
-    return False
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -1942,6 +1889,9 @@ async def _fetch_top_attractions_from_google(
     예전에는 max_count를 동선:목적지 ≈1:4로 **고정 분배**해, 동선 쪽 풀이 짧으면
     (예: 5+56=61) **목표 개수를 채우지 못하는** 기술적 결함이 있었음 → 한 풀에서 자름.
     4.3+·품질 통과 우선, 부족 시 낮은 평점도 티어 5로 포함.
+
+    수집된 POI는 `shared/attraction_geo.py` 기준으로 **목적지·경로·(지역 구간 시) 출발지 앵커**까지의
+    최단 거리가 상한 이내인지 거른다(특정 지역 전용 박스 대신 일반 규칙). 설계는 docs/ATTRACTION_PIPELINE.md 참고.
     """
     import asyncio
     import httpx
@@ -1963,6 +1913,8 @@ async def _fetch_top_attractions_from_google(
     route_points: list[str] = []
     dest_points: list[str] = []
     primary_bias: str | None = None
+    origin_ll_for_anchors: str | None = None
+    skip_long_haul_route = False
 
     async def get_lat_lng(
         client: httpx.AsyncClient, addr: str, *, for_destination: bool = False
@@ -2029,9 +1981,10 @@ async def _fetch_top_attractions_from_google(
         if dest_points:
             primary_bias = dest_points[0]
         # 서울→파타고니아 등 대륙 간 이동: Directions 경유지마다 Nearby 검색 시 한국·유럽·미국 명소가 섞임 → 경유 검색 생략
-        skip_long_haul_route = False
         if local_transport == "rental_car" and origin and dest_points:
             o_ll = await get_lat_lng(client, origin, for_destination=False)
+            if o_ll:
+                origin_ll_for_anchors = o_ll
             if o_ll and dest_points[0]:
                 try:
                     oa, ob = map(float, o_ll.split(","))
@@ -2046,6 +1999,19 @@ async def _fetch_top_attractions_from_google(
 
     if not dest_points:
         return [], None
+
+    patagonia_trip = _looks_like_patagonia(destination)
+    places_anchors = build_places_anchors(
+        dest_points,
+        route_points,
+        origin_ll=origin_ll_for_anchors,
+        include_origin=bool(
+            origin_ll_for_anchors
+            and not skip_long_haul_route
+            and (local_transport or "").strip() == "rental_car"
+        ),
+    )
+    max_km_places = default_max_km_for_places_filter(patagonia_trip)
 
     bad_types = {
         "hospital",
@@ -2110,30 +2076,15 @@ async def _fetch_top_attractions_from_google(
             "aerial tram",
             "ski lift",
         )
-    gc_trip = _looks_like_grand_circle(destination)
-
-    def _gc_skip_nearby_pair(typ: str | None, kw: str) -> bool:
-        """그랜드 서클: 'observation deck' 등 전 세계 도심 전망대가 붙는 키워드는 제외."""
-        if not gc_trip:
-            return False
-        kw_l = (kw or "").lower()
-        if kw_l == "observation deck" and typ == "point_of_interest":
-            return True
-        return False
-
     route_jobs: list[tuple[str, str | None, str]] = []
     dest_jobs: list[tuple[str, str | None, str]] = []
     for loc in route_points:
         for typ, kw in type_keyword_pairs[:8]:
-            if _gc_skip_nearby_pair(typ, kw):
-                continue
             route_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby[:6]:
             route_jobs.append((loc, None, kw))
     for loc in dest_points:
         for typ, kw in type_keyword_pairs:
-            if _gc_skip_nearby_pair(typ, kw):
-                continue
             dest_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby:
             dest_jobs.append((loc, None, kw))
@@ -2301,10 +2252,6 @@ async def _fetch_top_attractions_from_google(
     route_res: list[list[dict[str, Any]]] = list(route_pages)
     dest_res: list[list[dict[str, Any]]] = list(dest_pages) + list(text_pages)
 
-    anchor_ll_str = dest_points[0] if dest_points else None
-    patagonia_trip = _looks_like_patagonia(destination)
-    grand_circle_trip = _looks_like_grand_circle(destination)
-
     def ingest_pool_tiered(lists: list[list[dict]]) -> list[dict]:
         combined: list[dict] = []
         seen: set[str] = set()
@@ -2330,36 +2277,18 @@ async def _fetch_top_attractions_from_google(
                 addr_line = f"{p.get('formatted_address') or ''} {p.get('vicinity') or ''}"
                 if patagonia_trip and _formatted_address_suspicious_for_patagonia(addr_line):
                     continue
-                if grand_circle_trip and _formatted_address_suspicious_for_grand_circle(addr_line):
-                    continue
-                if grand_circle_trip and _name_out_of_scope_for_grand_circle(p.get("name")):
-                    continue
                 geom = p.get("geometry") or {}
                 loc = geom.get("location") if isinstance(geom, dict) else None
-                if grand_circle_trip and isinstance(loc, dict):
+                if places_anchors and isinstance(loc, dict):
                     try:
                         plat = float(loc.get("lat"))
                         plng = float(loc.get("lng"))
-                        if not _point_in_grand_circle_region(plat, plng):
-                            continue
                     except (TypeError, ValueError):
-                        pass
-                if anchor_ll_str and isinstance(loc, dict):
-                    try:
-                        plat = float(loc.get("lat"))
-                        plng = float(loc.get("lng"))
-                        alat, alng = map(float, anchor_ll_str.split(","))
-                        km = _haversine_km(plat, plng, alat, alng)
-                        if patagonia_trip:
-                            max_km = 2400.0
-                        elif grand_circle_trip:
-                            max_km = 650.0
-                        else:
-                            max_km = 4000.0
-                        if km > max_km:
+                        plat = plng = None
+                    if plat is not None and plng is not None:
+                        mk = min_km_to_anchor_strings(plat, plng, places_anchors)
+                        if mk is not None and mk > max_km_places:
                             continue
-                    except (TypeError, ValueError):
-                        pass
                 seen.add(pid)
                 combined.append(p)
         combined.sort(key=_place_itinerary_rank_key)
