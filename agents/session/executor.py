@@ -394,6 +394,8 @@ class SessionExecutor(BaseAgentExecutor):
             return bool(sf)
 
         flight_complete = _is_flight_complete(selected_flight)
+        flight_skipped = bool(data.get("flight_skipped"))
+        rental_skipped = bool(data.get("rental_skipped"))
 
         if (
             flight_complete
@@ -417,13 +419,14 @@ class SessionExecutor(BaseAgentExecutor):
             )
             return
 
-        if selected_flight and selected_itinerary and selected_accommodation:
+        if (selected_flight or flight_skipped) and selected_itinerary and selected_accommodation:
             resp = await self._call_agent(
                 "booking",
                 {
                     "confirmed_itinerary": selected_itinerary,
                     "selected_flight": selected_flight,
                     "selected_accommodation": selected_accommodation,
+                    "flight_skipped": flight_skipped,
                 },
             )
             if resp:
@@ -433,7 +436,11 @@ class SessionExecutor(BaseAgentExecutor):
                     "status": "confirmed",
                     "summary": "일정이 확정되었습니다.",
                     "steps": [
-                        {"order": 1, "item": "항공편", "details": selected_flight},
+                        {
+                            "order": 1,
+                            "item": "항공편",
+                            "details": selected_flight or ("건너뜀" if flight_skipped else None),
+                        },
                         {"order": 2, "item": "숙소", "details": selected_accommodation},
                         {"order": 3, "item": "일정", "details": selected_itinerary},
                     ],
@@ -443,7 +450,7 @@ class SessionExecutor(BaseAgentExecutor):
                 )
             return
 
-        if selected_flight and selected_itinerary and not selected_accommodation:
+        if (selected_flight or flight_skipped) and selected_itinerary and not selected_accommodation:
             acc_priority = [t.value for t in travel.accommodation_priority] if travel.accommodation_priority else [travel.accommodation_type.value]
             acc_payload = {
                 "location": travel.destination,
@@ -459,11 +466,12 @@ class SessionExecutor(BaseAgentExecutor):
                 acc_resp = json.dumps(
                     mock_search_hotels(travel.destination, travel.accommodation_type.value)
                 )
+            sf_acc = selected_flight if selected_flight else None
             start_d, end_d = _extract_rental_dates_from_flight(
-                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+                sf_acc, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
             lt_payload = _merge_rental_search(
-                _build_local_transport_payload(selected_flight, travel, start_d, end_d),
+                _build_local_transport_payload(sf_acc, travel, start_d, end_d),
                 rental_search,
             )
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
@@ -487,11 +495,16 @@ class SessionExecutor(BaseAgentExecutor):
             )
             return
 
-        if flight_complete and selected_local_transport and not selected_itinerary:
+        if (
+            (flight_complete or flight_skipped)
+            and (selected_local_transport or rental_skipped)
+            and not selected_itinerary
+        ):
+            sf_eff = selected_flight if flight_complete else None
             start_d, end_d = _extract_rental_dates_from_flight(
-                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+                sf_eff, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
-            lt_payload = _build_local_transport_payload(selected_flight, travel, start_d, end_d)
+            lt_payload = _build_local_transport_payload(sf_eff, travel, start_d, end_d)
             route_origin = lt_payload.get("transit_origin") or travel.origin
 
             # 일정·명소 일수는 폼이 아니라 선택 항공의 도착·귀국 출발일을 우선(유연일·초기 폼과 불일치 방지).
@@ -505,7 +518,7 @@ class SessionExecutor(BaseAgentExecutor):
                 "start_date": it_start,
                 "end_date": it_end,
                 "preference": travel.preference.model_dump(),
-                "selected_flight": selected_flight,
+                "selected_flight": sf_eff,
             }
             phase = (data.get("itinerary_phase") or "attractions").strip().lower()
             it_payload["itinerary_phase"] = phase
@@ -557,12 +570,13 @@ class SessionExecutor(BaseAgentExecutor):
                 )
             return
 
-        if flight_complete and not selected_local_transport:
+        if (flight_complete or flight_skipped) and not selected_local_transport and not rental_skipped:
+            sf_eff = selected_flight if flight_complete else None
             start_d, end_d = _extract_rental_dates_from_flight(
-                selected_flight, travel.start_date.isoformat(), travel.end_date.isoformat()
+                sf_eff, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
             lt_payload = _merge_rental_search(
-                _build_local_transport_payload(selected_flight, travel, start_d, end_d),
+                _build_local_transport_payload(sf_eff, travel, start_d, end_d),
                 rental_search,
             )
             if travel.local_transport == LocalTransportType.RENTAL_CAR:

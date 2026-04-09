@@ -227,6 +227,17 @@
         </form>
       </section>
 
+      <section id="step-input-bridge" class="card hidden">
+        <h2>다음 단계 선택</h2>
+        <p class="muted">항공권을 검색·선택하거나, 이미 항공이 정해졌거나 기차·버스 등으로 이동하는 경우 항공 단계를 건너뛸 수 있습니다.</p>
+        <div class="step-choice-actions" style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-top:1rem;align-items:center;">
+          <button type="button" id="btn-bridge-flights" class="btn-primary">항공편 검색·선택하기</button>
+          <button type="button" id="btn-bridge-skip-flights" class="secondary">항공편 건너뛰기</button>
+        </div>
+        <p class="muted" style="margin-top:1rem;font-size:0.88rem;">다구간 여정은 구간별 항공 선택이 필요해 「항공편 건너뛰기」를 쓸 수 없습니다.</p>
+        <button type="button" id="btn-back-input-bridge" class="secondary" style="margin-top:0.75rem;">여행 정보 수정</button>
+      </section>
+
       <section id="step-flights" class="card hidden">
         <h2 id="step-flights-title">2a. 출국 항공편 선택</h2>
         <div id="outbound-summary" class="hidden" style="margin-bottom: 1rem; padding: 0.8rem; background: rgba(56, 189, 248, 0.08); border-radius: 8px; font-size: 0.9em;">
@@ -258,9 +269,10 @@
 
         <div id="flights-list" class="options-grid" style="display: flex; flex-direction: column;"></div>
 
-        <div style="margin-top: 1.5rem;">
+        <div style="margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
           <button id="btn-next-flights" disabled title="리스트에서 항공편을 선택해주세요"
             style="opacity: 0.5; cursor: not-allowed;">다음</button>
+          <button type="button" id="btn-skip-flights" class="secondary">항공 없이 다음 단계</button>
           <button id="btn-back-flights" class="secondary">뒤로</button>
         </div>
       </section>
@@ -290,6 +302,7 @@
         <div id="rental-actions" class="rental-actions" style="margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
           <a id="btn-booking-rental" href="#" target="_blank" rel="noopener" class="btn-primary" style="display: none;">선택한 차량 예약하기</a>
           <button id="btn-next-rental">다음</button>
+          <button type="button" id="btn-skip-rental" class="secondary">건너뛰기 (여행 일정으로)</button>
           <button id="btn-back-rental" class="secondary">뒤로</button>
         </div>
       </section>
@@ -298,16 +311,22 @@
         <h2>4. 여행 일정</h2>
         <p class="muted" style="margin-bottom: 1rem;">목적지 주변 명소 후보에서 고르고, 동선·추천 동네·맛집을 반영한 뒤 점심·저녁을 지정합니다. 숙소는 다음 단계입니다.</p>
         <div id="itinerary-workflow-root"></div>
-        <button id="btn-next-itineraries">다음</button>
-        <button id="btn-back-itineraries" class="secondary">뒤로</button>
+        <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+          <button id="btn-next-itineraries">다음</button>
+          <button type="button" id="btn-skip-itineraries" class="secondary">건너뛰기 (숙소 선택으로)</button>
+          <button id="btn-back-itineraries" class="secondary">뒤로</button>
+        </div>
       </section>
 
       <section id="step-accommodation" class="card hidden">
         <h2>5. 숙소 선택</h2>
         <div id="accommodations-list" class="options-grid"></div>
         <div id="local-transport-info"></div>
-        <button id="btn-confirm-booking">일정 확정</button>
-        <button id="btn-back-accommodation" class="secondary">뒤로</button>
+        <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+          <button id="btn-confirm-booking">일정 확정</button>
+          <button type="button" id="btn-skip-accommodation" class="secondary">건너뛰기 (예약 안내로)</button>
+          <button id="btn-back-accommodation" class="secondary">뒤로</button>
+        </div>
       </section>
 
       <section id="step-confirm" class="card hidden">
@@ -325,7 +344,7 @@
     </main>
   </div>
   <script src="airports.js?v=8"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 
 </html>
