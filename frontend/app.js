@@ -258,6 +258,8 @@ function getFullPlanState() {
     flightSearchApi: state.flightSearchApi || '',
     flightSkipped: !!state.flightSkipped,
     rentalSkipped: !!state.rentalSkipped,
+    travelPrimaryIntent: state.travelPrimaryIntent,
+    rentalDecideFrom: state.rentalDecideFrom,
     selectedOutboundFlight: state.selectedOutboundFlight,
     selectedReturnFlight: state.selectedReturnFlight,
     selectedMultiCityFlights: state.selectedMultiCityFlights,
@@ -293,6 +295,8 @@ function loadPlanIntoState(data) {
   state.flightSearchApi = typeof data.flightSearchApi === 'string' ? data.flightSearchApi : '';
   state.flightSkipped = !!data.flightSkipped;
   state.rentalSkipped = !!data.rentalSkipped;
+  state.travelPrimaryIntent = data.travelPrimaryIntent ?? null;
+  state.rentalDecideFrom = data.rentalDecideFrom ?? null;
   state.selectedOutboundFlight = data.selectedOutboundFlight ?? null;
   state.selectedReturnFlight = data.selectedReturnFlight ?? null;
   state.selectedMultiCityFlights = Array.isArray(data.selectedMultiCityFlights) ? data.selectedMultiCityFlights : [];
@@ -460,6 +464,8 @@ function newPlan() {
   state.flightSearchApi = '';
   state.flightSkipped = false;
   state.rentalSkipped = false;
+  state.travelPrimaryIntent = null;
+  state.rentalDecideFrom = null;
   loadFormFromStorage();
   initTripTypeUI();
   renderPlanUI();
@@ -489,6 +495,8 @@ let state = {
   flightLeg: 'outbound',
   flightSkipped: false,
   rentalSkipped: false,
+  travelPrimaryIntent: null,
+  rentalDecideFrom: null,
   itineraries: [],
   selectedItinerary: null,
   itineraryWorkflowStep: null,
@@ -510,12 +518,14 @@ function $$(sel) { return document.querySelectorAll(sel); }
 
 const STEP_IDS = {
   'step-input': 'input',
-  'step-input-bridge': 'input',
   'step-origin-airports': 'input',
   'step-destination-airports': 'input',
   'step-flights': 'flights',
+  'step-rental-decide': 'rental',
   'step-rental': 'rental',
+  'step-itinerary-decide': 'itineraries',
   'step-itineraries': 'itineraries',
+  'step-accommodation-decide': 'accommodation',
   'step-accommodation': 'accommodation',
   'step-confirm': 'booking',
 };
@@ -545,14 +555,7 @@ function show(id, fromStepClick = false) {
       refreshStepView(step);
     }
   }
-  if (id === 'step-input-bridge') {
-    const tt = $('#trip_type_select')?.value || 'round_trip';
-    const sb = $('#btn-bridge-skip-flights');
-    if (sb) sb.style.display = tt === 'multi_city' ? 'none' : '';
-  }
   if (id === 'step-flights') {
-    const sbf = $('#btn-skip-flights');
-    if (sbf) sbf.style.display = state.trip_type === 'multi_city' ? 'none' : '';
     updateFlightNextButtonLabel();
   }
   if (id === 'step-rental') {
@@ -971,12 +974,12 @@ function renderDestAirports() {
   });
 }
 
-/** 항공 없이 렌트카/교통 단계로 (세션: flight_skipped). 다구간은 미지원. */
-async function advanceToRentalsSkipFlight() {
+/** 항공 건너뛰기 시 로컬 상태만 설정. false면 다구간 등으로 중단. */
+function prepareFlightSkipLocalState() {
   const tt = $('#trip_type_select')?.value || 'round_trip';
   if (tt === 'multi_city') {
     alert('다구간 여정은 구간별로 항공편을 선택해야 합니다.');
-    return;
+    return false;
   }
   state.flightSkipped = true;
   state.selectedFlight = null;
@@ -986,6 +989,18 @@ async function advanceToRentalsSkipFlight() {
   state.flights = [];
   state.currentFlights = null;
   state.flightsByLeg = {};
+  state.travelInput = buildTravelInput();
+  state.trip_type = state.travelInput?.trip_type || tt;
+  return true;
+}
+
+/** 항공 없이 세션에 렌트 검색 요청 (flight_skipped). 렌트 결정 화면에서 「검색」 시 호출. */
+async function runSessionRentalSearchSkipFlight() {
+  const tt = $('#trip_type_select')?.value || 'round_trip';
+  if (tt === 'multi_city') {
+    alert('다구간 여정은 구간별로 항공편을 선택해야 합니다.');
+    return;
+  }
   state.travelInput = buildTravelInput();
   state.trip_type = state.travelInput?.trip_type || tt;
   show('loading');
@@ -1011,6 +1026,70 @@ async function advanceToRentalsSkipFlight() {
   } catch (err) {
     showError(err.message);
   }
+}
+
+function showRentalDecide(from) {
+  state.rentalDecideFrom = from === 'no_flight' ? 'no_flight' : 'after_flight';
+  const lead = $('#rental-decide-lead');
+  if (lead) {
+    lead.textContent = from === 'no_flight'
+      ? '항공 단계를 건너뛰었습니다. 렌트카·대중교통 검색을 진행할지, 여행 일정 단계로 바로 갈지 선택하세요.'
+      : '선택한 항공을 반영해 렌트카·대중교통 옵션을 검색할 수 있습니다. 검색할지 여행 일정으로 바로 갈지 선택하세요.';
+  }
+  show('step-rental-decide');
+}
+
+async function executeRentalSearchFromDecide() {
+  if (state.flightSkipped) {
+    await runSessionRentalSearchSkipFlight();
+  } else {
+    await advanceToLocalTransportStep();
+  }
+}
+
+function validateTravelDateRange() {
+  const startVal = $('#travel-form').start_date?.value;
+  const endVal = $('#travel-form').end_date?.value;
+  if (startVal && endVal && endVal < startVal) {
+    alert('귀환일은 출발일 이후로 선택해 주세요.');
+    return false;
+  }
+  return true;
+}
+
+/** intent: 'flights' | 'no_flights' — 여행 정보에서 공항 선택 후 이어짐 */
+async function startTravelFlow(intent) {
+  if (!validateTravelDateRange()) return;
+  state.travelPrimaryIntent = intent;
+  if (intent === 'no_flights') {
+    const tt = $('#trip_type_select')?.value || 'round_trip';
+    if (tt === 'multi_city') {
+      alert('다구간 여정은 구간별 항공 선택이 필요합니다. 「항공편 검색·선택」으로 진행해 주세요.');
+      return;
+    }
+  }
+  if (needOriginAirport() && !state.origin_airport_code) {
+    renderOriginAirports();
+    show('step-origin-airports');
+    return;
+  }
+  if (needDestAirport() && !state.destination_airport_code) {
+    renderDestAirports();
+    show('step-destination-airports');
+    return;
+  }
+  await finishTravelAirportFlow();
+}
+
+async function finishTravelAirportFlow() {
+  const intent = state.travelPrimaryIntent;
+  if (intent === 'no_flights') {
+    if (!prepareFlightSkipLocalState()) return;
+    showRentalDecide('no_flight');
+    return;
+  }
+  state.flightSkipped = false;
+  await doFlightSearch();
 }
 
 async function doFlightSearch(leg) {
@@ -1059,29 +1138,12 @@ async function doFlightSearch(leg) {
   }
 }
 
-$('#travel-form').addEventListener('submit', async (e) => {
+$('#travel-form').addEventListener('submit', (e) => {
   e.preventDefault();
-
-  const startVal = $('#travel-form').start_date?.value;
-  const endVal = $('#travel-form').end_date?.value;
-  if (startVal && endVal && endVal < startVal) {
-    alert('귀환일은 출발일 이후로 선택해 주세요.');
-    return;
-  }
-
-  if (needOriginAirport() && !state.origin_airport_code) {
-    renderOriginAirports();
-    show('step-origin-airports');
-    return;
-  }
-  if (needDestAirport() && !state.destination_airport_code) {
-    renderDestAirports();
-    show('step-destination-airports');
-    return;
-  }
-
-  show('step-input-bridge');
 });
+
+$('#btn-travel-pick-flights')?.addEventListener('click', () => startTravelFlow('flights'));
+$('#btn-travel-skip-flights')?.addEventListener('click', () => startTravelFlow('no_flights'));
 
 $('#btn-back-origin-airports').addEventListener('click', () => {
   state.origin_airport_code = null;
@@ -1097,32 +1159,26 @@ $('#btn-back-destination-airports').addEventListener('click', () => {
   }
 });
 
-$('#btn-next-origin-airports').addEventListener('click', () => {
+$('#btn-next-origin-airports').addEventListener('click', async () => {
   if (!state.origin_airport_code) { alert('공항을 선택해 주세요.'); return; }
   if (needDestAirport() && !state.destination_airport_code) {
     renderDestAirports();
     show('step-destination-airports');
   } else {
-    show('step-input-bridge');
+    await finishTravelAirportFlow();
   }
 });
 
-$('#btn-next-destination-airports').addEventListener('click', () => {
+$('#btn-next-destination-airports').addEventListener('click', async () => {
   if (!state.destination_airport_code) { alert('공항을 선택해 주세요.'); return; }
-  show('step-input-bridge');
+  await finishTravelAirportFlow();
 });
 
-$('#btn-bridge-flights').addEventListener('click', async () => {
-  state.flightSkipped = false;
-  await doFlightSearch();
-});
-
-$('#btn-bridge-skip-flights').addEventListener('click', async () => {
-  await advanceToRentalsSkipFlight();
-});
-
-$('#btn-back-input-bridge').addEventListener('click', () => {
-  show('step-input');
+$('#btn-rental-decide-search')?.addEventListener('click', () => executeRentalSearchFromDecide());
+$('#btn-rental-decide-skip')?.addEventListener('click', () => skipRentalToItinerary());
+$('#btn-back-rental-decide')?.addEventListener('click', () => {
+  if (state.rentalDecideFrom === 'no_flight') show('step-input');
+  else show('step-flights');
 });
 
 function fmtFlightDateTime(iso) {
@@ -1480,7 +1536,7 @@ function selectFlight(f) {
   updateFlightNextButtonLabel();
 
   if (isLocalTransportSelectionComplete()) {
-    advanceToLocalTransportStep();
+    showRentalDecide('after_flight');
   }
 }
 
@@ -1587,12 +1643,7 @@ $$('.sort-btn').forEach(btn => {
 $('#btn-back-flights').addEventListener('click', () => {
   state.origin_airport_code = null;
   state.destination_airport_code = null;
-  show('step-input-bridge');
-});
-
-$('#btn-skip-flights').addEventListener('click', async () => {
-  if (!window.confirm('항공편을 선택하지 않고 렌트카·대중교통 단계로 이동할까요?')) return;
-  await advanceToRentalsSkipFlight();
+  show('step-input');
 });
 
 $('#btn-next-flights').addEventListener('click', async () => {
@@ -1628,7 +1679,7 @@ $('#btn-next-flights').addEventListener('click', async () => {
     }
   }
 
-  await advanceToLocalTransportStep();
+  showRentalDecide('after_flight');
 });
 
 function isoToDatetimeLocal(iso) {
@@ -2309,7 +2360,7 @@ function renderItineraries(items) {
 }
 
 $('#btn-back-rental').addEventListener('click', () => {
-  if (state.flightSkipped) show('step-input-bridge');
+  if (state.flightSkipped) show('step-rental-decide');
   else show('step-flights');
 });
 
@@ -2352,7 +2403,11 @@ if (btnRentalRefresh) btnRentalRefresh.addEventListener('click', async () => {
   }
 });
 
-$('#btn-next-rental').addEventListener('click', async () => {
+function showItineraryDecide() {
+  show('step-itinerary-decide');
+}
+
+async function proceedFromRentalToItinerary() {
   state.rentalSkipped = false;
   const ltNorm = normalizeLocalTransport(state.localTransport);
   if (state.travelInput?.local_transport === 'rental_car' && ltNorm.length === 0) {
@@ -2372,12 +2427,19 @@ $('#btn-next-rental').addEventListener('click', async () => {
   } catch (err) {
     showError(err.message);
   }
+}
+
+$('#btn-next-rental').addEventListener('click', () => {
+  showItineraryDecide();
 });
+
+$('#btn-itinerary-decide-go')?.addEventListener('click', () => proceedFromRentalToItinerary());
+$('#btn-itinerary-decide-skip')?.addEventListener('click', () => skipItineraryToAccommodation());
+$('#btn-back-itinerary-decide')?.addEventListener('click', () => show('step-rental'));
 
 $('#btn-back-itineraries').addEventListener('click', () => show('step-rental'));
 
 async function skipRentalToItinerary() {
-  if (!window.confirm('렌트카·대중교통 단계를 건너뛰고 여행 일정(명소) 단계로 이동할까요?')) return;
   state.rentalSkipped = true;
   show('loading');
   try {
@@ -2390,7 +2452,6 @@ async function skipRentalToItinerary() {
 }
 
 async function skipItineraryToAccommodation() {
-  if (!window.confirm('명소·동선·맛집 단계를 건너뛰고 숙소 검색으로 이동할까요?')) return;
   const dest = state.travelInput?.destination || '';
   const stub = {
     title: '일정 단계를 건너뛰었습니다',
@@ -2421,7 +2482,6 @@ async function skipItineraryToAccommodation() {
 }
 
 async function skipAccommodationToConfirm() {
-  if (!window.confirm('숙소를 고르지 않고 예약 안내 단계로 이동할까요?')) return;
   state.selectedAccommodation = {
     id: 'skipped',
     name: '숙소 선택 건너뛰기',
@@ -2443,9 +2503,40 @@ async function skipAccommodationToConfirm() {
   }
 }
 
-$('#btn-skip-rental').addEventListener('click', () => skipRentalToItinerary());
-$('#btn-skip-itineraries').addEventListener('click', () => skipItineraryToAccommodation());
-$('#btn-skip-accommodation').addEventListener('click', () => skipAccommodationToConfirm());
+function showAccommodationDecide() {
+  show('step-accommodation-decide');
+}
+
+async function proceedFromItineraryCompleteToAccommodation() {
+  if (!state.selectedItinerary) {
+    alert('일정이 없습니다.');
+    return;
+  }
+  show('loading');
+  try {
+    const payload = baseSessionPayload({
+      selected_flight: state.selectedFlight,
+      selected_itinerary: state.selectedItinerary,
+    });
+    const data = await callAgent(payload);
+    if (data?.error) throw new Error(data.error);
+    const acc = data?.accommodations || [];
+    const lt = data?.local_transport || [];
+    state.accommodations = Array.isArray(acc) ? acc : [];
+    state.localTransport = normalizeLocalTransport(lt);
+    renderAccommodations(state.accommodations);
+    $('#local-transport-info').innerHTML = state.localTransport.length
+      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+      : '';
+    show('step-accommodation');
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+$('#btn-accommodation-decide-go')?.addEventListener('click', () => proceedFromItineraryCompleteToAccommodation());
+$('#btn-accommodation-decide-skip')?.addEventListener('click', () => skipAccommodationToConfirm());
+$('#btn-back-accommodation-decide')?.addEventListener('click', () => show('step-itineraries'));
 
 $('#btn-next-itineraries').addEventListener('click', async () => {
   const ws = state.itineraryWorkflowStep;
@@ -2495,26 +2586,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
       alert('일정이 없습니다.');
       return;
     }
-    show('loading');
-    try {
-      const payload = baseSessionPayload({
-        selected_flight: state.selectedFlight,
-        selected_itinerary: state.selectedItinerary,
-      });
-      const data = await callAgent(payload);
-      if (data?.error) throw new Error(data.error);
-      const acc = data?.accommodations || [];
-      const lt = data?.local_transport || [];
-      state.accommodations = Array.isArray(acc) ? acc : [];
-      state.localTransport = normalizeLocalTransport(lt);
-      renderAccommodations(state.accommodations);
-      $('#local-transport-info').innerHTML = state.localTransport.length
-        ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
-        : '';
-      show('step-accommodation');
-    } catch (err) {
-      showError(err.message);
-    }
+    showAccommodationDecide();
     return;
   }
   if (ws === 'legacy') {
@@ -2522,26 +2594,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
       alert('일정을 선택해 주세요.');
       return;
     }
-    show('loading');
-    try {
-      const payload = baseSessionPayload({
-        selected_flight: state.selectedFlight,
-        selected_itinerary: state.selectedItinerary,
-      });
-      const data = await callAgent(payload);
-      if (data?.error) throw new Error(data.error);
-      const acc = data?.accommodations || [];
-      const lt = data?.local_transport || [];
-      state.accommodations = Array.isArray(acc) ? acc : [];
-      state.localTransport = normalizeLocalTransport(lt);
-      renderAccommodations(state.accommodations);
-      $('#local-transport-info').innerHTML = state.localTransport.length
-        ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
-        : '';
-      show('step-accommodation');
-    } catch (err) {
-      showError(err.message);
-    }
+    showAccommodationDecide();
     return;
   }
   alert('일정 단계를 진행해 주세요.');
@@ -2827,6 +2880,17 @@ function initTripTypeUI() {
   const single = $('#single-trip-fields');
   const multi = $('#multi-city-fields');
   const endDateLabel = $('#end-date-label');
+  const skipFlightsBtn = $('#btn-travel-skip-flights');
+  const skipHint = $('#travel-skip-flights-hint');
+  if (skipFlightsBtn && skipHint) {
+    if (val === 'multi_city') {
+      skipFlightsBtn.style.display = 'none';
+      skipHint.style.display = '';
+    } else {
+      skipFlightsBtn.style.display = '';
+      skipHint.style.display = 'none';
+    }
+  }
 
   if (val === 'multi_city') {
     single.classList.add('hidden');
