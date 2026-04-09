@@ -180,15 +180,74 @@ def _grand_circle_geocode_query(place: str) -> str:
 
 
 def _grand_circle_geocode_seeds() -> tuple[str, ...]:
-    """대표 구간별 Places 앵커(자이언·브라이스·페이지·캐년·모뉴먼트)."""
+    """대표 구간별 Places 앵커(자이언·모압/아치스·브라이스·페이지·캐년·모뉴먼트)."""
     return (
         "Las Vegas Nevada USA",
         "Springdale Utah USA",
+        "Moab Utah USA",
         "Bryce Canyon National Park Utah USA",
         "Page Arizona USA",
         "Grand Canyon Village Arizona USA",
         "Monument Valley Navajo Tribal Park Utah",
     )
+
+
+def _point_in_grand_circle_region(lat: float, lng: float) -> bool:
+    """미국 서남부 그랜드 서클(UT/AZ/NV·네바다·북애리조나). 일리노이·중서부 도심 전망대 좌표 제외."""
+    try:
+        latf = float(lat)
+        lngf = float(lng)
+    except (TypeError, ValueError):
+        return False
+    if latf < 34.3 or latf > 43.5:
+        return False
+    # 서경 약 108.4°W ~ 116.6°W (라스베이거스 ~ 모압·페이지). 시카고(~87°W) 등은 범위 밖.
+    if lngf > -108.4 or lngf < -116.6:
+        return False
+    return True
+
+
+def _formatted_address_suspicious_for_grand_circle(addr: str) -> bool:
+    """그랜드 서클 일정인데 주소가 미국 중동부·동부 등이면 제외."""
+    if not addr:
+        return False
+    a = addr.lower()
+    bad = (
+        "illinois",
+        "chicago",
+        "michigan",
+        "ohio",
+        "indiana",
+        "wisconsin",
+        "minnesota",
+        "missouri",
+        "iowa",
+        "nebraska",
+        "kansas",
+        "kentucky",
+        "tennessee",
+        "new york",
+        "florida",
+        "georgia",
+        "massachusetts",
+        "virginia",
+        "pennsylvania",
+        "north carolina",
+        "south carolina",
+    )
+    return any(x in a for x in bad)
+
+
+def _name_out_of_scope_for_grand_circle(name: str | None) -> bool:
+    """도심 전망대·중서부 랜드마크 등 그랜드 서클과 무관한 유명 POI 이름."""
+    nl = (name or "").lower()
+    if not nl:
+        return False
+    if "chicago" in nl or "willis tower" in nl:
+        return True
+    if "skydeck" in nl and any(x in nl for x in ("chicago", "willis", "illinois", "wacker")):
+        return True
+    return False
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -1242,6 +1301,19 @@ def _grand_circle_attraction_templates() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "Arches National Park (아치스 국립공원)",
+            "category": "하이킹",
+            "description": "델리케이트 아치 등 자연석 아치가 밀집한 모압 지대.",
+            "image_url": "",
+            "image_credit": "",
+            "practical_details": {
+                "parking": "성수기 입장 시간대 예약(시즌별).",
+                "walking_hiking": "짧은 트레일 다수.",
+                "fees_other": "공원 입장료.",
+                "tips": "더위·물.",
+            },
+        },
+        {
             "name": "Bryce Canyon National Park (브라이스 캐니언)",
             "category": "전망·하이킹",
             "description": "후드 기둥이 밀집한 원형극장 같은 암석 경관.",
@@ -1304,19 +1376,6 @@ def _grand_circle_attraction_templates() -> list[dict[str, Any]]:
                 "fees_other": "입장·투어 별도.",
                 "reservation_note": "황사·폐쇄 가능.",
                 "tips": "연료·물 보충.",
-            },
-        },
-        {
-            "name": "Arches National Park (아치스 국립공원)",
-            "category": "하이킹",
-            "description": "델리케이트 아치 등 자연석 아치가 밀집한 모압 지대.",
-            "image_url": "",
-            "image_credit": "",
-            "practical_details": {
-                "parking": "성수기 입장 시간대 예약(시즌별).",
-                "walking_hiking": "짧은 트레일 다수.",
-                "fees_other": "공원 입장료.",
-                "tips": "더위·물.",
             },
         },
         {
@@ -2051,15 +2110,30 @@ async def _fetch_top_attractions_from_google(
             "aerial tram",
             "ski lift",
         )
+    gc_trip = _looks_like_grand_circle(destination)
+
+    def _gc_skip_nearby_pair(typ: str | None, kw: str) -> bool:
+        """그랜드 서클: 'observation deck' 등 전 세계 도심 전망대가 붙는 키워드는 제외."""
+        if not gc_trip:
+            return False
+        kw_l = (kw or "").lower()
+        if kw_l == "observation deck" and typ == "point_of_interest":
+            return True
+        return False
+
     route_jobs: list[tuple[str, str | None, str]] = []
     dest_jobs: list[tuple[str, str | None, str]] = []
     for loc in route_points:
         for typ, kw in type_keyword_pairs[:8]:
+            if _gc_skip_nearby_pair(typ, kw):
+                continue
             route_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby[:6]:
             route_jobs.append((loc, None, kw))
     for loc in dest_points:
         for typ, kw in type_keyword_pairs:
+            if _gc_skip_nearby_pair(typ, kw):
+                continue
             dest_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby:
             dest_jobs.append((loc, None, kw))
@@ -2087,13 +2161,13 @@ async def _fetch_top_attractions_from_google(
     elif _looks_like_grand_circle(destination):
         text_queries.extend(
             [
+                "Arches National Park Moab Utah Delicate Arch",
                 "Zion National Park Utah hiking scenic",
                 "Bryce Canyon National Park Utah hoodoos",
                 "Antelope Canyon Page Arizona",
                 "Horseshoe Bend Page Arizona",
                 "Grand Canyon South Rim Arizona scenic",
                 "Monument Valley Utah scenic drive",
-                "Arches National Park Moab Utah",
                 "Canyonlands National Park Utah Island in the Sky",
                 "Valley of Fire State Park Nevada",
                 "Lake Powell Glen Canyon Arizona",
@@ -2229,6 +2303,7 @@ async def _fetch_top_attractions_from_google(
 
     anchor_ll_str = dest_points[0] if dest_points else None
     patagonia_trip = _looks_like_patagonia(destination)
+    grand_circle_trip = _looks_like_grand_circle(destination)
 
     def ingest_pool_tiered(lists: list[list[dict]]) -> list[dict]:
         combined: list[dict] = []
@@ -2255,15 +2330,32 @@ async def _fetch_top_attractions_from_google(
                 addr_line = f"{p.get('formatted_address') or ''} {p.get('vicinity') or ''}"
                 if patagonia_trip and _formatted_address_suspicious_for_patagonia(addr_line):
                     continue
+                if grand_circle_trip and _formatted_address_suspicious_for_grand_circle(addr_line):
+                    continue
+                if grand_circle_trip and _name_out_of_scope_for_grand_circle(p.get("name")):
+                    continue
                 geom = p.get("geometry") or {}
                 loc = geom.get("location") if isinstance(geom, dict) else None
+                if grand_circle_trip and isinstance(loc, dict):
+                    try:
+                        plat = float(loc.get("lat"))
+                        plng = float(loc.get("lng"))
+                        if not _point_in_grand_circle_region(plat, plng):
+                            continue
+                    except (TypeError, ValueError):
+                        pass
                 if anchor_ll_str and isinstance(loc, dict):
                     try:
                         plat = float(loc.get("lat"))
                         plng = float(loc.get("lng"))
                         alat, alng = map(float, anchor_ll_str.split(","))
                         km = _haversine_km(plat, plng, alat, alng)
-                        max_km = 2400.0 if patagonia_trip else 4000.0
+                        if patagonia_trip:
+                            max_km = 2400.0
+                        elif grand_circle_trip:
+                            max_km = 650.0
+                        else:
+                            max_km = 4000.0
                         if km > max_km:
                             continue
                     except (TypeError, ValueError):
