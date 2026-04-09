@@ -25,6 +25,11 @@ from shared.attraction_geo import (
     min_km_to_anchor_strings,
 )
 from shared.attraction_scenic import scenic_rank_bias
+from shared.grand_circle_places import (
+    build_grand_circle_loop_points,
+    grand_circle_corridor_max_km,
+    pick_grand_circle_gateway_ll,
+)
 from shared.directions_parking import enrich_attractions_parking_directions
 from shared.google_place_details import (
     enrich_attractions_with_place_details,
@@ -182,19 +187,6 @@ def _grand_circle_geocode_query(place: str) -> str:
     if "grand canyon" in pl or "그랜드 캐년" in p:
         return "Grand Canyon Village Arizona USA"
     return "Springdale Utah USA"
-
-
-def _grand_circle_geocode_seeds() -> tuple[str, ...]:
-    """대표 구간별 Places 앵커(자이언·모압/아치스·브라이스·페이지·캐년·모뉴먼트)."""
-    return (
-        "Las Vegas Nevada USA",
-        "Springdale Utah USA",
-        "Moab Utah USA",
-        "Bryce Canyon National Park Utah USA",
-        "Page Arizona USA",
-        "Grand Canyon Village Arizona USA",
-        "Monument Valley Navajo Tribal Park Utah",
-    )
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -1915,6 +1907,7 @@ async def _fetch_top_attractions_from_google(
     primary_bias: str | None = None
     origin_ll_for_anchors: str | None = None
     skip_long_haul_route = False
+    gc_route_mode = False
 
     async def get_lat_lng(
         client: httpx.AsyncClient, addr: str, *, for_destination: bool = False
@@ -1959,43 +1952,46 @@ async def _fetch_top_attractions_from_google(
             pass
         return []
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        d_locs = await asyncio.gather(
-            *(get_lat_lng(client, p, for_destination=True) for p in dest_places)
-        )
-        for loc in d_locs:
-            if loc:
-                dest_points.append(loc)
-        # 아르헨티나 앵커만 있으면 45km Nearby가 칠레 파타고니아(토레스 델 파이네 등)를 못 잡음 → 나탈레스 2차 앵커
-        if dest_points and _looks_like_patagonia(destination):
-            natales = await get_lat_lng(
-                client, "Puerto Natales, Magallanes, Chile", for_destination=True
+    async with httpx.AsyncClient(timeout=45) as client:
+        if _looks_like_grand_circle(destination) and not _looks_like_patagonia(destination):
+            # 게이트웨이 공항(LAX/LAS/PHX/SLC 중 출발지와 가장 가까운 곳) → 대표 공원 고정 루프 → 루프 주변만 검색
+            gc_route_mode = True
+            gw = await pick_grand_circle_gateway_ll(client, origin or "", api_key)
+            if gw:
+                dest_points, route_points = await build_grand_circle_loop_points(client, api_key, gw)
+            skip_long_haul_route = True
+            origin_ll_for_anchors = None
+            primary_bias = dest_points[0] if dest_points else None
+        else:
+            d_locs = await asyncio.gather(
+                *(get_lat_lng(client, p, for_destination=True) for p in dest_places)
             )
-            if natales and natales not in dest_points:
-                dest_points.append(natales)
-        if dest_points and _looks_like_grand_circle(destination) and not _looks_like_patagonia(destination):
-            for seed in _grand_circle_geocode_seeds():
-                loc = await get_lat_lng(client, seed, for_destination=False)
-                if loc and loc not in dest_points:
+            for loc in d_locs:
+                if loc:
                     dest_points.append(loc)
-        if dest_points:
-            primary_bias = dest_points[0]
-        # 서울→파타고니아 등 대륙 간 이동: Directions 경유지마다 Nearby 검색 시 한국·유럽·미국 명소가 섞임 → 경유 검색 생략
-        if local_transport == "rental_car" and origin and dest_points:
-            o_ll = await get_lat_lng(client, origin, for_destination=False)
-            if o_ll:
-                origin_ll_for_anchors = o_ll
-            if o_ll and dest_points[0]:
-                try:
-                    oa, ob = map(float, o_ll.split(","))
-                    da, db = map(float, dest_points[0].split(","))
-                    if _haversine_km(oa, ob, da, db) > 1200:
-                        skip_long_haul_route = True
-                except (ValueError, TypeError):
-                    pass
-        if local_transport == "rental_car" and origin and not skip_long_haul_route:
-            wpts = await get_route_waypoints(client, origin, dest_places[0])
-            route_points.extend(wpts)
+            if dest_points and _looks_like_patagonia(destination):
+                natales = await get_lat_lng(
+                    client, "Puerto Natales, Magallanes, Chile", for_destination=True
+                )
+                if natales and natales not in dest_points:
+                    dest_points.append(natales)
+            if dest_points:
+                primary_bias = dest_points[0]
+            if local_transport == "rental_car" and origin and dest_points:
+                o_ll = await get_lat_lng(client, origin, for_destination=False)
+                if o_ll:
+                    origin_ll_for_anchors = o_ll
+                if o_ll and dest_points[0]:
+                    try:
+                        oa, ob = map(float, o_ll.split(","))
+                        da, db = map(float, dest_points[0].split(","))
+                        if _haversine_km(oa, ob, da, db) > 1200:
+                            skip_long_haul_route = True
+                    except (ValueError, TypeError):
+                        pass
+            if local_transport == "rental_car" and origin and not skip_long_haul_route:
+                wpts = await get_route_waypoints(client, origin, dest_places[0])
+                route_points.extend(wpts)
 
     if not dest_points:
         return [], None
@@ -2011,7 +2007,11 @@ async def _fetch_top_attractions_from_google(
             and (local_transport or "").strip() == "rental_car"
         ),
     )
-    max_km_places = default_max_km_for_places_filter(patagonia_trip)
+    max_km_places = (
+        grand_circle_corridor_max_km()
+        if gc_route_mode
+        else default_max_km_for_places_filter(patagonia_trip)
+    )
 
     bad_types = {
         "hospital",
@@ -2052,6 +2052,16 @@ async def _fetch_top_attractions_from_google(
         ("point_of_interest", "panorama"),
         ("tourist_attraction", "scenic"),
     ]
+    pairs_for_jobs = type_keyword_pairs
+    if gc_route_mode:
+        pairs_for_jobs = [
+            x
+            for x in type_keyword_pairs
+            if not (
+                x[0] == "point_of_interest"
+                and (x[1] or "").lower() == "observation deck"
+            )
+        ]
     # type 없이 keyword만: 리프트역 보완. funivia/seilbahn 등은 유럽 편향 → 파타고니아에서는 남미·영어 키워드만.
     if _looks_like_patagonia(destination):
         lift_keyword_only_nearby = (
@@ -2079,12 +2089,12 @@ async def _fetch_top_attractions_from_google(
     route_jobs: list[tuple[str, str | None, str]] = []
     dest_jobs: list[tuple[str, str | None, str]] = []
     for loc in route_points:
-        for typ, kw in type_keyword_pairs[:8]:
+        for typ, kw in pairs_for_jobs[:8]:
             route_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby[:6]:
             route_jobs.append((loc, None, kw))
     for loc in dest_points:
-        for typ, kw in type_keyword_pairs:
+        for typ, kw in pairs_for_jobs:
             dest_jobs.append((loc, typ, kw))
         for kw in lift_keyword_only_nearby:
             dest_jobs.append((loc, None, kw))
@@ -2112,16 +2122,14 @@ async def _fetch_top_attractions_from_google(
     elif _looks_like_grand_circle(destination):
         text_queries.extend(
             [
-                "Arches National Park Moab Utah Delicate Arch",
-                "Zion National Park Utah hiking scenic",
+                "Grand Canyon National Park South Rim Arizona",
+                "Zion National Park Utah Angels Landing hiking",
                 "Bryce Canyon National Park Utah hoodoos",
                 "Antelope Canyon Page Arizona",
+                "Monument Valley Navajo Tribal Park scenic",
+                "Arches National Park Moab Utah Delicate Arch",
                 "Horseshoe Bend Page Arizona",
-                "Grand Canyon South Rim Arizona scenic",
-                "Monument Valley Utah scenic drive",
                 "Canyonlands National Park Utah Island in the Sky",
-                "Valley of Fire State Park Nevada",
-                "Lake Powell Glen Canyon Arizona",
             ]
         )
     else:
@@ -2149,6 +2157,8 @@ async def _fetch_top_attractions_from_google(
             ]
         )
 
+    gc_nearby_radius = "50000" if gc_route_mode else "45000"
+
     async def nearby_one(
         client: httpx.AsyncClient, loc: str, typ: str | None, kw: str
     ) -> list[dict[str, Any]]:
@@ -2156,7 +2166,7 @@ async def _fetch_top_attractions_from_google(
         keyword-only 요청은 고유 place_id 확보를 위해 next_page_token으로 2페이지까지(요청당 최대 20→약 40)."""
         params: dict[str, str] = {
             "location": loc,
-            "radius": "45000",
+            "radius": gc_nearby_radius,
             "key": api_key,
             "language": "en",
         }
@@ -2193,7 +2203,7 @@ async def _fetch_top_attractions_from_google(
         params = {
             "query": query,
             "location": loc,
-            "radius": "45000",
+            "radius": gc_nearby_radius,
             "key": api_key,
             "language": "en",
         }
@@ -2292,6 +2302,13 @@ async def _fetch_top_attractions_from_google(
                 seen.add(pid)
                 combined.append(p)
         combined.sort(key=_place_itinerary_rank_key)
+        if gc_route_mode:
+            combined.sort(
+                key=lambda p: (
+                    -float(p.get("rating") or 0),
+                    -int(p.get("user_ratings_total") or 0),
+                )
+            )
         return combined
 
     # route_res를 먼저 넣어 동선·목적지에 동일 place_id가 있으면 동선 쪽을 유지(첫 등장 우선).

@@ -70,6 +70,7 @@ const CITY_AIRPORTS = {
 
 /** 미국 서부 Grand Circle 등 — 여러 국립공원 묶음. 항공편은 출발 공항과의 대원거리로 가장 가까운 공항 우선 */
 const _grandCircleAirports = [
+  { code: 'LAX', name: '로스앤젤레스 LAX', drive_hours: 5, country: 'US' },
   { code: 'LAS', name: 'Harry Reid / 라스베이거스', drive_hours: 2.5, country: 'US' },
   { code: 'SLC', name: '솔트레이크시티', drive_hours: 3, country: 'US' },
   { code: 'PHX', name: '피닉스 스카이하버', drive_hours: 4, country: 'US' },
@@ -91,6 +92,7 @@ const CITY_COUNTRY = {
 
 /** IATA 공항 좌표(대원거리 비교). 지역 묶음(Grand Circle 등)일 때 출발 공항 기준 가장 가까운 도착 공항 우선 */
 const AIRPORT_COORDS = {
+  LAX: { lat: 33.942, lng: -118.408 },
   ICN: { lat: 37.469, lng: 126.451 },
   GMP: { lat: 37.558, lng: 126.791 },
   PUS: { lat: 35.179, lng: 129.075 },
