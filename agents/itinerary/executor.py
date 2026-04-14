@@ -42,7 +42,10 @@ from shared.google_place_details import (
     walking_hiking_clamp_smart,
 )
 from shared.place_images import enrich_attractions_images
-from shared.itinerary_route_schedule import enrich_route_bundle_with_directions_schedule
+from shared.itinerary_route_schedule import (
+    enrich_route_bundle_with_directions_schedule,
+    expand_selected_attractions_for_trip_days,
+)
 from shared.utils import new_agent_text_message
 
 logger = logging.getLogger(__name__)
@@ -1463,6 +1466,26 @@ def _mock_attractions(destination: str, trip_days: int, preference: dict) -> dic
             "오전·오후로 하루 약 두 곳을 기준으로 고르고, 숙소에서 차로 1시간을 넘기면 동선상 숙소 이동을 검토하되 한 거점 유지를 우선하세요."
         ),
     }
+
+
+def _merge_auto_fill_route_plan_notes(
+    out: dict[str, Any], auto_filled_ids: list[str], trip_days: int
+) -> None:
+    """Google enrich 없이도 route_plan에 자동 보강 명소 id·안내 문구를 넣는다."""
+    if not auto_filled_ids:
+        return
+    rp = out.get("route_plan")
+    if not isinstance(rp, dict):
+        rp = {}
+        out["route_plan"] = rp
+    rp["auto_filled_attraction_ids"] = list(auto_filled_ids)
+    slot_n = max(1, 2 * trip_days)
+    fill_note = (
+        f"선택만으로는 일자별 오전·오후 슬롯(최대 {slot_n}곳)을 채우기에 부족해, "
+        f"고르지 않은 후보 중 평점·리뷰 수 순으로 {len(auto_filled_ids)}곳을 자동 포함했습니다. "
+    )
+    cur = (rp.get("lodging_strategy") or "").strip()
+    rp["lodging_strategy"] = (fill_note + cur).strip()
 
 
 def _mock_route_and_restaurants(
@@ -2944,6 +2967,9 @@ JSON 객체 하나만 출력:
                     )
                 )
                 return
+            selected_objs, auto_filled_ids = expand_selected_attractions_for_trip_days(
+                selected_objs, catalog, trip_days
+            )
             out = _mock_route_and_restaurants(
                 destination, trip_days, dates, selected_objs, preference
             )
@@ -2959,7 +2985,7 @@ JSON 객체 하나만 출력:
 
 목적지: {destination}
 일수: {trip_days}, 날짜 목록: {json.dumps(dates, ensure_ascii=False)}
-선택된 명소: {json.dumps(selected_objs, ensure_ascii=False)}
+방문 후보 명소(일부는 선택만으로 슬롯이 부족할 때 평점 순으로 서버가 자동 포함했을 수 있음): {json.dumps(selected_objs, ensure_ascii=False)}
 취향: {json.dumps(preference, ensure_ascii=False)}
 항공: {json.dumps(selected_flight, ensure_ascii=False)}
 
@@ -2991,6 +3017,8 @@ JSON 객체 하나만 출력:
                         out = parsed
                 except Exception:
                     pass
+            if auto_filled_ids and not (self.settings.google_places_api_key or "").strip():
+                _merge_auto_fill_route_plan_notes(out, auto_filled_ids, trip_days)
             if (self.settings.google_places_api_key or "").strip():
                 try:
                     dest_code = (data.get("destination_airport_code") or "").strip().upper() or None
@@ -3005,9 +3033,12 @@ JSON 객체 하나만 출력:
                         preference=preference if isinstance(preference, dict) else {},
                         api_key=self.settings.google_places_api_key or "",
                         local_transport=str(local_transport or ""),
+                        auto_filled_attraction_ids=auto_filled_ids or None,
                     )
                 except Exception as e:
                     logger.warning("enrich_route_bundle_with_directions_schedule failed: %s", e)
+                    if auto_filled_ids:
+                        _merge_auto_fill_route_plan_notes(out, auto_filled_ids, trip_days)
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

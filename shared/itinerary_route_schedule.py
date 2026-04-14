@@ -18,6 +18,65 @@ from shared.google_place_details import fetch_place_details_raw
 logger = logging.getLogger(__name__)
 
 
+def expand_selected_attractions_for_trip_days(
+    selected_objs: list[dict[str, Any]],
+    catalog: list[dict[str, Any]] | None,
+    n_days: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """선택 명소만으로 하루 오전·오후 슬롯(일수×2)을 채우기에 부족하면, 미선택 카탈로그를 평점·리뷰 수 순으로 보강.
+
+    Returns:
+        (merged_attraction_dicts, auto_added_attraction_ids)
+    """
+    if not n_days or n_days < 1:
+        return [dict(x) for x in selected_objs if isinstance(x, dict)], []
+    if not catalog:
+        return [dict(x) for x in selected_objs if isinstance(x, dict)], []
+
+    slot_target = max(1, 2 * int(n_days))
+    sel: list[dict[str, Any]] = [dict(x) for x in selected_objs if isinstance(x, dict)]
+    sel_ids: set[str] = {str(x.get("id")) for x in sel if x.get("id")}
+    if len(sel) >= slot_target:
+        return sel, []
+
+    need = slot_target - len(sel)
+    candidates: list[dict[str, Any]] = []
+    for a in catalog:
+        if not isinstance(a, dict) or not a.get("id"):
+            continue
+        aid = str(a.get("id"))
+        if aid in sel_ids:
+            continue
+        candidates.append(a)
+
+    def _rating_key(a: dict[str, Any]) -> tuple[float, int]:
+        r = float(a.get("rating") or 0.0)
+        rev = int(a.get("user_ratings_total") or 0)
+        return (-r, -rev)
+
+    candidates.sort(key=_rating_key)
+    seen_pid: set[str] = {str(x.get("place_id") or "").strip() for x in sel if x.get("place_id")}
+    auto_added: list[str] = []
+
+    for a in candidates:
+        if need <= 0:
+            break
+        pid = str(a.get("place_id") or "").strip()
+        if pid and pid in seen_pid:
+            continue
+        oid = str(a.get("id"))
+        if oid in sel_ids:
+            continue
+        sel.append(dict(a))
+        sel_ids.add(oid)
+        auto_added.append(oid)
+        if pid:
+            seen_pid.add(pid)
+        need -= 1
+
+    return sel, auto_added
+
+
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     import math
 
@@ -195,6 +254,7 @@ async def enrich_route_bundle_with_directions_schedule(
     preference: dict[str, Any],
     api_key: str,
     local_transport: str,
+    auto_filled_attraction_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """route_plan.daily_schedule 등을 Directions 기반으로 채우거나 덮어쓴다."""
     if not (api_key or "").strip() or not dates:
@@ -328,8 +388,19 @@ async def enrich_route_bundle_with_directions_schedule(
 
     rp = dict(route_bundle.get("route_plan") or {})
     rp["daily_schedule"] = daily_schedule
+    auto_ids = [str(x) for x in (auto_filled_attraction_ids or []) if x]
+    if auto_ids:
+        rp["auto_filled_attraction_ids"] = auto_ids
+    slot_n = max(1, 2 * n_days)
+    fill_note = ""
+    if auto_ids:
+        fill_note = (
+            f"선택만으로는 일자별 오전·오후 슬롯(최대 {slot_n}곳)을 채우기에 부족해, "
+            f"고르지 않은 후보 중 평점·리뷰 수 순으로 {len(auto_ids)}곳을 자동 포함했습니다. "
+        )
     rp["lodging_strategy"] = (
-        f"{start_label} 도착 후 Nearest-Neighbor 동선으로 명소를 순서대로 방문합니다. "
+        fill_note
+        + f"{start_label} 도착 후 Nearest-Neighbor 동선으로 명소를 순서대로 방문합니다. "
         f"여행 속도({pace}) 기준 오전·오후 가용 시간을 고려했습니다. "
         + (rp.get("lodging_strategy") or "")
     ).strip()
