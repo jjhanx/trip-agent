@@ -75,7 +75,126 @@ const API_BASE = window.location.origin + '/a2a/';
 const API_PLANS = window.location.origin + '/api';
 const STORAGE_KEY = 'trip-agent-form';
 const PLANS_STORAGE_KEY = 'trip-agent-plans';
+const ITINERARY_DRAFT_KEY = 'trip-agent-itinerary-draft';
 const USER_ID_KEY = 'trip-agent-user-id';
+
+/** 동일 여행인지 판별해, 목적지·기간·공항 등이 바뀌면 일정 초안을 쓰지 않는다. */
+function itineraryDraftFingerprint() {
+  syncTravelInputFromForm();
+  const ti = state.travelInput;
+  const parts = [
+    ti?.origin || '',
+    ti?.destination || '',
+    String(ti?.start_date || ''),
+    String(ti?.end_date || ''),
+    ti?.trip_type || '',
+    state.flightSkipped ? '1' : '0',
+    state.rentalSkipped ? '1' : '0',
+    state.destination_airport_code || '',
+    state.origin_airport_code || '',
+  ];
+  return parts.join('|');
+}
+
+function saveItineraryDraft() {
+  try {
+    const fp = itineraryDraftFingerprint();
+    const draft = {
+      fp,
+      itineraryWorkflowStep: state.itineraryWorkflowStep,
+      itineraryAttractionCatalog: state.itineraryAttractionCatalog,
+      itineraryTripDays: state.itineraryTripDays,
+      itineraryRouteBundle: state.itineraryRouteBundle,
+      selectedAttractionIds: state.selectedAttractionIds,
+      mealChoices: state.mealChoices,
+      selectedItinerary: state.selectedItinerary,
+      itineraries: state.itineraries,
+    };
+    localStorage.setItem(ITINERARY_DRAFT_KEY, JSON.stringify(draft));
+  } catch (e) {
+    console.warn('saveItineraryDraft failed', e);
+  }
+}
+
+function clearItineraryDraft() {
+  try {
+    localStorage.removeItem(ITINERARY_DRAFT_KEY);
+  } catch (_) { /* ignore */ }
+}
+
+function restoreItineraryDraft() {
+  try {
+    const raw = localStorage.getItem(ITINERARY_DRAFT_KEY);
+    if (!raw) return;
+    const draft = JSON.parse(raw);
+    syncTravelInputFromForm();
+    const fp = itineraryDraftFingerprint();
+    if (!draft.fp || draft.fp !== fp) {
+      clearItineraryDraft();
+      return;
+    }
+    if (draft.itineraryWorkflowStep != null) state.itineraryWorkflowStep = draft.itineraryWorkflowStep;
+    state.itineraryAttractionCatalog = Array.isArray(draft.itineraryAttractionCatalog)
+      ? draft.itineraryAttractionCatalog
+      : [];
+    sanitizeAttractionCatalogInPlace(state.itineraryAttractionCatalog);
+    state.itineraryTripDays = draft.itineraryTripDays != null ? draft.itineraryTripDays : null;
+    state.itineraryRouteBundle = draft.itineraryRouteBundle && typeof draft.itineraryRouteBundle === 'object'
+      ? draft.itineraryRouteBundle
+      : null;
+    state.selectedAttractionIds = Array.isArray(draft.selectedAttractionIds) ? draft.selectedAttractionIds : [];
+    state.mealChoices = draft.mealChoices && typeof draft.mealChoices === 'object' ? draft.mealChoices : {};
+    state.selectedItinerary = draft.selectedItinerary ?? null;
+    state.itineraries = Array.isArray(draft.itineraries) ? draft.itineraries : [];
+    if (state.selectedItinerary && !state.itineraryWorkflowStep) {
+      const si = state.selectedItinerary;
+      if (si && typeof si === 'object' && !si.option_id && (si.daily_plan || si.summary || si.title)) {
+        state.itineraryWorkflowStep = 'complete';
+      }
+    }
+  } catch (e) {
+    console.warn('restoreItineraryDraft failed', e);
+  }
+}
+
+function normalizeAttractionKey(name) {
+  if (!name) return '';
+  return String(name)
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/（[^）]*）/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 서버가 새 id로 카탈로그를 다시 줄 때 place_id·이름으로 선택을 이어 붙인다. */
+function reconcileAttractionIdsAfterCatalogUpdate(prevCatalog, selectedIds, newCatalog) {
+  if (!Array.isArray(newCatalog) || newCatalog.length === 0) return [];
+  const prevList = Array.isArray(prevCatalog) ? prevCatalog : [];
+  const refs = (selectedIds || []).map((id) => {
+    const a = prevList.find((x) => x && x.id === id);
+    return a
+      ? { place_id: (a.place_id && String(a.place_id).trim()) || '', name: (a.name && String(a.name)) || '' }
+      : { place_id: '', name: '' };
+  });
+  const out = [];
+  const seen = new Set();
+  for (const ref of refs) {
+    let hit = null;
+    if (ref.place_id) {
+      hit = newCatalog.find((x) => x && x.place_id && String(x.place_id).trim() === ref.place_id);
+    }
+    if (!hit && ref.name) {
+      const k = normalizeAttractionKey(ref.name);
+      hit = newCatalog.find((x) => x && normalizeAttractionKey(x.name || '') === k);
+    }
+    if (hit && hit.id && !seen.has(hit.id)) {
+      out.push(hit.id);
+      seen.add(hit.id);
+    }
+  }
+  return out;
+}
 
 function getUserId() {
   return localStorage.getItem(USER_ID_KEY) || null;
@@ -326,6 +445,7 @@ function loadPlanIntoState(data) {
   try {
     saveFormToStorage();
   } catch (_) { /* ignore */ }
+  saveItineraryDraft();
 }
 
 function getSavedPlans() {
@@ -466,6 +586,7 @@ function newPlan() {
   state.rentalSkipped = false;
   state.travelPrimaryIntent = null;
   state.rentalDecideFrom = null;
+  clearItineraryDraft();
   loadFormFromStorage();
   initTripTypeUI();
   renderPlanUI();
@@ -732,6 +853,25 @@ function navigateToStep(stepName) {
 function showError(msg) {
   $('#error-message').textContent = msg;
   show('error');
+}
+
+/** 일정 단계에서 API 실패 시 전용 오류 화면 대신 일정 카드로 돌아가 선택·동선 상태를 유지한다. */
+function showAgentError(msg, opts = {}) {
+  const preferItinerary = opts.preferItinerary !== false;
+  if (
+    preferItinerary
+    && state.itineraryAttractionCatalog?.length
+    && (state.itineraryWorkflowStep === 'attractions'
+      || state.itineraryWorkflowStep === 'meals'
+      || state.itineraryWorkflowStep === 'complete')
+  ) {
+    alert(msg);
+    show('step-itineraries', true);
+    refreshStepView('itineraries');
+    saveItineraryDraft();
+    return;
+  }
+  showError(msg);
 }
 
 async function callAgent(payload) {
@@ -2123,6 +2263,28 @@ function collectAndValidateMealChoices() {
   return true;
 }
 
+/** 맛집 단계에서 선택만 바꾼 경우(아직 「일정 확정」 전) draft에 반영 */
+function snapshotMealChoicesFromDom() {
+  const bundle = state.itineraryRouteBundle;
+  const dates = bundle?.trip_dates || [];
+  const root = $('#itinerary-workflow-root');
+  if (!dates.length || !root) return;
+  const mc = { ...state.mealChoices };
+  for (const d of dates) {
+    const lf = root.querySelector(`select[data-date="${d}"][data-meal="lunch"][data-rank="first"]`)?.value;
+    const ls = root.querySelector(`select[data-date="${d}"][data-meal="lunch"][data-rank="second"]`)?.value;
+    const df = root.querySelector(`select[data-date="${d}"][data-meal="dinner"][data-rank="first"]`)?.value;
+    const ds = root.querySelector(`select[data-date="${d}"][data-meal="dinner"][data-rank="second"]`)?.value;
+    if (lf || ls || df || ds) {
+      mc[d] = {
+        lunch: { first: lf || '', second: ls || '' },
+        dinner: { first: df || '', second: ds || '' },
+      };
+    }
+  }
+  state.mealChoices = mc;
+}
+
 function updateItineraryNextButton() {
   const btn = $('#btn-next-itineraries');
   if (!btn) return;
@@ -2208,6 +2370,7 @@ function renderItineraryWorkflow(data) {
       cb.addEventListener('change', () => {
         state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
         updateItineraryNextButton();
+        saveItineraryDraft();
       });
     });
     root.querySelector('#btn-select-all-attrs')?.addEventListener('click', () => {
@@ -2216,9 +2379,11 @@ function renderItineraryWorkflow(data) {
       cbs.forEach(cb => cb.checked = !allChecked);
       state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
       updateItineraryNextButton();
+      saveItineraryDraft();
     });
     state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
     updateItineraryNextButton();
+    saveItineraryDraft();
     return;
   }
   if (step === 'select_meals') {
@@ -2292,7 +2457,12 @@ function renderItineraryWorkflow(data) {
     });
     html += '</div>';
     root.innerHTML = html;
+    root.addEventListener('change', () => {
+      snapshotMealChoicesFromDom();
+      saveItineraryDraft();
+    });
     updateItineraryNextButton();
+    saveItineraryDraft();
     return;
   }
   if (step === 'complete') {
@@ -2305,6 +2475,7 @@ function renderItineraryWorkflow(data) {
       <pre style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(JSON.stringify(fi.daily_plan || fi, null, 2))}</pre>
     </div>`;
     updateItineraryNextButton();
+    saveItineraryDraft();
     return;
   }
   if (state.itineraries?.length) {
@@ -2315,28 +2486,41 @@ function renderItineraryWorkflow(data) {
 function applyItineraryResponse(data) {
   if (data?.error) throw new Error(data.error);
   if (data?.itinerary_step === 'select_attractions') {
+    const prevCatalog = state.itineraryAttractionCatalog;
+    const prevSelected = [...(state.selectedAttractionIds || [])];
     state.itineraryAttractionCatalog = data.attractions || [];
     state.itineraryTripDays = data.trip_days != null ? data.trip_days : null;
     sanitizeAttractionCatalogInPlace(state.itineraryAttractionCatalog);
+    state.selectedAttractionIds = reconcileAttractionIdsAfterCatalogUpdate(
+      prevCatalog,
+      prevSelected,
+      state.itineraryAttractionCatalog,
+    );
     state.itineraryRouteBundle = null;
     state.mealChoices = {};
     state.selectedItinerary = null;
     state.itineraries = [];
+    state.itineraryWorkflowStep = 'attractions';
     renderItineraryWorkflow(data);
     show('step-itineraries');
+    saveItineraryDraft();
     return true;
   }
   if (data?.itinerary_step === 'select_meals') {
     state.itineraryRouteBundle = data;
     state.selectedItinerary = null;
+    state.itineraryWorkflowStep = 'meals';
     renderItineraryWorkflow(data);
     show('step-itineraries');
+    saveItineraryDraft();
     return true;
   }
   if (data?.itinerary_step === 'complete') {
     state.selectedItinerary = data.final_itinerary;
+    state.itineraryWorkflowStep = 'complete';
     renderItineraryWorkflow(data);
     show('step-itineraries');
+    saveItineraryDraft();
     return true;
   }
   let itin = Array.isArray(data) ? data : (data?.itineraries || data);
@@ -2346,6 +2530,7 @@ function applyItineraryResponse(data) {
   state.selectedItinerary = null;
   renderItineraries(state.itineraries);
   show('step-itineraries');
+  saveItineraryDraft();
   return true;
 }
 
@@ -2365,6 +2550,7 @@ function renderItineraries(items) {
       el.classList.add('selected');
       state.selectedItinerary = items[parseInt(el.dataset.idx, 10)];
       updateItineraryNextButton();
+      saveItineraryDraft();
     });
   });
   updateItineraryNextButton();
@@ -2436,7 +2622,7 @@ async function proceedFromRentalToItinerary() {
     if (data?.error) throw new Error(data.error);
     applyItineraryResponse(data);
   } catch (err) {
-    showError(err.message);
+    showAgentError(err.message);
   }
 }
 
@@ -2458,7 +2644,7 @@ async function skipRentalToItinerary() {
     if (data?.error) throw new Error(data.error);
     applyItineraryResponse(data);
   } catch (err) {
-    showError(err.message);
+    showAgentError(err.message);
   }
 }
 
@@ -2569,7 +2755,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
       if (data?.error) throw new Error(data.error);
       applyItineraryResponse(data);
     } catch (err) {
-      showError(err.message);
+      showAgentError(err.message);
     }
     return;
   }
@@ -2588,7 +2774,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
       if (data?.error) throw new Error(data.error);
       applyItineraryResponse(data);
     } catch (err) {
-      showError(err.message);
+      showAgentError(err.message);
     }
     return;
   }
@@ -2859,8 +3045,10 @@ function initDestinationAirportSync() {
 }
 
 function initStepIndicator() {
-  show('step-input');
   loadFormFromStorage();
+  syncTravelInputFromForm();
+  restoreItineraryDraft();
+  show('step-input');
   validateDestinationAirportMatchesDestination();
   applyDefaultDestinationAirportIfMissing();
   initDestinationAirportSync();
@@ -3048,7 +3236,10 @@ function initPlanToolbar() {
   });
 }
 function onNewPlanClick() {
-  if (state.currentPlanId || state.travelInput || state.flights?.length || state.itineraries?.length) {
+  const hasItineraryProgress = (state.itineraryAttractionCatalog?.length > 0)
+    || state.itineraryRouteBundle
+    || (state.selectedAttractionIds?.length > 0);
+  if (state.currentPlanId || state.travelInput || state.flights?.length || state.itineraries?.length || hasItineraryProgress) {
     if (!confirm('현재 진행 중인 내용이 저장되지 않을 수 있습니다. 새 계획을 만드시겠습니까?')) return;
   }
   newPlan();
@@ -3056,6 +3247,7 @@ function onNewPlanClick() {
 async function onSavePlanClick() {
   const ok = await savePlan();
   if (ok) {
+    saveItineraryDraft();
     alert('저장되었습니다.');
     renderPlanUI();
   } else {
@@ -3065,6 +3257,7 @@ async function onSavePlanClick() {
 async function onSaveAsPlanClick() {
   const ok = await savePlan(null, true);
   if (ok) {
+    saveItineraryDraft();
     alert('다른 이름으로 저장되었습니다.');
     renderPlanUI();
   } else {
