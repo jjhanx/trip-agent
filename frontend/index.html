@@ -60,13 +60,15 @@
           <span class="step-arrow">→</span>
           <div class="step-node" data-step="rental"><span class="num">3</span>렌트카/대중교통</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="itineraries"><span class="num">4</span>여행 일정</div>
+          <div class="step-node" data-step="attractions"><span class="num">4</span>명소 선택</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="accommodation"><span class="num">5</span>숙소 선택</div>
+          <div class="step-node" data-step="itinerary"><span class="num">5</span>여행 일정</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="confirm"><span class="num">6</span>일정 확정</div>
+          <div class="step-node" data-step="accommodation"><span class="num">6</span>숙소 선택</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="booking"><span class="num">7</span>예약 안내</div>
+          <div class="step-node" data-step="confirm"><span class="num">7</span>일정 확정</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="booking"><span class="num">8</span>예약 안내</div>
         </div>
       </nav>
 
@@ -328,18 +330,28 @@
         </div>
       </section>
 
-      <section id="step-itineraries" class="card hidden">
-        <h2>4. 여행 일정</h2>
-        <p class="muted" style="margin-bottom: 1rem;"><strong>① 명소 선택</strong> → <strong>② 경로·맛집 계획 받기</strong> → 맛집 우선순위 → 일정 확정 순으로 진행합니다. 같은 브라우저에서는 출발·목적·기간이 같을 때 명소 선택·동선·맛집 초안이 자동으로 임시 저장되며, 상단 <strong>저장</strong>으로 서버에도 함께 남깁니다. 숙소는 다음 단계입니다.</p>
-        <div id="itinerary-workflow-root"></div>
-        <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
-          <button id="btn-next-itineraries">다음</button>
-          <button id="btn-back-itineraries" class="secondary">뒤로</button>
+      <section id="step-attractions" class="card hidden">
+        <h2>4. 명소 선택</h2>
+        <p class="muted" style="margin-bottom: 1rem;">목적지 주변 명소 후보에서 방문할 곳을 고릅니다. 동선·맛집은 <strong>5. 여행 일정</strong> 단계에서 이어집니다. 브라우저·<strong>저장</strong>·파일 내보내기에 선택 상태가 함께 저장됩니다.</p>
+        <div id="itinerary-step-panel-mount-attractions">
+          <div id="itinerary-step-panel" class="itinerary-step-panel">
+            <div id="itinerary-workflow-root"></div>
+            <div class="itinerary-step-actions" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+              <button type="button" id="btn-next-itineraries">다음</button>
+              <button type="button" id="btn-back-itineraries" class="secondary">뒤로</button>
+            </div>
+          </div>
         </div>
       </section>
 
+      <section id="step-itinerary-plan" class="card hidden">
+        <h2>5. 여행 일정</h2>
+        <p class="muted" style="margin-bottom: 1rem;"><strong>경로·맛집 계획 받기</strong> → 맛집 우선순위 → 일정 확정까지 이 화면에서 진행합니다. 명소를 바꾸려면 위 단계 표에서 <strong>4. 명소 선택</strong>으로 이동하거나 아래 <strong>뒤로 (명소 선택)</strong>를 누르세요.</p>
+        <div id="itinerary-step-panel-mount-plan"></div>
+      </section>
+
       <section id="step-accommodation" class="card hidden">
-        <h2>5. 숙소 선택</h2>
+        <h2>6. 숙소 선택</h2>
         <div id="accommodations-list" class="options-grid"></div>
         <div id="local-transport-info"></div>
         <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
@@ -349,7 +361,7 @@
       </section>
 
       <section id="step-confirm" class="card hidden">
-        <h2>6. 일정 확정</h2>
+        <h2>7. 일정 확정 · 예약 안내</h2>
         <div id="booking-guidance"></div>
       </section>
 
@@ -363,7 +375,7 @@
     </main>
   </div>
   <script src="airports.js?v=9"></script>
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 
 </html>
