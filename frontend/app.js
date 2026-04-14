@@ -2085,9 +2085,10 @@ function getRestaurantOptionsForDay(routeBundle, dateStr) {
   if (!ds) return [];
   const am = ds.morning_attraction_id;
   const pm = ds.afternoon_attraction_id;
+  const extras = Array.isArray(ds.extra_attraction_ids) ? ds.extra_attraction_ids : [];
   const rba = routeBundle.restaurants_by_attraction || {};
   const list = [];
-  [am, pm].filter(Boolean).forEach((aid) => {
+  [am, pm, ...extras].filter(Boolean).forEach((aid) => {
     (rba[aid] || []).forEach((r) => {
       if (r && r.id && !list.find(x => x.id === r.id)) list.push(r);
     });
@@ -2251,9 +2252,13 @@ function renderItineraryWorkflow(data) {
       });
     }
     if (daily.length) {
-      html += '<h4>일자별 명소 배정</h4><ul>';
+      html += '<h4>일자별 명소 배정 (구글맵 도로·체류 시간 반영)</h4><ul>';
       daily.forEach((row) => {
-        html += `<li>${escapeHtml(row.date || '')}: 오전 ${escapeHtml(row.morning_attraction_id || '')} · 오후 ${escapeHtml(row.afternoon_attraction_id || '')} · ${escapeHtml(row.overnight_area_hint || '')}</li>`;
+        const extra = Array.isArray(row.extra_attraction_ids) && row.extra_attraction_ids.length
+          ? ` · 추가 ${escapeHtml(row.extra_attraction_ids.join(', '))}` : '';
+        const warn = row.schedule_pace_warning ? ` <span class="muted">(${escapeHtml(row.schedule_pace_warning)})</span>` : '';
+        const notes = row.route_notes ? `<div class="muted" style="font-size:0.88rem;margin:0.25rem 0 0;">${escapeHtml(row.route_notes)}</div>` : '';
+        html += `<li><strong>${escapeHtml(row.date || '')}</strong>: 오전 ${escapeHtml(row.morning_attraction_id || '—')} · 오후 ${escapeHtml(row.afternoon_attraction_id || '—')}${extra} · ${escapeHtml(row.overnight_area_hint || '')}${warn}${notes}</li>`;
       });
       html += '</ul>';
     }

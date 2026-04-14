@@ -42,6 +42,7 @@ from shared.google_place_details import (
     walking_hiking_clamp_smart,
 )
 from shared.place_images import enrich_attractions_images
+from shared.itinerary_route_schedule import enrich_route_bundle_with_directions_schedule
 from shared.utils import new_agent_text_message
 
 logger = logging.getLogger(__name__)
@@ -2623,6 +2624,8 @@ def _finalize_merge(
                 "date": d,
                 "morning_attraction_id": ds.get("morning_attraction_id"),
                 "afternoon_attraction_id": ds.get("afternoon_attraction_id"),
+                "extra_attraction_ids": ds.get("extra_attraction_ids") or [],
+                "route_notes": ds.get("route_notes"),
                 "lunch": {
                     "first_choice_id": lunch_first,
                     "first_choice_name": _resolve_restaurant_name(
@@ -2965,6 +2968,7 @@ JSON 객체 하나만 출력:
 2) 목적지 주변 추천 동네(숙소 후보 지역) 2~4개: area_id, name, description, reachable_attraction_ids, lodging_notes.
 3) 공항↔목적지 구간에 볼거리가 있으면 transit_legs에 leg(outbound|return), notes, suggested_overnight(도시명 또는 null), sights_along_route(짧은 배열).
 4) 각 선택 명소마다 식당 3곳: rating 내림차순, id는 고유문자열, description 짧게.
+5) 참고: 서버가 Google Maps Directions·지오코딩으로 `daily_schedule`을 다시 채울 수 있으나, `restaurants_by_attraction`·`neighborhoods`는 아래 값이 유지됩니다.
 
 출력 JSON 키:
 - itinerary_step: "select_meals"
@@ -2987,6 +2991,23 @@ JSON 객체 하나만 출력:
                         out = parsed
                 except Exception:
                     pass
+            if (self.settings.google_places_api_key or "").strip():
+                try:
+                    dest_code = (data.get("destination_airport_code") or "").strip().upper() or None
+                    out = await enrich_route_bundle_with_directions_schedule(
+                        out,
+                        selected_objs,
+                        destination=destination,
+                        origin=origin or "",
+                        dates=dates,
+                        selected_flight=selected_flight if isinstance(selected_flight, dict) else None,
+                        destination_airport_code=dest_code,
+                        preference=preference if isinstance(preference, dict) else {},
+                        api_key=self.settings.google_places_api_key or "",
+                        local_transport=str(local_transport or ""),
+                    )
+                except Exception as e:
+                    logger.warning("enrich_route_bundle_with_directions_schedule failed: %s", e)
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
