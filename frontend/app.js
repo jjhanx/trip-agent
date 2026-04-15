@@ -96,6 +96,12 @@ function itineraryDraftFingerprint() {
   return parts.join('|');
 }
 
+/** 일정 확정 시점의 명소 id 집합 비교용(정렬된 문자열 배열). */
+function sortedAttractionIdsCopy(ids) {
+  if (!Array.isArray(ids)) return [];
+  return [...ids].map(String).sort();
+}
+
 function saveItineraryDraft() {
   try {
     const fp = itineraryDraftFingerprint();
@@ -109,6 +115,7 @@ function saveItineraryDraft() {
       mealChoices: state.mealChoices,
       selectedItinerary: state.selectedItinerary,
       itineraries: state.itineraries,
+      lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     };
     localStorage.setItem(ITINERARY_DRAFT_KEY, JSON.stringify(draft));
   } catch (e) {
@@ -146,6 +153,18 @@ function restoreItineraryDraft() {
     state.mealChoices = draft.mealChoices && typeof draft.mealChoices === 'object' ? draft.mealChoices : {};
     state.selectedItinerary = draft.selectedItinerary ?? null;
     state.itineraries = Array.isArray(draft.itineraries) ? draft.itineraries : [];
+    state.lastCommittedAttractionIds = Array.isArray(draft.lastCommittedAttractionIds)
+      ? draft.lastCommittedAttractionIds.map(String)
+      : null;
+    const si0 = state.selectedItinerary;
+    const hasDaily = si0 && typeof si0 === 'object' && Array.isArray(si0.daily_plan) && si0.daily_plan.length > 0;
+    if (
+      hasDaily
+      && (!state.lastCommittedAttractionIds || state.lastCommittedAttractionIds.length === 0)
+      && state.selectedAttractionIds?.length
+    ) {
+      state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
+    }
     if (state.selectedItinerary && !state.itineraryWorkflowStep) {
       const si = state.selectedItinerary;
       if (si && typeof si === 'object' && !si.option_id && (si.daily_plan || si.summary || si.title)) {
@@ -392,6 +411,7 @@ function getFullPlanState() {
     itineraryRouteBundle: state.itineraryRouteBundle,
     selectedAttractionIds: state.selectedAttractionIds,
     mealChoices: state.mealChoices,
+    lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
     selectedAccommodation: state.selectedAccommodation,
     localTransport: state.localTransport,
@@ -430,11 +450,23 @@ function loadPlanIntoState(data) {
   state.itineraryRouteBundle = data.itineraryRouteBundle && typeof data.itineraryRouteBundle === 'object' ? data.itineraryRouteBundle : null;
   state.selectedAttractionIds = Array.isArray(data.selectedAttractionIds) ? data.selectedAttractionIds : [];
   state.mealChoices = data.mealChoices && typeof data.mealChoices === 'object' ? data.mealChoices : {};
+  state.lastCommittedAttractionIds = Array.isArray(data.lastCommittedAttractionIds)
+    ? data.lastCommittedAttractionIds.map(String)
+    : null;
   if (state.selectedItinerary && !state.itineraryWorkflowStep) {
     const si = state.selectedItinerary;
     if (si && typeof si === 'object' && !si.option_id && (si.daily_plan || si.summary || si.title)) {
       state.itineraryWorkflowStep = 'complete';
     }
+  }
+  const siLoad = state.selectedItinerary;
+  const hasDailyLoad = siLoad && typeof siLoad === 'object' && Array.isArray(siLoad.daily_plan) && siLoad.daily_plan.length > 0;
+  if (
+    hasDailyLoad
+    && (!state.lastCommittedAttractionIds || state.lastCommittedAttractionIds.length === 0)
+    && state.selectedAttractionIds?.length
+  ) {
+    state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
   }
   state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
   state.selectedAccommodation = data.selectedAccommodation ?? null;
@@ -581,6 +613,7 @@ function newPlan() {
   state.itineraryRouteBundle = null;
   state.selectedAttractionIds = [];
   state.mealChoices = {};
+  state.lastCommittedAttractionIds = null;
   state.accommodations = [];
   state.selectedAccommodation = null;
   state.localTransport = [];
@@ -637,6 +670,8 @@ let state = {
   selectedLocalTransport: null,
   currentPlanId: null,
   currentPlanName: null,
+  /** 일정 확정(finalize) 당시 명소 id 스냅샷 — 선택이 바뀌면 일정 무효·재생성 */
+  lastCommittedAttractionIds: null,
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -693,6 +728,42 @@ function selectedItineraryLooksFinal(si) {
   return false;
 }
 
+function attractionIdsMatchSnapshot(ids, snapshot) {
+  if (!snapshot || !Array.isArray(snapshot) || snapshot.length === 0) return false;
+  return sortedAttractionIdsCopy(ids).join('|') === sortedAttractionIdsCopy(snapshot).join('|');
+}
+
+/** 확정 일정과 동일한 명소 선택일 때만 「여행 일정으로」바로가기 */
+function itineraryShortcutAllowed() {
+  if (!selectedItineraryLooksFinal(state.selectedItinerary)) return false;
+  return attractionIdsMatchSnapshot(state.selectedAttractionIds, state.lastCommittedAttractionIds);
+}
+
+function invalidateItineraryPlanBecauseAttractionsDiverged() {
+  state.itineraryRouteBundle = null;
+  state.mealChoices = {};
+  state.selectedItinerary = null;
+  state.lastCommittedAttractionIds = null;
+  state.itineraryWorkflowStep = 'attractions';
+}
+
+function reRenderCurrentAttractionSelectionUi() {
+  const sec = $('#step-attractions');
+  if (!sec || sec.classList.contains('hidden')) return;
+  if (!state.itineraryAttractionCatalog?.length) return;
+  renderItineraryWorkflow({
+    itinerary_step: 'select_attractions',
+    attractions: state.itineraryAttractionCatalog,
+    design_notes: '',
+    time_ratio_note: '',
+    trip_days: state.itineraryTripDays != null
+      ? state.itineraryTripDays
+      : ((state.travelInput?.start_date && state.travelInput?.end_date)
+        ? inclusiveCalendarDays(state.travelInput.start_date, state.travelInput.end_date)
+        : (state.itineraryAttractionCatalog?.length ? Math.ceil(state.itineraryAttractionCatalog.length / 3) : 1)),
+  });
+}
+
 function isAttractionsSectionVisible() {
   const sec = $('#step-attractions');
   return !!(sec && !sec.classList.contains('hidden'));
@@ -702,7 +773,7 @@ function isAttractionsSectionVisible() {
 function goToItinerarySectionForState() {
   const ws = state.itineraryWorkflowStep;
   const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
-  if (selectedItineraryLooksFinal(state.selectedItinerary) && ws !== 'meals') {
+  if (selectedItineraryLooksFinal(state.selectedItinerary) && ws !== 'meals' && ws !== 'attractions') {
     mountItineraryStepPanel('plan');
     show('step-itinerary-plan');
     return;
@@ -2466,10 +2537,11 @@ function updateItineraryNextButton() {
   if (!btn) return;
   const ws = state.itineraryWorkflowStep;
   const onAttractions = isAttractionsSectionVisible();
-  const hasFinalPlan = selectedItineraryLooksFinal(state.selectedItinerary);
+  const shortcut = itineraryShortcutAllowed();
+  const hasSelection = state.selectedAttractionIds?.length > 0;
   if (ws === 'attractions') {
-    btn.textContent = hasFinalPlan ? '여행 일정으로' : '경로·맛집 계획 받기';
-    btn.disabled = !hasFinalPlan && !(state.selectedAttractionIds?.length > 0);
+    btn.textContent = shortcut ? '여행 일정으로' : '경로·맛집 계획 받기';
+    btn.disabled = !shortcut && !hasSelection;
     if (btnBack) btnBack.textContent = '뒤로 (렌트카/대중교통)';
   } else if (ws === 'meals') {
     btn.textContent = '일정 확정';
@@ -2477,13 +2549,13 @@ function updateItineraryNextButton() {
     if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
   } else if (ws === 'complete') {
     if (onAttractions) {
-      btn.textContent = '여행 일정으로';
-      btn.disabled = false;
+      btn.textContent = shortcut ? '여행 일정으로' : '경로·맛집 계획 받기';
+      btn.disabled = !shortcut && !hasSelection;
     } else {
       btn.textContent = '다음 (숙소 선택)';
       btn.disabled = false;
     }
-    if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
+    if (btnBack) btnBack.textContent = onAttractions ? '뒤로 (렌트카/대중교통)' : '뒤로 (명소 선택)';
   } else if (ws === 'legacy') {
     btn.textContent = '다음 (숙소 선택)';
     btn.disabled = !state.selectedItinerary;
@@ -2647,6 +2719,15 @@ function renderItineraryWorkflow(data) {
     root.querySelectorAll('.attr-pick').forEach((cb) => {
       cb.addEventListener('change', () => {
         state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
+        if (
+          state.lastCommittedAttractionIds?.length
+          && !attractionIdsMatchSnapshot(state.selectedAttractionIds, state.lastCommittedAttractionIds)
+        ) {
+          invalidateItineraryPlanBecauseAttractionsDiverged();
+          saveItineraryDraft();
+          reRenderCurrentAttractionSelectionUi();
+          return;
+        }
         updateItineraryNextButton();
         saveItineraryDraft();
       });
@@ -2656,6 +2737,15 @@ function renderItineraryWorkflow(data) {
       const allChecked = cbs.every(cb => cb.checked);
       cbs.forEach(cb => cb.checked = !allChecked);
       state.selectedAttractionIds = Array.from(root.querySelectorAll('.attr-pick:checked')).map(x => x.value);
+      if (
+        state.lastCommittedAttractionIds?.length
+        && !attractionIdsMatchSnapshot(state.selectedAttractionIds, state.lastCommittedAttractionIds)
+      ) {
+        invalidateItineraryPlanBecauseAttractionsDiverged();
+        saveItineraryDraft();
+        reRenderCurrentAttractionSelectionUi();
+        return;
+      }
       updateItineraryNextButton();
       saveItineraryDraft();
     });
@@ -2818,6 +2908,7 @@ function applyItineraryResponse(data) {
     state.itineraryRouteBundle = null;
     state.mealChoices = {};
     state.selectedItinerary = null;
+    state.lastCommittedAttractionIds = null;
     state.itineraries = [];
     state.itineraryWorkflowStep = 'attractions';
     renderItineraryWorkflow(data);
@@ -2839,6 +2930,7 @@ function applyItineraryResponse(data) {
   if (data?.itinerary_step === 'complete') {
     state.selectedItinerary = data.final_itinerary;
     state.itineraryWorkflowStep = 'complete';
+    state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
     renderItineraryWorkflow(data);
     mountItineraryStepPanel('plan');
     show('step-itinerary-plan');
@@ -2959,11 +3051,13 @@ $('#btn-back-itinerary-decide')?.addEventListener('click', () => show('step-rent
 
 $('#btn-back-itineraries').addEventListener('click', () => {
   const ws = state.itineraryWorkflowStep;
+  const onAttractions = isAttractionsSectionVisible();
   if (ws === 'legacy') {
     show('step-rental');
     return;
   }
-  if (ws === 'meals' || ws === 'complete') {
+  // 일정·맛집 화면(5단계)에서만 명소(4단계)로 — 이미 명소 화면이면 이전 단계(렌트)로
+  if ((ws === 'meals' || ws === 'complete') && !onAttractions) {
     state.itineraryWorkflowStep = 'attractions';
     state.itineraryRouteBundle = null;
     state.mealChoices = {};
@@ -2971,6 +3065,10 @@ $('#btn-back-itineraries').addEventListener('click', () => {
     mountItineraryStepPanel('attractions');
     show('step-attractions', true);
     refreshStepView('attractions');
+    return;
+  }
+  if (ws === 'complete' && onAttractions) {
+    show('step-rental');
     return;
   }
   show('step-rental');
@@ -3082,8 +3180,7 @@ $('#btn-back-accommodation-decide')?.addEventListener('click', () => {
 $('#btn-next-itineraries').addEventListener('click', async () => {
   const ws = state.itineraryWorkflowStep;
   const onAttractions = isAttractionsSectionVisible();
-  const hasFinalPlan = selectedItineraryLooksFinal(state.selectedItinerary);
-  if ((ws === 'attractions' && hasFinalPlan) || (ws === 'complete' && onAttractions)) {
+  if ((ws === 'attractions' || (ws === 'complete' && onAttractions)) && itineraryShortcutAllowed()) {
     navigateToStep('itinerary');
     return;
   }
