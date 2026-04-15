@@ -263,16 +263,26 @@ header p {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .meal-priority-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
 }
 .meal-priority-label {
-  flex: 0 0 auto;
+  white-space: nowrap;
   min-width: 2.75rem;
+}
+.meal-day-block .meal-priority-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .meal-rest-grid {
   display: grid;
