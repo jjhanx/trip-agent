@@ -954,3 +954,114 @@ a.btn-primary:hover { background: var(--accent-hover); }
 
 #loading p { margin: 0; }
 #error-message { color: var(--error); }
+
+/* 숙소 단계: 현지 이동 요약(렌트 카드와 동일 정보, 읽기 전용) */
+.local-transport-summary {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.local-transport-summary-heading {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+.rental-card--summary {
+  grid-template-columns: 100px 1fr;
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.15);
+}
+.rental-card--summary .rental-card-body {
+  padding: 0.75rem 0.75rem 0.75rem 0;
+}
+.rental-card--summary .rental-card-img {
+  min-height: 80px;
+}
+.transport-offer-simple {
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.12);
+}
+.transport-offer-simple-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* 숙소 카드 */
+.accommodation-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden;
+  text-align: left;
+}
+.accommodation-card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.accommodation-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+@media (max-width: 600px) {
+  .accommodation-gallery { grid-template-columns: repeat(2, 1fr); }
+}
+.acc-thumb-wrap {
+  display: block;
+  aspect-ratio: 4/3;
+  overflow: hidden;
+}
+.acc-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.accommodation-card-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.accommodation-card-body h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+.acc-type-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent);
+  vertical-align: middle;
+}
+.acc-rating { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
+.acc-location { margin: 0 !important; font-size: 0.9rem; color: var(--muted); }
+.acc-price { margin: 0 !important; font-weight: 600; color: var(--accent); }
+.acc-flags { margin: 0 !important; font-size: 0.85rem; }
+.acc-meta, .acc-fit { margin: 0 !important; font-size: 0.82rem; line-height: 1.45; color: var(--text); }
+.acc-fit { color: var(--muted); }
+.acc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.acc-chip {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+.acc-booking-row { margin: 0.5rem 0 0 !important; }
+.acc-rationale { margin: 0 !important; font-size: 0.82rem; line-height: 1.4; }

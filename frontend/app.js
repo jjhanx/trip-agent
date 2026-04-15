@@ -924,7 +924,7 @@ function refreshStepView(step) {
     renderAccommodations(state.accommodations);
     const ltEl = $('#local-transport-info');
     if (ltEl) ltEl.innerHTML = state.localTransport?.length
-      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+      ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
   }
 }
@@ -2208,6 +2208,136 @@ function normalizeLocalTransport(lt) {
   return [];
 }
 
+function isDetailedRentalOffer(opt, isRental) {
+  if (!isRental) return false;
+  const k = opt.offer_kind;
+  return !!(
+    opt.image_url || opt.vehicle_name || opt.booking_url
+    || k === 'amadeus_transfer' || k === 'serpapi_self_drive' || k === 'vehicle_class_guide'
+    || k === 'self_drive_compare' || k === 'affiliate' || k === 'info'
+  );
+}
+
+/**
+ * @param {'interactive'|'static'} mode interactive: 렌트 단계 선택 카드, static: 숙소 단계 읽기 전용 요약
+ */
+function htmlForTransportOffer(opt, i, isRental, mode) {
+  const readonly = mode === 'static';
+  const stop = readonly ? '' : ' onclick="event.stopPropagation()"';
+  if (isDetailedRentalOffer(opt, isRental)) {
+    const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
+    const titleRaw = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
+    const title = escapeHtml(titleRaw);
+    const features = escapeHtml(Array.isArray(opt.features) ? opt.features.join(' · ') : (opt.features || ''));
+    const recommendedBadge = opt.recommended ? '<span class="rental-badge recommended">여행가방 추천</span>' : '';
+    const kind = opt.offer_kind || '';
+    const kindBadge = kind === 'amadeus_transfer'
+      ? '<span class="rental-badge">트랜스퍼 견적</span>'
+      : kind === 'serpapi_self_drive'
+        ? '<span class="rental-badge">셀프 드라이브 후보</span>'
+        : kind === 'vehicle_class_guide'
+          ? '<span class="rental-badge">차급·스펙</span>'
+          : kind === 'self_drive_compare'
+            ? '<span class="rental-badge">셀프 드라이브 비교</span>'
+            : kind === 'info'
+              ? '<span class="rental-badge">안내</span>'
+              : kind === 'affiliate'
+                ? '<span class="rental-badge">제휴</span>'
+                : '';
+    const imgHtml = opt.image_url
+      ? `<img src="${String(opt.image_url).replace(/"/g, '%22')}" alt="${escapeHtml(opt.vehicle_name || opt.car_type || '')}" class="rental-card-img" loading="lazy">`
+      : '';
+    const vn = escapeHtml(opt.vehicle_name || '');
+    const od = escapeHtml(opt.description || '');
+    const detailHtml = (opt.description || opt.vehicle_name) ? `<p class="rental-desc">${vn}${od ? ' · ' + od : ''}</p>` : '';
+    const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${escapeHtml(opt.luggage_capacity)}</span>` : '';
+    const priceBasis = escapeHtml(opt.price_basis || '');
+    const bookingLabel = kind === 'self_drive_compare'
+      ? '공항 전체 비교 (EB)'
+      : kind === 'vehicle_class_guide'
+        ? '이 차급·일정 (EB)'
+        : kind === 'serpapi_self_drive'
+          ? '가격·차종 확인(출처)'
+          : kind === 'affiliate'
+            ? 'Travelpayouts 제휴 열기'
+            : (opt.provider === 'EconomyBookings' ? 'EconomyBookings 열기' : '예약·약관 확인');
+    const safeBooking = typeof opt.booking_url === 'string' && /^https?:\/\//i.test(opt.booking_url) ? opt.booking_url : '';
+    const bookingBtn = safeBooking
+      ? `<a href="${safeBooking.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking"${stop}>${bookingLabel}</a>`
+      : '';
+    const liveEb = kind === 'self_drive_compare' && typeof opt.eb_cars_results_url === 'string' && /^https?:\/\//i.test(opt.eb_cars_results_url)
+      ? opt.eb_cars_results_url
+      : '';
+    const liveEbBtn = liveEb
+      ? `<a href="${liveEb.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking btn-eb-live"${stop}>실시간 차량·가격 (EB)</a>`
+      : '';
+    const orig = (opt.price_original_amount && opt.price_original_currency)
+      ? ` <span class="rental-original-price">(${escapeHtml(String(opt.price_original_amount))} ${escapeHtml(String(opt.price_original_currency))})</span>`
+      : '';
+    const snipRaw = opt.price_snippet_raw ? `<span class="rental-snippet-price">스니펫: ${escapeHtml(opt.price_snippet_raw)}</span>` : '';
+    const srcLine = opt.source_label ? `<p class="rental-source">${escapeHtml(opt.source_label)}</p>` : '';
+    const schedLine = opt.rental_schedule_line ? `<p class="rental-schedule">${escapeHtml(opt.rental_schedule_line)}</p>` : '';
+    const locLine = [opt.pickup_location, opt.dropoff_location].filter(Boolean).map((x) => escapeHtml(x)).join(' → ');
+    const priceEst = opt.price_is_estimate && opt.price_total_krw ? '약 ' : '';
+    const wrapClass = readonly
+      ? 'transport-offer-static rental-card rental-card--summary'
+      : 'option-item rental-card';
+    const dataIdx = readonly ? '' : ` data-idx="${i}"`;
+    return `
+        <div class="${wrapClass}"${dataIdx}>
+          <div class="rental-card-media">${imgHtml}</div>
+          <div class="rental-card-body">
+            <h3>${title} ${kindBadge} ${recommendedBadge}</h3>
+            ${opt.price_label_ko ? `<p class="rental-price-headline">${escapeHtml(opt.price_label_ko)}</p>` : ''}
+            ${detailHtml}
+            ${features ? `<p class="rental-features">${features}</p>` : ''}
+            ${srcLine}
+            ${luggageHtml}
+            ${schedLine}
+            <p class="rental-location">${locLine}</p>
+            <div class="rental-footer">
+              ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}
+              ${bookingBtn}${liveEbBtn}
+            </div>
+            ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}
+          </div>
+        </div>
+      `;
+  }
+  let title = ''; let desc = '';
+  if (isRental) {
+    const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
+    title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
+    desc = [opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ');
+    if (opt.price_total_krw) desc += ` | ${opt.price_total_krw.toLocaleString()}원`;
+  } else {
+    title = opt.description || opt.route_id || `옵션 ${i + 1}`;
+    desc = opt.duration_minutes ? `약 ${opt.duration_minutes}분` : '';
+    if (opt.pass_price_krw) desc += ` | ${opt.pass_price_krw.toLocaleString()}원`;
+  }
+  if (readonly) {
+    return `
+      <div class="transport-offer-simple">
+        <h5 class="transport-offer-simple-title">${escapeHtml(title)}</h5>
+        <p class="muted">${escapeHtml(desc)}</p>
+      </div>`;
+  }
+  return `
+      <div class="option-item" data-idx="${i}">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(desc)}</p>
+      </div>
+    `;
+}
+
+function formatLocalTransportSummaryHtml(lt) {
+  const rows = normalizeLocalTransport(lt);
+  if (!rows.length) return '';
+  const isRental = state.travelInput?.local_transport === 'rental_car';
+  const cards = rows.map((opt, i) => htmlForTransportOffer(opt, i, isRental, 'static')).join('');
+  return `<div class="local-transport-summary" role="region" aria-label="현지 이동"><h4 class="local-transport-summary-heading">현지 이동</h4>${cards}</div>`;
+}
+
 function renderRentalOptions(items) {
   const list = $('#rental-list');
   if (!list) return;
@@ -2231,101 +2361,7 @@ function renderRentalOptions(items) {
     return;
   }
   if (isRental && rows.length > 0 && selectHint) selectHint.classList.remove('hidden');
-  list.innerHTML = rows.map((opt, i) => {
-    if (isRental && (opt.image_url || opt.vehicle_name || opt.booking_url || opt.offer_kind === 'amadeus_transfer' || opt.offer_kind === 'serpapi_self_drive' || opt.offer_kind === 'vehicle_class_guide' || opt.offer_kind === 'self_drive_compare' || opt.offer_kind === 'affiliate' || opt.offer_kind === 'info')) {
-      const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
-      const titleRaw = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
-      const title = escapeHtml(titleRaw);
-      const features = escapeHtml(Array.isArray(opt.features) ? opt.features.join(' · ') : (opt.features || ''));
-      const recommendedBadge = opt.recommended ? '<span class="rental-badge recommended">여행가방 추천</span>' : '';
-      const kind = opt.offer_kind || '';
-      const kindBadge = kind === 'amadeus_transfer'
-        ? '<span class="rental-badge">트랜스퍼 견적</span>'
-        : kind === 'serpapi_self_drive'
-          ? '<span class="rental-badge">셀프 드라이브 후보</span>'
-          : kind === 'vehicle_class_guide'
-            ? '<span class="rental-badge">차급·스펙</span>'
-            : kind === 'self_drive_compare'
-              ? '<span class="rental-badge">셀프 드라이브 비교</span>'
-              : kind === 'info'
-                ? '<span class="rental-badge">안내</span>'
-                : kind === 'affiliate'
-                  ? '<span class="rental-badge">제휴</span>'
-                  : '';
-      const imgHtml = opt.image_url
-        ? `<img src="${String(opt.image_url).replace(/"/g, '%22')}" alt="${escapeHtml(opt.vehicle_name || opt.car_type || '')}" class="rental-card-img" loading="lazy">`
-        : '';
-      const vn = escapeHtml(opt.vehicle_name || '');
-      const od = escapeHtml(opt.description || '');
-      const detailHtml = (opt.description || opt.vehicle_name) ? `<p class="rental-desc">${vn}${od ? ' · ' + od : ''}</p>` : '';
-      const luggageHtml = opt.luggage_capacity ? `<span class="rental-luggage">수하물: ${escapeHtml(opt.luggage_capacity)}</span>` : '';
-      const priceBasis = escapeHtml(opt.price_basis || '');
-      const bookingLabel = kind === 'self_drive_compare'
-        ? '공항 전체 비교 (EB)'
-        : kind === 'vehicle_class_guide'
-          ? '이 차급·일정 (EB)'
-          : kind === 'serpapi_self_drive'
-            ? '가격·차종 확인(출처)'
-            : kind === 'affiliate'
-              ? 'Travelpayouts 제휴 열기'
-              : (opt.provider === 'EconomyBookings' ? 'EconomyBookings 열기' : '예약·약관 확인');
-      const safeBooking = typeof opt.booking_url === 'string' && /^https?:\/\//i.test(opt.booking_url) ? opt.booking_url : '';
-      const bookingBtn = safeBooking
-        ? `<a href="${safeBooking.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking" onclick="event.stopPropagation()">${bookingLabel}</a>`
-        : '';
-      const liveEb = kind === 'self_drive_compare' && typeof opt.eb_cars_results_url === 'string' && /^https?:\/\//i.test(opt.eb_cars_results_url)
-        ? opt.eb_cars_results_url
-        : '';
-      const liveEbBtn = liveEb
-        ? `<a href="${liveEb.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking btn-eb-live" onclick="event.stopPropagation()">실시간 차량·가격 (EB)</a>`
-        : '';
-      const orig = (opt.price_original_amount && opt.price_original_currency)
-        ? ` <span class="rental-original-price">(${escapeHtml(String(opt.price_original_amount))} ${escapeHtml(String(opt.price_original_currency))})</span>`
-        : '';
-      const snipRaw = opt.price_snippet_raw ? `<span class="rental-snippet-price">스니펫: ${escapeHtml(opt.price_snippet_raw)}</span>` : '';
-      const srcLine = opt.source_label ? `<p class="rental-source">${escapeHtml(opt.source_label)}</p>` : '';
-      const schedLine = opt.rental_schedule_line ? `<p class="rental-schedule">${escapeHtml(opt.rental_schedule_line)}</p>` : '';
-      const locLine = [opt.pickup_location, opt.dropoff_location].filter(Boolean).map((x) => escapeHtml(x)).join(' → ');
-      const priceEst = opt.price_is_estimate && opt.price_total_krw ? '약 ' : '';
-      return `
-        <div class="option-item rental-card" data-idx="${i}">
-          <div class="rental-card-media">${imgHtml}</div>
-          <div class="rental-card-body">
-            <h3>${title} ${kindBadge} ${recommendedBadge}</h3>
-            ${opt.price_label_ko ? `<p class="rental-price-headline">${escapeHtml(opt.price_label_ko)}</p>` : ''}
-            ${detailHtml}
-            ${features ? `<p class="rental-features">${features}</p>` : ''}
-            ${srcLine}
-            ${luggageHtml}
-            ${schedLine}
-            <p class="rental-location">${locLine}</p>
-            <div class="rental-footer">
-              ${opt.price_total_krw ? `<span class="price">${priceEst}${opt.price_total_krw.toLocaleString()}원</span>${orig}${snipRaw}` : '<span class="rental-no-price">가격: 링크에서 확인</span>'}
-              ${bookingBtn}${liveEbBtn}
-            </div>
-            ${priceBasis ? `<div class="rental-price-basis">${priceBasis}</div>` : ''}
-          </div>
-        </div>
-      `;
-    }
-    let title = '', desc = '';
-    if (isRental) {
-      const seatsLabel = opt.seats ? ` (${opt.seats}인승)` : '';
-      title = opt.provider ? `${opt.provider} - ${opt.car_type || ''}${seatsLabel}` : (opt.car_type || `옵션 ${i + 1}`) + seatsLabel;
-      desc = [opt.pickup_location, opt.dropoff_location].filter(Boolean).join(' → ');
-      if (opt.price_total_krw) desc += ` | ${opt.price_total_krw.toLocaleString()}원`;
-    } else {
-      title = opt.description || opt.route_id || `옵션 ${i + 1}`;
-      desc = opt.duration_minutes ? `약 ${opt.duration_minutes}분` : '';
-      if (opt.pass_price_krw) desc += ` | ${opt.pass_price_krw.toLocaleString()}원`;
-    }
-    return `
-      <div class="option-item" data-idx="${i}">
-        <h3>${escapeHtml(title)}</h3>
-        <p>${escapeHtml(desc)}</p>
-      </div>
-    `;
-  }).join('');
+  list.innerHTML = rows.map((opt, i) => htmlForTransportOffer(opt, i, isRental, 'interactive')).join('');
   list.querySelectorAll('.option-item').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target?.closest('.btn-booking')) return;
@@ -3160,7 +3196,7 @@ async function skipItineraryToAccommodation() {
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
-      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+      ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
     show('step-accommodation');
   } catch (err) {
@@ -3213,7 +3249,7 @@ async function proceedFromItineraryCompleteToAccommodation() {
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
-      ? `<h4>현지 이동</h4><pre>${JSON.stringify(state.localTransport, null, 2)}</pre>`
+      ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
     show('step-accommodation');
   } catch (err) {
@@ -3296,19 +3332,78 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
   alert('일정 단계를 진행해 주세요.');
 });
 
+const ACCOMMODATION_TYPE_KO = {
+  hotel: '호텔',
+  guesthouse: '게스트하우스',
+  hostel: '호스텔',
+  apartment: '아파트',
+  resort: '리조트',
+  villa: '빌라',
+  bnb: 'B&B',
+  hotel_with_kitchen: '부엌 있는 호텔',
+  mountain_lodge: '산장',
+};
+
 function renderAccommodations(items) {
   const list = $('#accommodations-list');
-  list.innerHTML = items.map((a, i) => `
-    <div class="option-item" data-idx="${i}">
-      <h3>${a.name || ''}</h3>
-      <p>${a.location || ''} | ${a.price_per_night_krw ? a.price_per_night_krw.toLocaleString() + '원/박' : ''}</p>
-    </div>
-  `).join('');
+  if (!list) return;
+  list.innerHTML = items.map((a, i) => {
+    const typeKo = ACCOMMODATION_TYPE_KO[a.accommodation_type] || a.accommodation_type || '';
+    const imgs = Array.isArray(a.image_urls) && a.image_urls.length
+      ? a.image_urls.slice(0, 6)
+      : (a.image_url ? [a.image_url] : []);
+    const gallery = imgs.length
+      ? `<div class="accommodation-gallery">${imgs.map((u) => {
+        const href = String(u).replace(/"/g, '%22');
+        return `<a href="${href}" target="_blank" rel="noopener" class="acc-thumb-wrap"><img src="${href}" alt="" class="acc-thumb" loading="lazy"></a>`;
+      }).join('')}</div>`
+      : '';
+    const hlRaw = Array.isArray(a.feature_highlights) && a.feature_highlights.length
+      ? a.feature_highlights
+      : (Array.isArray(a.amenities) ? a.amenities : []);
+    const chips = hlRaw.length
+      ? `<div class="acc-chips">${hlRaw.map((x) => `<span class="acc-chip">${escapeHtml(String(x))}</span>`).join('')}</div>`
+      : '';
+    const nights = a.stay_nights != null ? `${Number(a.stay_nights)}박` : '';
+    const total = a.total_stay_estimate_krw
+      ? ` · 합계 약 ${a.total_stay_estimate_krw.toLocaleString()}원`
+      : '';
+    const priceClean = a.price_per_night_krw
+      ? `<p class="acc-price">${a.price_per_night_krw.toLocaleString()}원/박${nights ? ' · ' + nights : ''}${total}</p>`
+      : (a.location ? `<p class="acc-price muted">가격 정보는 링크에서 확인</p>` : '');
+    const flags = [a.breakfast_included ? '조식 포함' : (a.breakfast_included === false ? '조식 미포함' : null), a.kitchen ? '주방' : null].filter(Boolean);
+    const flagLine = flags.length ? `<p class="acc-flags">${flags.map((t) => escapeHtml(t)).join(' · ')}</p>` : '';
+    const bed = a.bedroom_summary ? `<p class="acc-meta"><strong>침실·구성</strong> ${escapeHtml(a.bedroom_summary)}</p>` : '';
+    const park = a.parking_fee_text ? `<p class="acc-meta"><strong>주차</strong> ${escapeHtml(a.parking_fee_text)}</p>` : '';
+    const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·케이블카·주차 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
+    const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
+    const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
+      ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (URL)</a></p>`
+      : '';
+    const rating = a.rating != null ? `<span class="acc-rating">★ ${escapeHtml(String(a.rating))}</span>` : '';
+    return `
+    <div class="option-item accommodation-card" data-idx="${i}">
+      ${gallery}
+      <div class="accommodation-card-body">
+        <h3>${escapeHtml(a.name || '')}${typeKo ? ` <span class="acc-type-badge">${escapeHtml(typeKo)}</span>` : ''} ${rating}</h3>
+        <p class="acc-location">${escapeHtml(a.location || '')}</p>
+        ${rationale}
+        ${priceClean}
+        ${flagLine}
+        ${bed}
+        ${park}
+        ${chips}
+        ${fit}
+        ${url}
+      </div>
+    </div>`;
+  }).join('');
   list.querySelectorAll('.option-item').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      if (e.target?.closest('a')) return;
       list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
-      state.selectedAccommodation = items[parseInt(el.dataset.idx)];
+      state.selectedAccommodation = items[parseInt(el.dataset.idx, 10)];
     });
   });
 }

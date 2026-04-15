@@ -458,13 +458,26 @@ class SessionExecutor(BaseAgentExecutor):
                 "check_out": travel.end_date.isoformat(),
                 "accommodation_type": travel.accommodation_type.value,
                 "accommodation_priority": acc_priority,
+                "travelers_total": _total_passengers(travel),
+                "selected_itinerary": selected_itinerary
+                if isinstance(selected_itinerary, dict)
+                else None,
             }
             acc_resp = await self._call_agent("accommodation", acc_payload)
             if not acc_resp:
                 from mcp_servers.hotel.services import mock_search_hotels
 
                 acc_resp = json.dumps(
-                    mock_search_hotels(travel.destination, travel.accommodation_type.value)
+                    mock_search_hotels(
+                        travel.destination,
+                        travel.accommodation_type.value,
+                        acc_priority,
+                        _total_passengers(travel),
+                        selected_itinerary if isinstance(selected_itinerary, dict) else None,
+                        travel.start_date.isoformat(),
+                        travel.end_date.isoformat(),
+                    ),
+                    ensure_ascii=False,
                 )
             sf_acc = selected_flight if selected_flight else None
             start_d, end_d = _extract_rental_dates_from_flight(

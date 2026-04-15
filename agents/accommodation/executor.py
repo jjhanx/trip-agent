@@ -33,25 +33,43 @@ class AccommodationExecutor(BaseAgentExecutor):
             check_out = data.get("check_out", "")
             accommodation_type = data.get("accommodation_type", "hotel")
             accommodation_priority = data.get("accommodation_priority")
+            travelers_total = data.get("travelers_total")
+            selected_itinerary = data.get("selected_itinerary")
         except Exception as e:
             await event_queue.enqueue_event(new_agent_text_message(f"입력 오류: {e}"))
             return
         try:
-            result = await self.mcp.call_tool(
-                "search_hotels",
-                {
-                    "location": location,
-                    "check_in": check_in,
-                    "check_out": check_out,
-                    "accommodation_type": accommodation_type,
-                },
-            )
+            mcp_args = {
+                "location": location,
+                "check_in": check_in,
+                "check_out": check_out,
+                "accommodation_type": accommodation_type,
+            }
+            if accommodation_priority is not None:
+                mcp_args["accommodation_priority_json"] = json.dumps(
+                    accommodation_priority, ensure_ascii=False
+                )
+            if travelers_total is not None:
+                mcp_args["travelers_total"] = travelers_total
+            if selected_itinerary is not None:
+                mcp_args["selected_itinerary_json"] = json.dumps(
+                    selected_itinerary, ensure_ascii=False
+                )
+            result = await self.mcp.call_tool("search_hotels", mcp_args)
             text = result.get("text", json.dumps(result))
             hotels = json.loads(text) if isinstance(text, str) else text
         except Exception:
             from mcp_servers.hotel.services import mock_search_hotels
 
-            hotels = mock_search_hotels(location, accommodation_type, accommodation_priority)
+            hotels = mock_search_hotels(
+                location,
+                accommodation_type,
+                accommodation_priority,
+                travelers_total,
+                selected_itinerary if isinstance(selected_itinerary, dict) else None,
+                check_in,
+                check_out,
+            )
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(hotels[:5], ensure_ascii=False))
         )
