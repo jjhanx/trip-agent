@@ -2434,11 +2434,28 @@ function mergePreservedMealChoices(prev, routeBundle) {
   return out;
 }
 
+/**
+ * Place id로 지도 열 때 `query`와 함께 넘겨야 로케일(예: 한국) 기본 영역으로 잘못 열리지 않음.
+ * @see https://developers.google.com/maps/documentation/urls/get-started
+ */
+function googleMapsSearchUrlWithPlaceId(placeId, labelForQuery) {
+  const pid = placeId && String(placeId).trim();
+  if (!pid) return '';
+  const q = (labelForQuery && String(labelForQuery).trim()) || 'place';
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}&query_place_id=${encodeURIComponent(pid)}`;
+}
+
 /** 맛집에 구글 Place URL이 없으면 검색 링크 생성 */
 function restaurantMapsSearchUrl(rest, destHint) {
   const u = rest.google_maps_url && String(rest.google_maps_url).trim();
   if (u && /^https?:\/\//i.test(u)) return u;
-  const q = [rest.name, destHint].filter(Boolean).join(' ');
+  const pid = rest.id != null && String(rest.id).trim();
+  const name = (rest.name && String(rest.name).trim()) || '';
+  const label = [name, destHint].filter((x) => x && String(x).trim()).join(', ') || name || 'Restaurant';
+  if (pid) {
+    return googleMapsSearchUrlWithPlaceId(pid, label);
+  }
+  const q = [name, destHint].filter(Boolean).join(' ');
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
@@ -2459,11 +2476,13 @@ function googleMapsUrlForAttractionCatalogEntry(a, destHint) {
 
 /** 확정 일정 표용: 식당 Place id 또는 이름+목적지 검색. */
 function restaurantMapsUrlFromChoice(placeId, placeName, destHint) {
-  const pid = placeId && String(placeId).trim();
+  const pid = placeId != null && String(placeId).trim();
+  const name = (placeName && String(placeName).trim()) || '';
+  const label = [name, destHint].filter((x) => x && String(x).trim()).join(', ') || name || 'Restaurant';
   if (pid) {
-    return `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(pid)}`;
+    return googleMapsSearchUrlWithPlaceId(pid, label);
   }
-  return restaurantMapsSearchUrl({ name: placeName || '' }, destHint);
+  return restaurantMapsSearchUrl({ name: name || '' }, destHint);
 }
 
 /** kind: lunch → 오전 명소→식당, dinner → 오후 명소→식당 (서버 `drive_from_slots_by_date`) */
