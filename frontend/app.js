@@ -693,6 +693,11 @@ function selectedItineraryLooksFinal(si) {
   return false;
 }
 
+function isAttractionsSectionVisible() {
+  const sec = $('#step-attractions');
+  return !!(sec && !sec.classList.contains('hidden'));
+}
+
 /** 현재 워크플로에 맞는 명소/일정 화면으로 이동(패널 마운트 포함). */
 function goToItinerarySectionForState() {
   const ws = state.itineraryWorkflowStep;
@@ -2386,17 +2391,24 @@ function updateItineraryNextButton() {
   const btnBack = $('#btn-back-itineraries');
   if (!btn) return;
   const ws = state.itineraryWorkflowStep;
+  const onAttractions = isAttractionsSectionVisible();
+  const hasFinalPlan = selectedItineraryLooksFinal(state.selectedItinerary);
   if (ws === 'attractions') {
-    btn.textContent = '경로·맛집 계획 받기';
-    btn.disabled = !(state.selectedAttractionIds?.length > 0);
+    btn.textContent = hasFinalPlan ? '여행 일정으로' : '경로·맛집 계획 받기';
+    btn.disabled = !hasFinalPlan && !(state.selectedAttractionIds?.length > 0);
     if (btnBack) btnBack.textContent = '뒤로 (렌트카/대중교통)';
   } else if (ws === 'meals') {
     btn.textContent = '일정 확정';
     btn.disabled = false;
     if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
   } else if (ws === 'complete') {
-    btn.textContent = '다음 (숙소 선택)';
-    btn.disabled = false;
+    if (onAttractions) {
+      btn.textContent = '여행 일정으로';
+      btn.disabled = false;
+    } else {
+      btn.textContent = '다음 (숙소 선택)';
+      btn.disabled = false;
+    }
     if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
   } else if (ws === 'legacy') {
     btn.textContent = '다음 (숙소 선택)';
@@ -2868,6 +2880,12 @@ $('#btn-back-accommodation-decide')?.addEventListener('click', () => {
 
 $('#btn-next-itineraries').addEventListener('click', async () => {
   const ws = state.itineraryWorkflowStep;
+  const onAttractions = isAttractionsSectionVisible();
+  const hasFinalPlan = selectedItineraryLooksFinal(state.selectedItinerary);
+  if ((ws === 'attractions' && hasFinalPlan) || (ws === 'complete' && onAttractions)) {
+    navigateToStep('itinerary');
+    return;
+  }
   if (ws === 'attractions') {
     if (!state.selectedAttractionIds?.length) {
       alert('명소를 한 곳 이상 선택해 주세요.');
