@@ -259,6 +259,21 @@ header p {
   font-weight: 600;
   color: var(--text);
 }
+.meal-priority-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.meal-priority-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.meal-priority-label {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+}
 .meal-rest-grid {
   display: grid;
   gap: 0.65rem;

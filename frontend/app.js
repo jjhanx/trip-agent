@@ -2615,22 +2615,30 @@ function renderItineraryWorkflow(data) {
       const cardsDinner = renderMealRestaurantCardsHtml(opts, destHint, d, 'dinner');
       html += `<div class="option-item meal-day-block" style="margin-bottom:1.25rem;"><h4>${escapeHtml(d)}</h4>
         <p class="muted">점심 (오전 일정 명소 기준 이동·후보)</p>
-        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
-            <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.first)}</select>
-          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
-            <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.second)}</select>
+        <div class="meal-priority-rows">
+          <div class="meal-priority-row">
+            <span class="meal-priority-label">1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
+              <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.first)}</select>
+          </div>
+          <div class="meal-priority-row">
+            <span class="meal-priority-label">2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
+              <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.second)}</select>
+          </div>
         </div>
         <div class="meal-candidate-detail">
           <h4 class="meal-candidate-detail__title">점심 맛집 후보 상세</h4>
           <div class="meal-rest-grid">${cardsLunch}</div>
         </div>
         <p class="muted" style="margin-top:1rem;">저녁 (오후 일정 명소 기준 이동·후보)</p>
-        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
-            <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.first)}</select>
-          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
-            <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.second)}</select>
+        <div class="meal-priority-rows">
+          <div class="meal-priority-row">
+            <span class="meal-priority-label">1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
+              <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.first)}</select>
+          </div>
+          <div class="meal-priority-row">
+            <span class="meal-priority-label">2순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
+              <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.second)}</select>
+          </div>
         </div>
         <div class="meal-candidate-detail">
           <h4 class="meal-candidate-detail__title">저녁 맛집 후보 상세</h4>
