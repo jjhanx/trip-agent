@@ -3044,6 +3044,17 @@ JSON 객체 하나만 출력:
                 _merge_auto_fill_route_plan_notes(out, auto_filled_ids, trip_days)
             if (self.settings.google_places_api_key or "").strip():
                 try:
+                    from shared.restaurant_places import enrich_restaurants_by_attraction_from_places
+
+                    out = await enrich_restaurants_by_attraction_from_places(
+                        out,
+                        selected_objs,
+                        destination=destination,
+                        api_key=self.settings.google_places_api_key or "",
+                    )
+                except Exception as e:
+                    logger.warning("enrich_restaurants_by_attraction_from_places failed: %s", e)
+                try:
                     dest_code = (data.get("destination_airport_code") or "").strip().upper() or None
                     out = await enrich_route_bundle_with_directions_schedule(
                         out,
