@@ -934,16 +934,9 @@ function navigateToStep(stepName) {
       saveItineraryDraft();
     }
   }
-  if (stepName === 'itinerary') {
-    const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
-    const ws = state.itineraryWorkflowStep;
-    const pastAttractions = ws === 'meals' || ws === 'complete' || ws === 'legacy';
-    // 동선·맛집/확정 일정 단계였는데 본문 키가 비어 있는 저장본도 5단계로 보낸다(여기서 막으면 4↔5 이동이 막힘).
-    if (!hasPlan && !pastAttractions && state.itineraryAttractionCatalog?.length) {
-      navigateToStep('attractions');
-      return;
-    }
-  }
+  // 5. 여행 일정: 상단 단계 클릭은 항상 일정 화면으로 연다(명소만 확인한 뒤 복귀 포함).
+  // 예전에는 동선 전·카탈로그만 있을 때 4단계로 되돌렸는데, 저장 본문이 비어 보이는 경우에도 막혀 4↔5 이동이 안 됨.
+  // 본문이 없으면 refreshStepView가 안내문을 띄운다.
   const sectionId = STEP_TO_SECTION[stepName];
   if (!sectionId) return;
   show(sectionId, true);

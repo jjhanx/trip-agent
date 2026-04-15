@@ -176,6 +176,8 @@ header p {
 }
 
 .step-indicator {
+  position: relative;
+  z-index: 20;
   margin-bottom: 1.5rem;
   overflow-x: auto;
   padding-bottom: 0.5rem;
