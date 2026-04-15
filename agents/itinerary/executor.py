@@ -3073,6 +3073,16 @@ JSON 객체 하나만 출력:
                     logger.warning("enrich_route_bundle_with_directions_schedule failed: %s", e)
                     if auto_filled_ids:
                         _merge_auto_fill_route_plan_notes(out, auto_filled_ids, trip_days)
+                try:
+                    from shared.restaurant_places import enrich_restaurant_drives_from_daily_schedule
+
+                    out = await enrich_restaurant_drives_from_daily_schedule(
+                        out,
+                        selected_objs,
+                        api_key=self.settings.google_places_api_key or "",
+                    )
+                except Exception as e:
+                    logger.warning("enrich_restaurant_drives_from_daily_schedule failed: %s", e)
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )

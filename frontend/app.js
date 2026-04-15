@@ -2338,7 +2338,20 @@ function restaurantMapsSearchUrl(rest, destHint) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
-function renderMealRestaurantCardsHtml(opts, destHint) {
+/** kind: lunch → 오전 명소→식당, dinner → 오후 명소→식당 (서버 `drive_from_slots_by_date`) */
+function mealDrivePrefixHtml(r, dateStr, kind) {
+  const slot = r.drive_from_slots_by_date && r.drive_from_slots_by_date[dateStr];
+  if (!slot || typeof slot !== 'object') return '';
+  const min = kind === 'lunch' ? slot.from_morning_minutes : slot.from_afternoon_minutes;
+  const an = kind === 'lunch' ? slot.morning_attraction_name : slot.afternoon_attraction_name;
+  const label = kind === 'lunch' ? '오전 계획 명소' : '오후 계획 명소';
+  if (min != null && Number.isFinite(Number(min))) {
+    return `<p class="meal-rest-drive"><span class="meal-rest-drive__k">${escapeHtml(label)}</span> 「${escapeHtml(an || '—')}」에서 승용차 약 <strong>${escapeHtml(String(min))}분</strong></p>`;
+  }
+  return '';
+}
+
+function renderMealRestaurantCardsHtml(opts, destHint, dateStr, kind) {
   if (!opts || !opts.length) return '';
   const seen = new Set();
   const uniq = [];
@@ -2348,6 +2361,7 @@ function renderMealRestaurantCardsHtml(opts, destHint) {
     uniq.push(o);
   });
   return uniq.map((r) => {
+    const drive = mealDrivePrefixHtml(r, dateStr, kind);
     const name = escapeHtml(r.name || '');
     const rating = Number(r.rating) || 0;
     const rev = r.user_ratings_total != null && String(r.user_ratings_total).trim() !== ''
@@ -2364,7 +2378,8 @@ function renderMealRestaurantCardsHtml(opts, destHint) {
     const linksHtml = links.length
       ? `<p class="meal-rest-card__links">${links.join(' <span class="muted">·</span> ')}</p>`
       : '';
-    return `<article class="meal-rest-card" data-rest-id="${escapeHtml(r.id || '')}">
+    return `<article class="meal-rest-card" data-rest-id="${escapeHtml(r.id || '')}" data-meal-kind="${kind === 'lunch' ? 'lunch' : 'dinner'}">
+      ${drive}
       <h5 class="meal-rest-card__name">${name} <span class="muted">(${rating.toFixed(1)}★)</span>${rev}</h5>
       ${desc ? `<p class="meal-rest-card__desc">${desc}</p>` : ''}
       ${linksHtml}
@@ -2581,7 +2596,7 @@ function renderItineraryWorkflow(data) {
       html += '</ul>';
     }
     html += '<h3>맛집 (명소당 3곳, 평점순) — 날짜별 점심·저녁 1·2순위</h3>';
-    html += '<p class="muted" style="font-size:0.9rem;margin:-0.25rem 0 0.75rem;">드롭다운에는 상호·평점만 표시됩니다. 아래 <strong>맛집 후보 상세</strong>에서 소개·링크를 확인한 뒤 선택하세요.</p>';
+    html += '<p class="muted" style="font-size:0.9rem;margin:-0.25rem 0 0.75rem;">점심 후보는 <strong>오전</strong> 일정 명소에서, 저녁 후보는 <strong>오후</strong> 일정 명소에서 승용차 이동 시간(분)을 안내합니다(Google Directions, API·좌표 있을 때). 카드에서 소개·링크를 확인한 뒤 선택하세요.</p>';
     const destHint = (state.travelInput?.destination || '').trim();
     const mealOptsHtml = (opts, selectedId) =>
       opts.map((o) => {
@@ -2596,16 +2611,21 @@ function renderItineraryWorkflow(data) {
         html += `<p class="muted">${escapeHtml(d)}: 해당 날짜 맛집 후보가 없습니다.</p>`;
         return;
       }
-      const cards = renderMealRestaurantCardsHtml(opts, destHint);
+      const cardsLunch = renderMealRestaurantCardsHtml(opts, destHint, d, 'lunch');
+      const cardsDinner = renderMealRestaurantCardsHtml(opts, destHint, d, 'dinner');
       html += `<div class="option-item meal-day-block" style="margin-bottom:1.25rem;"><h4>${escapeHtml(d)}</h4>
-        <p class="muted">점심 (당일 방문 명소 인근)</p>
+        <p class="muted">점심 (오전 일정 명소 기준 이동·후보)</p>
         <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
           <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.first)}</select>
           <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.second)}</select>
         </div>
-        <p class="muted">저녁</p>
+        <div class="meal-candidate-detail">
+          <h4 class="meal-candidate-detail__title">점심 맛집 후보 상세</h4>
+          <div class="meal-rest-grid">${cardsLunch}</div>
+        </div>
+        <p class="muted" style="margin-top:1rem;">저녁 (오후 일정 명소 기준 이동·후보)</p>
         <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
           <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.first)}</select>
@@ -2613,20 +2633,27 @@ function renderItineraryWorkflow(data) {
             <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.second)}</select>
         </div>
         <div class="meal-candidate-detail">
-          <h4 class="meal-candidate-detail__title">맛집 후보 상세</h4>
-          <div class="meal-rest-grid">${cards}</div>
+          <h4 class="meal-candidate-detail__title">저녁 맛집 후보 상세</h4>
+          <div class="meal-rest-grid">${cardsDinner}</div>
         </div></div>`;
     });
     html += '</div>';
     root.innerHTML = html;
     const syncMealCardHighlight = () => {
-      const ids = new Set();
-      root.querySelectorAll('select.meal-priority-select').forEach((sel) => {
-        if (sel.value) ids.add(sel.value);
-      });
-      root.querySelectorAll('.meal-rest-card').forEach((card) => {
-        const id = card.dataset.restId;
-        card.classList.toggle('meal-rest-card--picked', !!(id && ids.has(id)));
+      root.querySelectorAll('.meal-day-block').forEach((block) => {
+        const lunchIds = new Set();
+        const dinnerIds = new Set();
+        block.querySelectorAll('select.meal-priority-select').forEach((sel) => {
+          if (!sel.value) return;
+          if (sel.dataset.meal === 'lunch') lunchIds.add(sel.value);
+          else if (sel.dataset.meal === 'dinner') dinnerIds.add(sel.value);
+        });
+        block.querySelectorAll('.meal-rest-card').forEach((card) => {
+          const id = card.dataset.restId;
+          const mk = card.dataset.mealKind;
+          const picked = mk === 'lunch' ? lunchIds.has(id) : dinnerIds.has(id);
+          card.classList.toggle('meal-rest-card--picked', !!(id && picked));
+        });
       });
     };
     syncMealCardHighlight();

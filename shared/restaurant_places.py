@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from urllib.parse import urlencode
 
-from shared.directions_parking import geocode_address
+from shared.directions_parking import driving_minutes_between, geocode_address
 from shared.google_place_details import fetch_place_details_raw
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,17 @@ def _is_food_establishment(types: list[str] | None) -> bool:
     if t & {"gas_station", "convenience_store", "supermarket", "lodging", "storage"}:
         return False
     return bool(t & {"restaurant", "food", "cafe", "bar", "bakery", "meal_takeaway"})
+
+
+def _lat_lng_from_geometry(obj: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not isinstance(obj, dict):
+        return None
+    geo = obj.get("geometry") or {}
+    loc = geo.get("location") or {}
+    la, lo = loc.get("lat"), loc.get("lng")
+    if isinstance(la, (int, float)) and isinstance(lo, (int, float)):
+        return float(la), float(lo)
+    return None
 
 
 def _maps_url_from_details(details: dict[str, Any], place_id: str) -> str:
@@ -178,7 +189,8 @@ async def _one_restaurant_record(
         rating = float(nearby_row.get("rating") or 0.0)
         rev = int(nearby_row.get("user_ratings_total") or 0)
         desc = vicinity or "Google Places 근처 검색 결과입니다."
-        return {
+        ll = _lat_lng_from_geometry(nearby_row)
+        row: dict[str, Any] = {
             "id": place_id,
             "place_id": place_id,
             "name": name or place_id,
@@ -188,6 +200,9 @@ async def _one_restaurant_record(
             "website": None,
             "google_maps_url": f"https://www.google.com/maps/search/?api=1&query_place_id={place_id}",
         }
+        if ll:
+            row["lat"], row["lng"] = ll[0], ll[1]
+        return row
 
     name = str(details.get("name") or nearby_row.get("name") or "").strip()
     rating = float(details.get("rating") or nearby_row.get("rating") or 0.0)
@@ -195,7 +210,8 @@ async def _one_restaurant_record(
     desc = _build_description(details, vicinity)
     web = (details.get("website") or "").strip()
     website = web if web.startswith("http") else None
-    return {
+    ll2 = _lat_lng_from_geometry(details)
+    row = {
         "id": place_id,
         "place_id": place_id,
         "name": name,
@@ -205,6 +221,9 @@ async def _one_restaurant_record(
         "website": website,
         "google_maps_url": _maps_url_from_details(details, place_id),
     }
+    if ll2:
+        row["lat"], row["lng"] = ll2[0], ll2[1]
+    return row
 
 
 async def restaurants_near_attraction(
@@ -286,4 +305,127 @@ async def enrich_restaurants_by_attraction_from_places(
 
     out = dict(route_bundle)
     out["restaurants_by_attraction"] = new_rba
+    return out
+
+
+def _attr_lat_lng_pair(
+    attr_by_id: dict[str, dict[str, Any]], aid: str | None
+) -> tuple[float, float] | None:
+    if not aid:
+        return None
+    a = attr_by_id.get(str(aid))
+    if not isinstance(a, dict):
+        return None
+    la, lo = a.get("attr_lat"), a.get("attr_lng")
+    if isinstance(la, (int, float)) and isinstance(lo, (int, float)):
+        return float(la), float(lo)
+    return None
+
+
+async def enrich_restaurant_drives_from_daily_schedule(
+    route_bundle: dict[str, Any],
+    selected_objs: list[dict[str, Any]],
+    api_key: str,
+) -> dict[str, Any]:
+    """일자별 오전·오후 명소 좌표 → 식당 좌표 Directions(승용차) 분. `drive_from_slots_by_date`에 저장."""
+    if not (api_key or "").strip():
+        return route_bundle
+    rba = route_bundle.get("restaurants_by_attraction")
+    if not isinstance(rba, dict) or not rba:
+        return route_bundle
+    rp = route_bundle.get("route_plan") or {}
+    daily = rp.get("daily_schedule") or []
+    if not isinstance(daily, list) or not daily:
+        return route_bundle
+
+    attr_by_id: dict[str, dict[str, Any]] = {}
+    for a in selected_objs:
+        if isinstance(a, dict) and a.get("id"):
+            attr_by_id[str(a["id"])] = a
+
+    rid_to_refs: dict[str, list[dict[str, Any]]] = {}
+    for _aid, lst in rba.items():
+        if not isinstance(lst, list):
+            continue
+        for r in lst:
+            if isinstance(r, dict) and r.get("id"):
+                rid = str(r["id"])
+                rid_to_refs.setdefault(rid, []).append(r)
+
+    meta_list: list[
+        tuple[str, str, str, str, tuple[float, float] | None, tuple[float, float] | None, float, float]
+    ] = []
+
+    for ds in daily:
+        if not isinstance(ds, dict):
+            continue
+        d = str(ds.get("date") or "").strip()
+        if not d:
+            continue
+        am_id = ds.get("morning_attraction_id")
+        pm_id = ds.get("afternoon_attraction_id")
+        extras = ds.get("extra_attraction_ids") or []
+        if not isinstance(extras, list):
+            extras = []
+        am_name = str((attr_by_id.get(str(am_id)) or {}).get("name") or am_id or "오전 명소")
+        pm_name = str((attr_by_id.get(str(pm_id)) or {}).get("name") or pm_id or "오후 명소")
+        o_am = _attr_lat_lng_pair(attr_by_id, str(am_id) if am_id else None)
+        o_pm = _attr_lat_lng_pair(attr_by_id, str(pm_id) if pm_id else None)
+
+        day_ids: set[str] = set()
+        for aid in [am_id, pm_id, *extras]:
+            if not aid:
+                continue
+            for r in rba.get(str(aid), []) or []:
+                if isinstance(r, dict) and r.get("id"):
+                    day_ids.add(str(r["id"]))
+
+        for rid in day_ids:
+            refs = rid_to_refs.get(rid) or []
+            if not refs:
+                continue
+            r0 = refs[0]
+            rlat, rlng = r0.get("lat"), r0.get("lng")
+            if not isinstance(rlat, (int, float)) or not isinstance(rlng, (int, float)):
+                continue
+            rlat_f, rlng_f = float(rlat), float(rlng)
+            meta_list.append((d, rid, am_name, pm_name, o_am, o_pm, rlat_f, rlng_f))
+
+    if not meta_list:
+        return route_bundle
+
+    sem = asyncio.Semaphore(8)
+
+    async def drive_legs(
+        m: tuple[str, str, str, str, tuple[float, float] | None, tuple[float, float] | None, float, float],
+    ) -> tuple[str, str, str, str, int | None, int | None]:
+        d, rid, am_name, pm_name, o_am, o_pm, rlat, rlng = m
+        async with sem:
+            fm: int | None = None
+            fp: int | None = None
+            if o_am:
+                fm = await driving_minutes_between(
+                    api_key, o_am[0], o_am[1], rlat, rlng
+                )
+            if o_pm:
+                fp = await driving_minutes_between(
+                    api_key, o_pm[0], o_pm[1], rlat, rlng
+                )
+        return d, rid, am_name, pm_name, fm, fp
+
+    results = await asyncio.gather(*[drive_legs(m) for m in meta_list])
+    for d, rid, am_name, pm_name, fm, fp in results:
+        info = {
+            "morning_attraction_name": am_name,
+            "afternoon_attraction_name": pm_name,
+            "from_morning_minutes": fm,
+            "from_afternoon_minutes": fp,
+        }
+        for ref in rid_to_refs.get(rid, []):
+            dfs = ref.setdefault("drive_from_slots_by_date", {})
+            if isinstance(dfs, dict):
+                dfs[d] = dict(info)
+
+    out = dict(route_bundle)
+    out["restaurants_by_attraction"] = rba
     return out

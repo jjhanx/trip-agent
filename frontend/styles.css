@@ -263,6 +263,16 @@ header p {
   display: grid;
   gap: 0.65rem;
 }
+.meal-rest-drive {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.meal-rest-drive__k {
+  color: var(--text);
+  font-weight: 600;
+}
 .meal-rest-card {
   margin: 0;
   padding: 0.75rem 1rem;
