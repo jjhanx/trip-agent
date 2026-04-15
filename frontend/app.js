@@ -2330,6 +2330,48 @@ function getRestaurantOptionsForDay(routeBundle, dateStr) {
   return list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
 }
 
+/** 맛집에 구글 Place URL이 없으면 검색 링크 생성 */
+function restaurantMapsSearchUrl(rest, destHint) {
+  const u = rest.google_maps_url && String(rest.google_maps_url).trim();
+  if (u && /^https?:\/\//i.test(u)) return u;
+  const q = [rest.name, destHint].filter(Boolean).join(' ');
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+function renderMealRestaurantCardsHtml(opts, destHint) {
+  if (!opts || !opts.length) return '';
+  const seen = new Set();
+  const uniq = [];
+  opts.forEach((o) => {
+    if (!o || !o.id || seen.has(o.id)) return;
+    seen.add(o.id);
+    uniq.push(o);
+  });
+  return uniq.map((r) => {
+    const name = escapeHtml(r.name || '');
+    const rating = Number(r.rating) || 0;
+    const rev = r.user_ratings_total != null && String(r.user_ratings_total).trim() !== ''
+      ? ` <span class="muted">· 리뷰 ${escapeHtml(String(r.user_ratings_total))}</span>`
+      : '';
+    const desc = r.description ? linkifyUrlsInPlainText(String(r.description)) : '';
+    const w = r.website && String(r.website).trim();
+    const web = w && /^https?:\/\//i.test(w)
+      ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="meal-rest-link">웹사이트</a>`
+      : '';
+    const gmapUrl = restaurantMapsSearchUrl(r, destHint);
+    const gmap = `<a href="${escapeHtml(gmapUrl)}" target="_blank" rel="noopener noreferrer" class="meal-rest-link">지도·길찾기</a>`;
+    const links = [web, gmap].filter(Boolean);
+    const linksHtml = links.length
+      ? `<p class="meal-rest-card__links">${links.join(' <span class="muted">·</span> ')}</p>`
+      : '';
+    return `<article class="meal-rest-card" data-rest-id="${escapeHtml(r.id || '')}">
+      <h5 class="meal-rest-card__name">${name} <span class="muted">(${rating.toFixed(1)}★)</span>${rev}</h5>
+      ${desc ? `<p class="meal-rest-card__desc">${desc}</p>` : ''}
+      ${linksHtml}
+    </article>`;
+  }).join('');
+}
+
 function collectAndValidateMealChoices() {
   const bundle = state.itineraryRouteBundle;
   const dates = bundle?.trip_dates || [];
@@ -2539,10 +2581,14 @@ function renderItineraryWorkflow(data) {
       html += '</ul>';
     }
     html += '<h3>맛집 (명소당 3곳, 평점순) — 날짜별 점심·저녁 1·2순위</h3>';
+    html += '<p class="muted" style="font-size:0.9rem;margin:-0.25rem 0 0.75rem;">드롭다운에는 상호·평점만 표시됩니다. 아래 <strong>맛집 후보 상세</strong>에서 소개·링크를 확인한 뒤 선택하세요.</p>';
+    const destHint = (state.travelInput?.destination || '').trim();
     const mealOptsHtml = (opts, selectedId) =>
-      opts.map((o) =>
-        `<option value="${escapeHtml(o.id)}"${o.id === selectedId ? ' selected' : ''}>${escapeHtml(o.name || '')} (${Number(o.rating).toFixed(1)})</option>`
-      ).join('');
+      opts.map((o) => {
+        const tipRaw = (o.description && String(o.description)) || [o.name, o.rating != null ? `${Number(o.rating).toFixed(1)}★` : ''].filter(Boolean).join(' — ');
+        const titleAttr = tipRaw ? ` title="${escapeHtml(tipRaw.slice(0, 500))}"` : '';
+        return `<option value="${escapeHtml(o.id)}"${titleAttr}${o.id === selectedId ? ' selected' : ''}>${escapeHtml(o.name || '')} (${Number(o.rating).toFixed(1)}★)</option>`;
+      }).join('');
     dates.forEach((d) => {
       const opts = getRestaurantOptionsForDay(rb, d);
       const mc = state.mealChoices?.[d] || {};
@@ -2550,26 +2596,43 @@ function renderItineraryWorkflow(data) {
         html += `<p class="muted">${escapeHtml(d)}: 해당 날짜 맛집 후보가 없습니다.</p>`;
         return;
       }
-      html += `<div class="option-item" style="margin-bottom:1rem;"><h4>${escapeHtml(d)}</h4>
+      const cards = renderMealRestaurantCardsHtml(opts, destHint);
+      html += `<div class="option-item meal-day-block" style="margin-bottom:1.25rem;"><h4>${escapeHtml(d)}</h4>
         <p class="muted">점심 (당일 방문 명소 인근)</p>
         <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" style="min-width:14rem;">
+          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.first)}</select>
-          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" style="min-width:14rem;">
+          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="lunch" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.lunch?.second)}</select>
         </div>
         <p class="muted">저녁</p>
         <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" style="min-width:14rem;">
+          <span>1순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="first" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.first)}</select>
-          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="second" style="min-width:14rem;">
+          <span>2순위</span><select data-date="${escapeHtml(d)}" data-meal="dinner" data-rank="second" class="meal-priority-select" style="min-width:14rem;">
             <option value="">선택</option>${mealOptsHtml(opts, mc.dinner?.second)}</select>
+        </div>
+        <div class="meal-candidate-detail">
+          <h4 class="meal-candidate-detail__title">맛집 후보 상세</h4>
+          <div class="meal-rest-grid">${cards}</div>
         </div></div>`;
     });
     html += '</div>';
     root.innerHTML = html;
+    const syncMealCardHighlight = () => {
+      const ids = new Set();
+      root.querySelectorAll('select.meal-priority-select').forEach((sel) => {
+        if (sel.value) ids.add(sel.value);
+      });
+      root.querySelectorAll('.meal-rest-card').forEach((card) => {
+        const id = card.dataset.restId;
+        card.classList.toggle('meal-rest-card--picked', !!(id && ids.has(id)));
+      });
+    };
+    syncMealCardHighlight();
     root.addEventListener('change', () => {
       snapshotMealChoicesFromDom();
+      syncMealCardHighlight();
       saveItineraryDraft();
     });
     updateItineraryNextButton();

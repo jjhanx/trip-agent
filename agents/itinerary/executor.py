@@ -1488,6 +1488,14 @@ def _merge_auto_fill_route_plan_notes(
     rp["lodging_strategy"] = (fill_note + cur).strip()
 
 
+def _restaurant_maps_search_url(name: str, destination: str) -> str:
+    """클라이언트·목업용 구글맵 검색 링크(정식 Place URL이 없을 때)."""
+    from urllib.parse import quote
+
+    q = f"{(name or '').strip()} {(destination or '').strip()}".strip()
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(q)
+
+
 def _mock_route_and_restaurants(
     destination: str,
     trip_days: int,
@@ -1511,24 +1519,34 @@ def _mock_route_and_restaurants(
     restaurants_by_attraction: dict[str, list[dict[str, Any]]] = {}
     for a in selected:
         aid = a["id"]
+        n1, n2, n3 = f"{a['name']} 근처 맛집 A", f"{a['name']} 근처 맛집 B", f"{a['name']} 근처 맛집 C"
         restaurants_by_attraction[aid] = [
             {
                 "id": f"{aid}_r1",
-                "name": f"{a['name']} 근처 맛집 A",
+                "name": n1,
                 "rating": 4.6,
-                "description": "현지인 단골, 점심·저녁 모두 가능.",
+                "description": "현지인 단골, 점심·저녁 모두 가능. 예약 권장(주말).",
+                "user_ratings_total": 842,
+                "website": None,
+                "google_maps_url": _restaurant_maps_search_url(n1, destination),
             },
             {
                 "id": f"{aid}_r2",
-                "name": f"{a['name']} 근처 맛집 B",
+                "name": n2,
                 "rating": 4.4,
-                "description": "평점 좋은 브런치·라이트 저녁.",
+                "description": "평점 좋은 브런치·라이트 저녁. 테라스 좌석 있음.",
+                "user_ratings_total": 1205,
+                "website": None,
+                "google_maps_url": _restaurant_maps_search_url(n2, destination),
             },
             {
                 "id": f"{aid}_r3",
-                "name": f"{a['name']} 근처 맛집 C",
+                "name": n3,
                 "rating": 4.2,
-                "description": "가성비 좋은 현지 요리.",
+                "description": "가성비 좋은 현지 요리. 현금만 가능할 수 있음.",
+                "user_ratings_total": 620,
+                "website": None,
+                "google_maps_url": _restaurant_maps_search_url(n3, destination),
             },
         ]
     return {
@@ -2993,14 +3011,19 @@ JSON 객체 하나만 출력:
 1) 동선을 고려해 일자별 오전·오후 명소 id를 배정. 숙소에서 차로 1시간 초과 거리면 숙소 이동을 검토하되 한 거점 유지를 우선.
 2) 목적지 주변 추천 동네(숙소 후보 지역) 2~4개: area_id, name, description, reachable_attraction_ids, lodging_notes.
 3) 공항↔목적지 구간에 볼거리가 있으면 transit_legs에 leg(outbound|return), notes, suggested_overnight(도시명 또는 null), sights_along_route(짧은 배열).
-4) 각 선택 명소마다 식당 3곳: rating 내림차순, id는 고유문자열, description 짧게.
+4) 각 선택 명소마다 식당 3곳: rating 내림차순, id는 고유문자열. 각 식당에 반드시 포함:
+   - name, rating(숫자), description(2~3문장: 분위기·대표 메뉴·가격대·예약·현금 여부 등 계획에 필요한 정보)
+   - user_ratings_total(정수, 추정 가능하면 리뷰 수)
+   - website: 공식·예약 페이지 http(s) URL, 없거나 불확실하면 null
+   - google_maps_url: 확실한 구글맵 장소 URL이 있으면 넣고, 없으면 null(클라이언트가 검색 링크 생성)
 5) 참고: 서버가 Google Maps Directions·지오코딩으로 `daily_schedule`을 다시 채울 수 있으나, `restaurants_by_attraction`·`neighborhoods`는 아래 값이 유지됩니다.
 
 출력 JSON 키:
 - itinerary_step: "select_meals"
 - route_plan: daily_schedule( date, morning_attraction_id, afternoon_attraction_id, overnight_area_hint ), transit_legs, lodging_strategy, destination_base_days
 - neighborhoods: 배열
-- restaurants_by_attraction: 객체, 키는 명소 id, 값은 길이 3 배열 {{id,name,rating,description}}
+- restaurants_by_attraction: 객체, 키는 명소 id, 값은 길이 3 배열. 각 원소는
+  {{id,name,rating,description,user_ratings_total,website,google_maps_url}}
 - trip_dates: {json.dumps(dates, ensure_ascii=False)}"""
                     resp = await client.chat.completions.create(
                         model=self.settings.llm_model,
