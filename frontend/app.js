@@ -2471,6 +2471,72 @@ function updateItineraryNextButton() {
   }
 }
 
+/** 확정 일정 표: 명소 id → 카탈로그 이름(없으면 id 문자열). */
+function attractionDisplayNameById(id) {
+  if (id == null || id === '') return '—';
+  const sid = String(id);
+  const cat = state.itineraryAttractionCatalog || [];
+  const a = cat.find((x) => x && String(x.id) === sid);
+  return a && a.name ? String(a.name) : sid;
+}
+
+function formatExtraAttractionIdsForTable(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return '—';
+  return ids.map((id) => attractionDisplayNameById(id)).join(', ');
+}
+
+function renderFinalDailyPlanTableHtml(fi) {
+  const plan = fi && Array.isArray(fi.daily_plan) ? fi.daily_plan : [];
+  if (!plan.length) {
+    return '<p class="muted">일자별 일정 데이터가 없습니다.</p>';
+  }
+  const rows = plan.map((day) => {
+    const date = escapeHtml(day.date || '—');
+    const am = escapeHtml(attractionDisplayNameById(day.morning_attraction_id));
+    const pm = escapeHtml(attractionDisplayNameById(day.afternoon_attraction_id));
+    const ex = escapeHtml(formatExtraAttractionIdsForTable(day.extra_attraction_ids));
+    let notesHtml = '—';
+    if (day.route_notes) {
+      notesHtml = linkifyUrlsInPlainText(String(day.route_notes)).replace(/\n/g, '<br>');
+    }
+    const lu = day.lunch || {};
+    const di = day.dinner || {};
+    const lunchLines = [
+      lu.first_choice_name ? `1순위: ${escapeHtml(String(lu.first_choice_name))}` : '',
+      lu.second_choice_name ? `2순위: ${escapeHtml(String(lu.second_choice_name))}` : '',
+    ].filter(Boolean).join('<br>') || '—';
+    const dinnerLines = [
+      di.first_choice_name ? `1순위: ${escapeHtml(String(di.first_choice_name))}` : '',
+      di.second_choice_name ? `2순위: ${escapeHtml(String(di.second_choice_name))}` : '',
+    ].filter(Boolean).join('<br>') || '—';
+    return `<tr>
+      <td>${date}</td>
+      <td>${am}</td>
+      <td>${pm}</td>
+      <td class="final-itinerary-table__extras">${ex}</td>
+      <td class="final-itinerary-table__notes">${notesHtml}</td>
+      <td class="final-itinerary-table__meals">${lunchLines}</td>
+      <td class="final-itinerary-table__meals">${dinnerLines}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="final-itinerary-table-wrap">
+    <table class="final-itinerary-table" role="grid" aria-label="일자별 일정">
+      <thead>
+        <tr>
+          <th scope="col">날짜</th>
+          <th scope="col">오전 명소</th>
+          <th scope="col">오후 명소</th>
+          <th scope="col">추가 명소</th>
+          <th scope="col">동선·메모</th>
+          <th scope="col">점심 (1·2순위)</th>
+          <th scope="col">저녁 (1·2순위)</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 function renderItineraryWorkflow(data) {
   const root = $('#itinerary-workflow-root');
   if (!root) return;
@@ -2681,7 +2747,7 @@ function renderItineraryWorkflow(data) {
       <h3>${escapeHtml(fi.title || '확정 일정')}</h3>
       <p>${escapeHtml(fi.summary || '')}</p>
       <h4>일자별 요약</h4>
-      <pre style="white-space:pre-wrap; font-size:0.85rem;">${escapeHtml(JSON.stringify(fi.daily_plan || fi, null, 2))}</pre>
+      ${renderFinalDailyPlanTableHtml(fi)}
     </div>`;
     updateItineraryNextButton();
     saveItineraryDraft();

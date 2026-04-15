@@ -253,6 +253,57 @@ header p {
   padding-top: 0.75rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+/* 확정 일정(complete): 일자별 표 */
+.final-itinerary-table-wrap {
+  overflow-x: auto;
+  margin: 0.75rem 0 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  -webkit-overflow-scrolling: touch;
+}
+.final-itinerary-table {
+  width: 100%;
+  min-width: 52rem;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.final-itinerary-table th,
+.final-itinerary-table td {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.final-itinerary-table thead th {
+  background: rgba(0, 0, 0, 0.28);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.final-itinerary-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+.final-itinerary-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.final-itinerary-table__notes {
+  max-width: 24rem;
+  min-width: 12rem;
+}
+.final-itinerary-table__notes a {
+  color: var(--accent);
+  word-break: break-all;
+}
+.final-itinerary-table__extras {
+  max-width: 14rem;
+  min-width: 6rem;
+}
+.final-itinerary-table__meals {
+  min-width: 9rem;
+  white-space: normal;
+}
 .meal-candidate-detail__title {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
