@@ -677,10 +677,23 @@ function mountItineraryStepPanel(which) {
   }
 }
 
+/** 저장·복원된 확정 일정(요약·일자별). 일정 옵션 카드·건너뛰기 스텁은 제외. */
+function selectedItineraryLooksFinal(si) {
+  if (!si || typeof si !== 'object') return false;
+  if (si.option_id) return false;
+  if (si.skipped) return false;
+  return !!(si.daily_plan || si.summary || si.title);
+}
+
 /** 현재 워크플로에 맞는 명소/일정 화면으로 이동(패널 마운트 포함). */
 function goToItinerarySectionForState() {
   const ws = state.itineraryWorkflowStep;
   const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
+  if (selectedItineraryLooksFinal(state.selectedItinerary) && ws !== 'meals') {
+    mountItineraryStepPanel('plan');
+    show('step-itinerary-plan');
+    return;
+  }
   if (ws === 'attractions' || (!hasPlan && state.itineraryAttractionCatalog?.length && ws !== 'meals' && ws !== 'complete')) {
     mountItineraryStepPanel('attractions');
     show('step-attractions');
@@ -809,10 +822,10 @@ function refreshStepView(step) {
   }
   if (step === 'itinerary') {
     mountItineraryStepPanel('plan');
-    if (state.itineraryWorkflowStep === 'complete' && state.selectedItinerary) {
-      renderItineraryWorkflow({ itinerary_step: 'complete', final_itinerary: state.selectedItinerary });
-    } else if (state.itineraryWorkflowStep === 'meals' && state.itineraryRouteBundle) {
+    if (state.itineraryWorkflowStep === 'meals' && state.itineraryRouteBundle) {
       renderItineraryWorkflow(state.itineraryRouteBundle);
+    } else if (selectedItineraryLooksFinal(state.selectedItinerary)) {
+      renderItineraryWorkflow({ itinerary_step: 'complete', final_itinerary: state.selectedItinerary });
     } else if (state.itineraries?.length) {
       renderItineraries(state.itineraries);
     } else if (state.itineraryAttractionCatalog?.length) {
@@ -895,7 +908,13 @@ function showFlightSummaryForEdit(sf) {
 
 function navigateToStep(stepName) {
   if (stepName === 'attractions') {
-    if (state.itineraryRouteBundle || state.itineraryWorkflowStep === 'meals' || state.itineraryWorkflowStep === 'complete') {
+    // 맛집 단계에서 명소로 돌아갈 때만 동선·맛집 초안 삭제. 완성 일정(complete)은 명소만 살펴보는 경우가 많아 상태 유지.
+    if (state.itineraryWorkflowStep === 'meals') {
+      state.itineraryWorkflowStep = 'attractions';
+      state.itineraryRouteBundle = null;
+      state.mealChoices = {};
+      saveItineraryDraft();
+    } else if (state.itineraryWorkflowStep !== 'complete' && state.itineraryRouteBundle) {
       state.itineraryWorkflowStep = 'attractions';
       state.itineraryRouteBundle = null;
       state.mealChoices = {};
@@ -2384,7 +2403,8 @@ function renderItineraryWorkflow(data) {
   if (!root) return;
   const step = data?.itinerary_step;
   if (step === 'select_attractions') {
-    state.itineraryWorkflowStep = 'attractions';
+    const keepCompleteForReview = state.itineraryWorkflowStep === 'complete' && selectedItineraryLooksFinal(state.selectedItinerary);
+    if (!keepCompleteForReview) state.itineraryWorkflowStep = 'attractions';
     const ats = data.attractions || [];
     sanitizeAttractionCatalogInPlace(ats);
     const note = data.time_ratio_note || '';
