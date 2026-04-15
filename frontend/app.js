@@ -741,7 +741,7 @@ function itineraryShortcutAllowed() {
 
 function invalidateItineraryPlanBecauseAttractionsDiverged() {
   state.itineraryRouteBundle = null;
-  state.mealChoices = {};
+  // mealChoices는 유지 — 새 route_restaurants 응답 후 mergePreservedMealChoices로 후보만 겹치는 슬롯 복원
   state.selectedItinerary = null;
   state.lastCommittedAttractionIds = null;
   state.itineraryWorkflowStep = 'attractions';
@@ -996,12 +996,10 @@ function navigateToStep(stepName) {
     if (state.itineraryWorkflowStep === 'meals') {
       state.itineraryWorkflowStep = 'attractions';
       state.itineraryRouteBundle = null;
-      state.mealChoices = {};
       saveItineraryDraft();
     } else if (state.itineraryWorkflowStep !== 'complete' && state.itineraryRouteBundle) {
       state.itineraryWorkflowStep = 'attractions';
       state.itineraryRouteBundle = null;
-      state.mealChoices = {};
       saveItineraryDraft();
     }
   }
@@ -2401,6 +2399,41 @@ function getRestaurantOptionsForDay(routeBundle, dateStr) {
   return list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
 }
 
+/**
+ * 명소 변경 후 새 동선 번들에서도 그날 후보에 남아 있는 식당만 맛집 선택을 이어 붙인다.
+ * @param {Record<string, { lunch?: { first?: string, second?: string }, dinner?: { first?: string, second?: string } }>} prev
+ */
+function mergePreservedMealChoices(prev, routeBundle) {
+  if (!routeBundle || typeof routeBundle !== 'object') return {};
+  const dates = routeBundle.trip_dates || [];
+  if (!Array.isArray(dates) || !dates.length) return {};
+  const prevMc = prev && typeof prev === 'object' ? prev : {};
+  const out = {};
+  dates.forEach((d) => {
+    const opts = getRestaurantOptionsForDay(routeBundle, d);
+    const allowed = new Set(
+      opts.map((o) => (o && o.id != null ? String(o.id) : '')).filter(Boolean),
+    );
+    if (!allowed.size) return;
+    const p = prevMc[d];
+    const lunch = p && p.lunch ? p.lunch : {};
+    const dinner = p && p.dinner ? p.dinner : {};
+    let lf = lunch.first && allowed.has(String(lunch.first)) ? String(lunch.first) : '';
+    let ls = lunch.second && allowed.has(String(lunch.second)) ? String(lunch.second) : '';
+    let df = dinner.first && allowed.has(String(dinner.first)) ? String(dinner.first) : '';
+    let ds = dinner.second && allowed.has(String(dinner.second)) ? String(dinner.second) : '';
+    if (lf && ls && lf === ls) ls = '';
+    if (df && ds && df === ds) ds = '';
+    if (lf || ls || df || ds) {
+      out[d] = {
+        lunch: { first: lf, second: ls },
+        dinner: { first: df, second: ds },
+      };
+    }
+  });
+  return out;
+}
+
 /** 맛집에 구글 Place URL이 없으면 검색 링크 생성 */
 function restaurantMapsSearchUrl(rest, destHint) {
   const u = rest.google_maps_url && String(rest.google_maps_url).trim();
@@ -2919,6 +2952,7 @@ function applyItineraryResponse(data) {
   }
   if (data?.itinerary_step === 'select_meals') {
     state.itineraryRouteBundle = data;
+    state.mealChoices = mergePreservedMealChoices(state.mealChoices, data);
     state.selectedItinerary = null;
     state.itineraryWorkflowStep = 'meals';
     renderItineraryWorkflow(data);
@@ -3060,7 +3094,6 @@ $('#btn-back-itineraries').addEventListener('click', () => {
   if ((ws === 'meals' || ws === 'complete') && !onAttractions) {
     state.itineraryWorkflowStep = 'attractions';
     state.itineraryRouteBundle = null;
-    state.mealChoices = {};
     saveItineraryDraft();
     mountItineraryStepPanel('attractions');
     show('step-attractions', true);
