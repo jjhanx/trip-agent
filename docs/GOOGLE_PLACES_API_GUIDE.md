@@ -25,10 +25,11 @@ Google Maps Platform을 사용하려면 결제 수단을 등록해야 합니다.
 1. 좌측 메뉴의 **[API 및 서비스]** > **[사용자 인증 정보]**로 이동합니다.
 2. 상단 **[+ 사용자 인증 정보 만들기]** > **[API 키]**를 클릭하여 키를 생성합니다.
 3. **(중요)** 생성된 키를 클릭하여 엽니다.
-4. 하단 **API 제한사항**에서 **키 제한**을 선택할 때, 아래를 함께 허용합니다(일정 `parking`의 **거점→명소 주행 분**에 **Directions API**·**Geocoding API**가 필요합니다).
+4. 하단 **API 제한사항**에서 **키 제한**을 선택할 때, 아래를 함께 허용합니다(일정 `parking`의 **거점→명소 주행 분**에 **Directions API**·**Geocoding API**가 필요하고, **숙소 검색**에는 **Distance Matrix API**가 추가로 필요합니다).
    - `Places API` (또는 Places API (New))
    - `Directions API`
    - `Geocoding API`
+   - `Distance Matrix API` (숙소~명소 주행 분 합산 — [HOTEL_SEARCH_API.md](HOTEL_SEARCH_API.md))
 
 ## 5. `.env` 파일에 적용
 

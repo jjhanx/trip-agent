@@ -35,6 +35,7 @@ class AccommodationExecutor(BaseAgentExecutor):
             accommodation_priority = data.get("accommodation_priority")
             travelers_total = data.get("travelers_total")
             selected_itinerary = data.get("selected_itinerary")
+            itinerary_attraction_catalog = data.get("itinerary_attraction_catalog")
         except Exception as e:
             await event_queue.enqueue_event(new_agent_text_message(f"입력 오류: {e}"))
             return
@@ -55,20 +56,28 @@ class AccommodationExecutor(BaseAgentExecutor):
                 mcp_args["selected_itinerary_json"] = json.dumps(
                     selected_itinerary, ensure_ascii=False
                 )
+            if itinerary_attraction_catalog is not None:
+                mcp_args["itinerary_attraction_catalog_json"] = json.dumps(
+                    itinerary_attraction_catalog, ensure_ascii=False
+                )
             result = await self.mcp.call_tool("search_hotels", mcp_args)
             text = result.get("text", json.dumps(result))
             hotels = json.loads(text) if isinstance(text, str) else text
         except Exception:
-            from mcp_servers.hotel.services import mock_search_hotels
+            from mcp_servers.hotel.services import run_hotel_search
 
-            hotels = mock_search_hotels(
+            hotels = run_hotel_search(
                 location,
                 accommodation_type,
                 accommodation_priority,
                 travelers_total,
                 selected_itinerary if isinstance(selected_itinerary, dict) else None,
+                itinerary_attraction_catalog
+                if isinstance(itinerary_attraction_catalog, list)
+                else None,
                 check_in,
                 check_out,
+                (self.settings.google_places_api_key or "").strip() or None,
             )
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(hotels[:5], ensure_ascii=False))

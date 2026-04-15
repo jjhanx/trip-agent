@@ -1065,3 +1065,20 @@ a.btn-primary:hover { background: var(--accent-hover); }
 }
 .acc-booking-row { margin: 0.5rem 0 0 !important; }
 .acc-rationale { margin: 0 !important; font-size: 0.82rem; line-height: 1.4; }
+
+.acc-drive-block {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+}
+.acc-drive-title { margin: 0 0 0.35rem !important; font-size: 0.85rem; }
+.acc-drive-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.acc-drive-sum { margin: 0.4rem 0 0 !important; font-size: 0.82rem; color: var(--accent); }

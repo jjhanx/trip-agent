@@ -1,7 +1,10 @@
 """Hotel search logic - shared by MCP server and agents."""
 
+import logging
 from datetime import datetime
 from urllib.parse import quote_plus
+
+logger = logging.getLogger(__name__)
 
 ACCOMMODATION_TYPES = [
     "hotel", "guesthouse", "hostel", "apartment", "resort",
@@ -176,3 +179,56 @@ def mock_search_hotels(
         }
         out.append(row)
     return out
+
+
+def run_hotel_search(
+    location: str,
+    accommodation_type: str = "hotel",
+    accommodation_priority: list[str] | None = None,
+    travelers_total: int | None = None,
+    selected_itinerary: dict | None = None,
+    itinerary_attraction_catalog: list | None = None,
+    check_in: str | None = None,
+    check_out: str | None = None,
+    google_api_key: str | None = None,
+) -> list[dict]:
+    """Places+Distance Matrix 기반 경로 최적화 후보, 실패 시 mock."""
+    from mcp_servers.hotel.attraction_points import collect_attraction_latlngs
+    from mcp_servers.hotel.google_places_hotels import search_route_optimized_hotels
+
+    guests = max(1, travelers_total or 2)
+    points = collect_attraction_latlngs(itinerary_attraction_catalog, selected_itinerary)
+    try:
+        real = search_route_optimized_hotels(
+            location_label=location,
+            attraction_points=points,
+            check_in=check_in or "",
+            check_out=check_out or "",
+            travelers_total=guests,
+            api_key=google_api_key,
+        )
+        if real:
+            return _assign_accommodation_types(real, accommodation_type, accommodation_priority)
+    except Exception as e:
+        logger.warning("run_hotel_search: Google path failed, using mock: %s", e)
+    return mock_search_hotels(
+        location,
+        accommodation_type,
+        accommodation_priority,
+        travelers_total,
+        selected_itinerary,
+        check_in,
+        check_out,
+    )
+
+
+def _assign_accommodation_types(
+    rows: list[dict],
+    accommodation_type: str,
+    accommodation_priority: list[str] | None,
+) -> list[dict]:
+    priority = accommodation_priority or [accommodation_type]
+    valid = [p for p in priority if p in ACCOMMODATION_TYPES] or ["hotel"]
+    for i, row in enumerate(rows):
+        row["accommodation_type"] = valid[i % len(valid)]
+    return rows

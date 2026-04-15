@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>여행 일정 설계 | Trip Agent</title>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
   <!-- Travelpayouts 추적 스크립트 -->
   <script data-noptimize="1" data-cfasync="false" data-wpfc-render="false">
     (function () {
@@ -352,7 +352,7 @@
 
       <section id="step-accommodation" class="card hidden">
         <h2>6. 숙소 선택</h2>
-        <p class="muted" style="margin-bottom: 1rem;">일정·일행·선호 숙소 형태를 반영한 후보입니다. 명소 접근·주차·케이블카(리프트)역 도보 여건 등은 카드마다 요약합니다. 객실 사진은 대표 분위기용이며 실제와 다를 수 있습니다. 조건·가격은 예약 URL에서 최종 확인하세요.</p>
+        <p class="muted" style="margin-bottom: 1rem;">서버에 <code>GOOGLE_PLACES_API_KEY</code>와 Distance Matrix API(콘솔에서 사용 설정)가 있으면 일정 명소 좌표를 기준으로 주행 시간이 짧은 숙소를 고릅니다. 저장소 <code>docs/HOTEL_SEARCH_API.md</code>를 참고하세요. 키가 없으면 예시(mock) 후보입니다. 렌트카를 고른 경우 이 화면에서는 별도 「현지 이동」 목록을 두지 않으며, 숙소 카드에 승용차 이동 분만 표시됩니다.</p>
         <div id="accommodations-list" class="options-grid"></div>
         <div id="local-transport-info"></div>
         <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
@@ -376,7 +376,7 @@
     </main>
   </div>
   <script src="airports.js?v=9"></script>
-  <script src="app.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 
 </html>

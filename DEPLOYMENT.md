@@ -230,6 +230,14 @@ SERPAPI_API_KEY=발급받은_api_key
 
 SerpApi·Travelpayouts·Amadeus를 모두 쓰지 않으면 항공은 Mock(예시) 데이터로 동작합니다.
 
+### Google Maps Platform (일정 동선·맛집·숙소 실검색)
+
+동일 키로 Places·Geocoding·Directions·**Distance Matrix**(숙소→명소 주행 분)를 사용합니다. Cloud Console에서 위 API를 **사용(Enabled)**으로 설정하세요. 숙소 검색 전용 설정은 [docs/HOTEL_SEARCH_API.md](docs/HOTEL_SEARCH_API.md), 키 발급은 [docs/GOOGLE_PLACES_API_GUIDE.md](docs/GOOGLE_PLACES_API_GUIDE.md)를 참고합니다.
+
+```env
+GOOGLE_PLACES_API_KEY=AIza...
+```
+
 ### 3.3 Docker Compose로 실행
 
 ```bash

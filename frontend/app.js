@@ -3188,6 +3188,7 @@ async function skipItineraryToAccommodation() {
     const data = await callAgent(baseSessionPayload({
       selected_flight: state.selectedFlight,
       selected_itinerary: stub,
+      itinerary_attraction_catalog: state.itineraryAttractionCatalog,
     }));
     if (data?.error) throw new Error(data.error);
     const acc = data?.accommodations || [];
@@ -3240,6 +3241,7 @@ async function proceedFromItineraryCompleteToAccommodation() {
     const payload = baseSessionPayload({
       selected_flight: state.selectedFlight,
       selected_itinerary: state.selectedItinerary,
+      itinerary_attraction_catalog: state.itineraryAttractionCatalog,
     });
     const data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
@@ -3376,6 +3378,15 @@ function renderAccommodations(items) {
     const bed = a.bedroom_summary ? `<p class="acc-meta"><strong>침실·구성</strong> ${escapeHtml(a.bedroom_summary)}</p>` : '';
     const park = a.parking_fee_text ? `<p class="acc-meta"><strong>주차</strong> ${escapeHtml(a.parking_fee_text)}</p>` : '';
     const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·케이블카·주차 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
+    const driveBlock = (() => {
+      const rows = Array.isArray(a.attraction_drive_times) ? a.attraction_drive_times : [];
+      if (!rows.length && a.total_driving_minutes_sum == null) return '';
+      const lis = rows.map((d) => `<li>${escapeHtml(d.name || '')} — 승용차 약 <strong>${d.minutes != null ? d.minutes : '?'}</strong>분 (편도)</li>`).join('');
+      const sum = a.total_driving_minutes_sum != null
+        ? `<p class="acc-drive-sum">명소까지 편도 주행 분 합계(추정): 약 <strong>${a.total_driving_minutes_sum}</strong>분</p>`
+        : '';
+      return `<div class="acc-drive-block"><p class="acc-drive-title"><strong>숙소 → 일정 명소(승용차)</strong></p><ul class="acc-drive-list">${lis}</ul>${sum}</div>`;
+    })();
     const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
     const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
       ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (URL)</a></p>`
@@ -3393,6 +3404,7 @@ function renderAccommodations(items) {
         ${bed}
         ${park}
         ${chips}
+        ${driveBlock}
         ${fit}
         ${url}
       </div>

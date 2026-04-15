@@ -452,6 +452,7 @@ class SessionExecutor(BaseAgentExecutor):
 
         if (selected_flight or flight_skipped) and selected_itinerary and not selected_accommodation:
             acc_priority = [t.value for t in travel.accommodation_priority] if travel.accommodation_priority else [travel.accommodation_type.value]
+            cat_list = data.get("itinerary_attraction_catalog")
             acc_payload = {
                 "location": travel.destination,
                 "check_in": travel.start_date.isoformat(),
@@ -462,20 +463,25 @@ class SessionExecutor(BaseAgentExecutor):
                 "selected_itinerary": selected_itinerary
                 if isinstance(selected_itinerary, dict)
                 else None,
+                "itinerary_attraction_catalog": cat_list
+                if isinstance(cat_list, list)
+                else None,
             }
             acc_resp = await self._call_agent("accommodation", acc_payload)
             if not acc_resp:
-                from mcp_servers.hotel.services import mock_search_hotels
+                from mcp_servers.hotel.services import run_hotel_search
 
                 acc_resp = json.dumps(
-                    mock_search_hotels(
+                    run_hotel_search(
                         travel.destination,
                         travel.accommodation_type.value,
                         acc_priority,
                         _total_passengers(travel),
                         selected_itinerary if isinstance(selected_itinerary, dict) else None,
+                        cat_list if isinstance(cat_list, list) else None,
                         travel.start_date.isoformat(),
                         travel.end_date.isoformat(),
+                        (self.settings.google_places_api_key or "").strip() or None,
                     ),
                     ensure_ascii=False,
                 )
@@ -483,15 +489,14 @@ class SessionExecutor(BaseAgentExecutor):
             start_d, end_d = _extract_rental_dates_from_flight(
                 sf_acc, travel.start_date.isoformat(), travel.end_date.isoformat()
             )
-            lt_payload = _merge_rental_search(
-                _build_local_transport_payload(sf_acc, travel, start_d, end_d),
-                rental_search,
-            )
             if travel.local_transport == LocalTransportType.RENTAL_CAR:
-                lt_resp = await self._call_agent("rental_car", lt_payload)
-                if not lt_resp:
-                    lt_resp = self._rental_car_fallback_json(lt_payload)
+                # 숙소 단계: 이미 렌트를 택했으므로 추가 이동 수단 목록은 비움(주행 분은 숙소 후보에 포함)
+                lt_resp = "[]"
             else:
+                lt_payload = _merge_rental_search(
+                    _build_local_transport_payload(sf_acc, travel, start_d, end_d),
+                    rental_search,
+                )
                 lt_resp = await self._call_agent("transit", lt_payload)
                 if not lt_resp:
                     lt_resp = json.dumps([
