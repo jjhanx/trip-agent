@@ -682,7 +682,15 @@ function selectedItineraryLooksFinal(si) {
   if (!si || typeof si !== 'object') return false;
   if (si.option_id) return false;
   if (si.skipped) return false;
-  return !!(si.daily_plan || si.summary || si.title);
+  if (si.summary || si.title) return true;
+  const dp = si.daily_plan;
+  if (dp != null) {
+    if (Array.isArray(dp)) return dp.length > 0;
+    if (typeof dp === 'object') return Object.keys(dp).length > 0;
+  }
+  if (si.route_plan && typeof si.route_plan === 'object' && Object.keys(si.route_plan).length) return true;
+  if (Array.isArray(si.days) && si.days.length) return true;
+  return false;
 }
 
 /** 현재 워크플로에 맞는 명소/일정 화면으로 이동(패널 마운트 포함). */
@@ -923,7 +931,10 @@ function navigateToStep(stepName) {
   }
   if (stepName === 'itinerary') {
     const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
-    if (!hasPlan && state.itineraryAttractionCatalog?.length) {
+    const ws = state.itineraryWorkflowStep;
+    const pastAttractions = ws === 'meals' || ws === 'complete' || ws === 'legacy';
+    // 동선·맛집/확정 일정 단계였는데 본문 키가 비어 있는 저장본도 5단계로 보낸다(여기서 막으면 4↔5 이동이 막힘).
+    if (!hasPlan && !pastAttractions && state.itineraryAttractionCatalog?.length) {
       navigateToStep('attractions');
       return;
     }
@@ -2403,8 +2414,11 @@ function renderItineraryWorkflow(data) {
   if (!root) return;
   const step = data?.itinerary_step;
   if (step === 'select_attractions') {
-    const keepCompleteForReview = state.itineraryWorkflowStep === 'complete' && selectedItineraryLooksFinal(state.selectedItinerary);
-    if (!keepCompleteForReview) state.itineraryWorkflowStep = 'attractions';
+    if (selectedItineraryLooksFinal(state.selectedItinerary)) {
+      state.itineraryWorkflowStep = 'complete';
+    } else {
+      state.itineraryWorkflowStep = 'attractions';
+    }
     const ats = data.attractions || [];
     sanitizeAttractionCatalogInPlace(ats);
     const note = data.time_ratio_note || '';
