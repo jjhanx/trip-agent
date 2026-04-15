@@ -2338,6 +2338,30 @@ function restaurantMapsSearchUrl(rest, destHint) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
+/** 명소 카탈로그 항목 → 구글맵 (공식 url → place_id → 이름+목적지 검색). */
+function googleMapsUrlForAttractionCatalogEntry(a, destHint) {
+  if (!a || typeof a !== 'object') return '';
+  const gm = (a.google_maps_url && String(a.google_maps_url).trim()) || '';
+  if (gm && /^https?:\/\//i.test(gm)) return gm;
+  const pid = (a.place_id && String(a.place_id).trim()) || '';
+  if (pid) {
+    return `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(pid)}`;
+  }
+  const nm = (a.name && String(a.name).trim()) || '';
+  const q = [nm, destHint].filter(Boolean).join(' ');
+  if (!q.trim()) return '';
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+/** 확정 일정 표용: 식당 Place id 또는 이름+목적지 검색. */
+function restaurantMapsUrlFromChoice(placeId, placeName, destHint) {
+  const pid = placeId && String(placeId).trim();
+  if (pid) {
+    return `https://www.google.com/maps/search/?api=1&query_place_id=${encodeURIComponent(pid)}`;
+  }
+  return restaurantMapsSearchUrl({ name: placeName || '' }, destHint);
+}
+
 /** kind: lunch → 오전 명소→식당, dinner → 오후 명소→식당 (서버 `drive_from_slots_by_date`) */
 function mealDrivePrefixHtml(r, dateStr, kind) {
   const slot = r.drive_from_slots_by_date && r.drive_from_slots_by_date[dateStr];
@@ -2471,18 +2495,37 @@ function updateItineraryNextButton() {
   }
 }
 
-/** 확정 일정 표: 명소 id → 카탈로그 이름(없으면 id 문자열). */
-function attractionDisplayNameById(id) {
-  if (id == null || id === '') return '—';
-  const sid = String(id);
+/** 확정 일정 표: 명소 셀(이름에 구글맵 링크). */
+function finalItineraryAttractionCellHtml(attractionId, destHint) {
+  if (attractionId == null || attractionId === '') return '—';
+  const sid = String(attractionId);
   const cat = state.itineraryAttractionCatalog || [];
   const a = cat.find((x) => x && String(x.id) === sid);
-  return a && a.name ? String(a.name) : sid;
+  const name = a && a.name ? String(a.name) : sid;
+  const nameEsc = escapeHtml(name);
+  let url = a ? googleMapsUrlForAttractionCatalogEntry(a, destHint) : '';
+  if (!url) {
+    const q = destHint ? `${name} ${destHint}` : name;
+    url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  }
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${nameEsc}</a>`;
 }
 
-function formatExtraAttractionIdsForTable(ids) {
+function finalItineraryExtrasCellHtml(ids, destHint) {
   if (!Array.isArray(ids) || ids.length === 0) return '—';
-  return ids.map((id) => attractionDisplayNameById(id)).join(', ');
+  return ids.map((id) => finalItineraryAttractionCellHtml(id, destHint)).join(', ');
+}
+
+function finalItineraryMealRankLine(rankLabel, placeId, placeName, destHint) {
+  if (!placeName && !placeId) return '';
+  const nameRaw = placeName ? String(placeName) : (placeId ? '식당' : '');
+  if (!nameRaw) return '';
+  const nameEsc = escapeHtml(nameRaw);
+  const url = restaurantMapsUrlFromChoice(placeId, placeName || nameRaw, destHint);
+  const linked = url
+    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${nameEsc}</a>`
+    : nameEsc;
+  return `${escapeHtml(rankLabel)}: ${linked}`;
 }
 
 function renderFinalDailyPlanTableHtml(fi) {
@@ -2490,11 +2533,12 @@ function renderFinalDailyPlanTableHtml(fi) {
   if (!plan.length) {
     return '<p class="muted">일자별 일정 데이터가 없습니다.</p>';
   }
+  const destHint = (state.travelInput?.destination || '').trim();
   const rows = plan.map((day) => {
     const date = escapeHtml(day.date || '—');
-    const am = escapeHtml(attractionDisplayNameById(day.morning_attraction_id));
-    const pm = escapeHtml(attractionDisplayNameById(day.afternoon_attraction_id));
-    const ex = escapeHtml(formatExtraAttractionIdsForTable(day.extra_attraction_ids));
+    const am = finalItineraryAttractionCellHtml(day.morning_attraction_id, destHint);
+    const pm = finalItineraryAttractionCellHtml(day.afternoon_attraction_id, destHint);
+    const ex = finalItineraryExtrasCellHtml(day.extra_attraction_ids, destHint);
     let notesHtml = '—';
     if (day.route_notes) {
       notesHtml = linkifyUrlsInPlainText(String(day.route_notes)).replace(/\n/g, '<br>');
@@ -2502,12 +2546,12 @@ function renderFinalDailyPlanTableHtml(fi) {
     const lu = day.lunch || {};
     const di = day.dinner || {};
     const lunchLines = [
-      lu.first_choice_name ? `1순위: ${escapeHtml(String(lu.first_choice_name))}` : '',
-      lu.second_choice_name ? `2순위: ${escapeHtml(String(lu.second_choice_name))}` : '',
+      finalItineraryMealRankLine('1순위', lu.first_choice_id, lu.first_choice_name, destHint),
+      finalItineraryMealRankLine('2순위', lu.second_choice_id, lu.second_choice_name, destHint),
     ].filter(Boolean).join('<br>') || '—';
     const dinnerLines = [
-      di.first_choice_name ? `1순위: ${escapeHtml(String(di.first_choice_name))}` : '',
-      di.second_choice_name ? `2순위: ${escapeHtml(String(di.second_choice_name))}` : '',
+      finalItineraryMealRankLine('1순위', di.first_choice_id, di.first_choice_name, destHint),
+      finalItineraryMealRankLine('2순위', di.second_choice_id, di.second_choice_name, destHint),
     ].filter(Boolean).join('<br>') || '—';
     return `<tr>
       <td>${date}</td>

@@ -292,6 +292,13 @@ header p {
   max-width: 24rem;
   min-width: 12rem;
 }
+.final-itinerary-table td a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.final-itinerary-table td a:hover {
+  text-decoration: underline;
+}
 .final-itinerary-table__notes a {
   color: var(--accent);
   word-break: break-all;
