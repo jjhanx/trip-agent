@@ -181,6 +181,64 @@ def mock_search_hotels(
     return out
 
 
+def _rooms_for_party(guests: int) -> int:
+    """가격 곱셈용 객실 수 추정(2인 1실)."""
+    return max(1, (guests + 1) // 2)
+
+
+def _itinerary_has_daily_schedule(selected_itinerary: dict | None) -> bool:
+    if not isinstance(selected_itinerary, dict):
+        return False
+    rp = selected_itinerary.get("route_plan")
+    if isinstance(rp, dict):
+        ds = rp.get("daily_schedule")
+        if isinstance(ds, list) and len(ds) > 0:
+            return True
+    dp = selected_itinerary.get("daily_plan")
+    return isinstance(dp, list) and len(dp) > 0
+
+
+def _placeholder_daily_segments(
+    selected_itinerary: dict | None,
+    guests: int,
+    rooms_for_pricing: int,
+) -> list[dict] | None:
+    """일정에 날짜별 행은 있으나 명소 좌표 세그먼트를 만들지 못했을 때 날짜 블록만 유지."""
+    rp = (selected_itinerary or {}).get("route_plan") or {}
+    rows = rp.get("daily_schedule") or []
+    if not rows and isinstance((selected_itinerary or {}).get("daily_plan"), list):
+        rows = (selected_itinerary or {}).get("daily_plan") or []
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        d = str(row.get("date") or "").strip()[:10]
+        if not d:
+            continue
+        out.append(
+            {
+                "segment_type": "daily_stay_hint",
+                "date": d,
+                "overnight_area_hint": row.get("overnight_area_hint"),
+                "day_route_summary": (row.get("route_notes") or "")[:400],
+                "attraction_names_today": [],
+                "hotels": [],
+                "party_rooms_hint": (
+                    f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)"
+                ),
+                "suggests_hotel_relocation": row.get("suggests_hotel_relocation"),
+                "approx_drive_previous_day_region_to_today_minutes": row.get(
+                    "approx_drive_previous_day_region_to_today_minutes"
+                ),
+                "hotel_search_note_ko": (
+                    "일정은 날짜별로 있으나 명소 좌표·카탈로그 매칭이 없어 숙소 후보를 채우지 못했습니다. "
+                    "일정 확정 단계를 다시 거치거나 세션에 명소 카탈로그가 포함됐는지 확인하세요."
+                ),
+            }
+        )
+    return out if out else None
+
+
 def run_hotel_search(
     location: str,
     accommodation_type: str = "hotel",
@@ -191,14 +249,49 @@ def run_hotel_search(
     check_in: str | None = None,
     check_out: str | None = None,
     google_api_key: str | None = None,
+    travelpayouts_token: str | None = None,
+    travelers: dict | None = None,
 ) -> list[dict]:
-    """Places+Distance Matrix 기반 경로 최적화 후보, 실패 시 mock."""
-    from mcp_servers.hotel.attraction_points import collect_attraction_latlngs
-    from mcp_servers.hotel.google_places_hotels import search_route_optimized_hotels
+    """일자별 명소 구간마다 숙소 후보(우선). 실패 시 전체 명소 합산 또는 mock."""
+    from mcp_servers.hotel.attraction_points import (
+        collect_attraction_latlngs,
+        collect_daily_attraction_segments,
+    )
+    from mcp_servers.hotel.google_places_hotels import (
+        search_hotels_per_daily_segments,
+        search_route_optimized_hotels,
+    )
 
     guests = max(1, travelers_total or 2)
-    points = collect_attraction_latlngs(itinerary_attraction_catalog, selected_itinerary)
+    rooms = _rooms_for_party(guests)
     try:
+        daily = collect_daily_attraction_segments(
+            itinerary_attraction_catalog, selected_itinerary
+        )
+        if daily:
+            per_day = search_hotels_per_daily_segments(
+                location_label=location,
+                daily_segments=daily,
+                check_in=check_in or "",
+                check_out=check_out or "",
+                travelers_total=guests,
+                api_key=google_api_key,
+                hotellook_token=travelpayouts_token,
+                rooms_for_pricing=rooms,
+            )
+            if per_day:
+                return _assign_types_to_daily_segments(
+                    per_day, accommodation_type, accommodation_priority
+                )
+
+        if _itinerary_has_daily_schedule(selected_itinerary):
+            ph = _placeholder_daily_segments(selected_itinerary, guests, rooms)
+            if ph:
+                return _assign_types_to_daily_segments(
+                    ph, accommodation_type, accommodation_priority
+                )
+
+        points = collect_attraction_latlngs(itinerary_attraction_catalog, selected_itinerary)
         real = search_route_optimized_hotels(
             location_label=location,
             attraction_points=points,
@@ -206,6 +299,8 @@ def run_hotel_search(
             check_out=check_out or "",
             travelers_total=guests,
             api_key=google_api_key,
+            hotellook_token=travelpayouts_token,
+            rooms_for_pricing=rooms,
         )
         if real:
             return _assign_accommodation_types(real, accommodation_type, accommodation_priority)
@@ -220,6 +315,21 @@ def run_hotel_search(
         check_in,
         check_out,
     )
+
+
+def _assign_types_to_daily_segments(
+    segments: list[dict],
+    accommodation_type: str,
+    accommodation_priority: list[str] | None,
+) -> list[dict]:
+    priority = accommodation_priority or [accommodation_type]
+    valid = [p for p in priority if p in ACCOMMODATION_TYPES] or ["hotel"]
+    for seg in segments:
+        hs = seg.get("hotels") if isinstance(seg.get("hotels"), list) else []
+        for i, h in enumerate(hs):
+            if isinstance(h, dict):
+                h["accommodation_type"] = valid[i % len(valid)]
+    return segments
 
 
 def _assign_accommodation_types(

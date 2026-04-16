@@ -17,11 +17,8 @@ from shared.directions_parking import (
     geocode_address,
     reverse_geocode_city_display_name,
 )
-from shared.loop_route_planner import (
-    add_attraction_markers_to_static_map,
-    fetch_loop_route_directions,
-    pick_closest_farthest_and_order,
-)
+from shared.loop_route_planner import add_attraction_markers_to_static_map
+from shared.tour_route_optimizer import fetch_full_tour_directions, optimize_visit_order_driving
 from shared.google_place_details import fetch_place_details_raw
 
 logger = logging.getLogger(__name__)
@@ -289,28 +286,19 @@ async def enrich_route_bundle_with_directions_schedule(
     ordered: list[dict[str, Any]] = []
     loop_route_meta: dict[str, Any] = {}
     try:
-        ordered, loop_meta = await pick_closest_farthest_and_order(
-            s_lat, s_lng, enriched, api_key
-        )
-        loop_route_meta = dict(loop_meta)
-        if ordered:
-            dir_meta = await fetch_loop_route_directions(
-                s_lat, s_lng, ordered[0], ordered[-1], api_key
-            )
+        tour_list, tour_meta = await optimize_visit_order_driving(s_lat, s_lng, enriched, api_key)
+        if tour_list:
+            ordered = tour_list
+            loop_route_meta = dict(tour_meta)
+            dir_meta = await fetch_full_tour_directions(s_lat, s_lng, ordered, api_key)
             loop_route_meta.update(dir_meta)
             su = loop_route_meta.get("static_map_url")
             loop_route_meta["static_map_url"] = add_attraction_markers_to_static_map(
                 su, enriched, api_key
             )
-            loop_route_meta["ordered_attraction_ids"] = [
-                str(x.get("id")) for x in ordered if x.get("id")
-            ]
-            loop_route_meta["route_kind_ko"] = (
-                "도착 앵커 → (승용차 기준) 가장 가까운 명소 → 가장 먼 명소 → 앵커로 돌아오는 루프. "
-                "명소 방문 순서는 이 루프의 주 구간(가까운 쪽→먼 쪽)에 사영해 정렬했습니다."
-            )
+            loop_route_meta["tour_route"] = True
     except Exception as e:
-        logger.warning("loop_route_planner failed, falling back to NN: %s", e)
+        logger.warning("tour_route_optimizer failed, falling back to NN: %s", e)
         ordered = []
 
     if not ordered:
@@ -495,8 +483,9 @@ async def enrich_route_bundle_with_directions_schedule(
             f"고르지 않은 후보 중 평점·리뷰 수 순으로 {len(auto_ids)}곳을 자동 포함했습니다. "
         )
     route_note = (
-        f"{start_label} 도착 후 루프·경로상 정렬로 명소를 순서대로 방문합니다. "
-        if loop_route_meta.get("closest_attraction_id")
+        f"{start_label} 도착 후 모든 명소를 한 번씩 도는 순서를 Distance Matrix 승용차 시간으로 잡고 "
+        f"(탐욕·2-opt 근사), 그 순서대로 하루 두 곳씩 배정합니다. "
+        if loop_route_meta.get("tour_route")
         else f"{start_label} 도착 후 Nearest-Neighbor 동선으로 명소를 순서대로 방문합니다. "
     )
     rp["lodging_strategy"] = (

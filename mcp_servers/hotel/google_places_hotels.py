@@ -58,8 +58,9 @@ def _radius_for_points(center: tuple[float, float], points: list[dict[str, Any]]
     for p in points:
         km = _haversine_km(clat, clng, p["lat"], p["lng"])
         max_km = max(max_km, km)
-    r = int(max(8000, (max_km + 12) * 1000))
-    return min(50000, r)
+    # 당일 명소가 퍼져 있을수록 반경을 넓혀 숙소 후보를 더 잡음(도로·산악 구간 대비 여유 km)
+    r = int(max(12000, (max_km + 28) * 1000))
+    return min(85000, r)
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -208,7 +209,7 @@ def rank_hotels_for_attraction_points(
     attraction_points: list[dict[str, Any]],
     api_key: str,
     max_hotels: int = 3,
-    top_candidates: int = 8,
+    top_candidates: int = 14,
     itinerary_scope: str = "single_day",
     max_commute_minutes_one_way: int | None = 60,
     travelers_total: int | None = None,
@@ -465,6 +466,22 @@ def search_hotels_per_daily_segments(
         d = str(seg.get("date") or "")[:10]
         pts = seg.get("points") or []
         if not isinstance(pts, list) or not pts:
+            out_segments.append(
+                {
+                    "segment_type": "daily_stay_hint",
+                    "date": d,
+                    "overnight_area_hint": seg.get("overnight_area_hint"),
+                    "day_route_summary": (seg.get("route_notes") or "")[:400],
+                    "attraction_names_today": [],
+                    "hotels": [],
+                    "party_rooms_hint": f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)",
+                    "suggests_hotel_relocation": seg.get("suggests_hotel_relocation"),
+                    "approx_drive_previous_day_region_to_today_minutes": seg.get(
+                        "approx_drive_previous_day_region_to_today_minutes"
+                    ),
+                    "hotel_search_note_ko": "이 날짜 명소 좌표가 카탈로그에 없어 숙소 후보를 검색하지 못했습니다.",
+                }
+            )
             continue
         ohint = seg.get("overnight_area_hint")
         rnotes = (seg.get("route_notes") or "")[:400]
@@ -475,21 +492,20 @@ def search_hotels_per_daily_segments(
             attraction_points=pts,
             api_key=key,
             max_hotels=3,
-            top_candidates=8,
+            top_candidates=14,
             itinerary_scope="single_day",
             max_commute_minutes_one_way=60,
             travelers_total=guests,
         )
-        if not hotels:
-            continue
 
         ci, co = _one_night_around_date(d)
-        for h in hotels:
-            h["segment_stay_date"] = d
-            h["selection_rationale"] = (
-                f"{d} 당일 방문({', '.join(names[:6])}{'…' if len(names) > 6 else ''}) 기준. 일행 {guests}명."
-            )
-            _attach_hotellook_price(h, ci, co, hotellook_token, rooms_for_pricing)
+        if hotels:
+            for h in hotels:
+                h["segment_stay_date"] = d
+                h["selection_rationale"] = (
+                    f"{d} 당일 방문({', '.join(names[:6])}{'…' if len(names) > 6 else ''}) 기준. 일행 {guests}명."
+                )
+                _attach_hotellook_price(h, ci, co, hotellook_token, rooms_for_pricing)
 
         out_segments.append(
             {
@@ -498,11 +514,16 @@ def search_hotels_per_daily_segments(
                 "overnight_area_hint": ohint,
                 "day_route_summary": rnotes,
                 "attraction_names_today": names,
-                "hotels": hotels,
+                "hotels": hotels or [],
                 "party_rooms_hint": f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)",
                 "suggests_hotel_relocation": seg.get("suggests_hotel_relocation"),
                 "approx_drive_previous_day_region_to_today_minutes": seg.get(
                     "approx_drive_previous_day_region_to_today_minutes"
+                ),
+                "hotel_search_note_ko": (
+                    None
+                    if hotels
+                    else "이 날짜 방문 명소 주변에서 조건에 맞는 숙소 후보를 찾지 못했습니다. 반경·조건을 완화했거나 지역 특성상 60분 이내 숙소가 없을 수 있습니다."
                 ),
             }
         )

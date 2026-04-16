@@ -2869,7 +2869,7 @@ function renderItineraryWorkflow(data) {
       const legs = loopRoute.legs_summary_ko || '';
       const oc = Array.isArray(loopRoute.ordered_attraction_ids) ? loopRoute.ordered_attraction_ids.join(' → ') : '';
       html += `<div class="loop-route-block">
-        <h4>추천 루프 경로 (도착 앵커 → 가장 가까운 명소 → 가장 먼 명소 → 도착)</h4>
+        <h4>전체 명소 투어 동선 (승용차 시간 행렬 + 순서 근사, 지도는 동일 순서 웨이포인트)</h4>
         ${rk ? `<p class="muted">${escapeHtml(rk)}</p>` : ''}
         <div class="loop-route-map-wrap">
           <img class="loop-static-map" src="${String(loopRoute.static_map_url).replace(/"/g, '%22')}" alt="루프 동선 지도" loading="lazy" width="640" height="400" />
@@ -3543,7 +3543,7 @@ function renderAccommodations(items) {
       const hotels = Array.isArray(seg.hotels) ? seg.hotels : [];
       const sel = state.accommodationSelectionByDate?.[d];
       const selId = sel?.hotel_id ?? sel?.place_id;
-      const cards = hotels.map((h, hi) => {
+      const cards = (hotels.length ? hotels : []).map((h, hi) => {
         const id = h.hotel_id ?? h.place_id;
         const selected = selId && id && selId === id;
         const ds = driveScopeFromHotel(h);
@@ -3562,6 +3562,9 @@ function renderAccommodations(items) {
       const apx = seg.approx_drive_previous_day_region_to_today_minutes != null
         ? `<p class="muted acc-seg-apx">전일·당일 구역(중심) 간 승용차 약 ${seg.approx_drive_previous_day_region_to_today_minutes}분(추정)</p>`
         : '';
+      const hNote = seg.hotel_search_note_ko
+        ? `<p class="acc-seg-hotel-note">${escapeHtml(seg.hotel_search_note_ko)}</p>`
+        : '';
       const anames = Array.isArray(seg.attraction_names_today) && seg.attraction_names_today.length
         ? `<p class="acc-seg-attr"><strong>이날 방문</strong> ${seg.attraction_names_today.map((x) => escapeHtml(String(x))).join(' · ')}</p>`
         : '';
@@ -3575,8 +3578,9 @@ function renderAccommodations(items) {
       ${apx}
       ${route}
       ${party}
+      ${hNote}
     </header>
-    <div class="acc-day-cards">${cards}</div>
+    <div class="acc-day-cards">${cards || '<p class="muted acc-seg-empty">이 날짜에 선택 가능한 숙소 후보가 없습니다. 일정·명소 좌표·API 키를 확인하세요.</p>'}</div>
   </section>`;
     }).join('') + `<footer class="acc-trip-footer">${dailyTripFooterInnerHtml(rows)}</footer>`;
 

@@ -1165,4 +1165,11 @@ a.btn-primary:hover { background: var(--accent-hover); }
   line-height: 1.45;
   color: #fecaca;
 }
+.acc-seg-hotel-note {
+  margin: 0.5rem 0 0 !important;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #fde68a;
+}
+.acc-seg-empty { margin: 0.5rem 0 0; }
 .acc-fac, .acc-detail-urls { margin: 0 !important; font-size: 0.82rem; line-height: 1.45; }

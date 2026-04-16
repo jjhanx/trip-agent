@@ -36,11 +36,12 @@
 - 일정에 **`daily_schedule`(또는 `daily_plan`)** 이 있으면 **각 날짜에 배정된 명소만** 그날의 Distance Matrix 대상으로 삼고, 응답은 `segment_type: "daily_stay_hint"` **일자별 블록**으로 나뉩니다. 각 숙소 객체에는 `drive_time_scope: "single_day_attractions"` 가 붙습니다.  
 - 일별 세그먼트를 만들 수 없을 때만 **여행 전체 명소**를 한 번에 넣는 레거시 경로를 쓰며, 이때 `drive_time_scope: "all_trip_attractions"` 이고 UI에서 “전체 일정 기준”으로 안내합니다.
 
-### 루프 동선·60분·숙소 이동 힌트
+### 투어 동선·60분·숙소 이동 힌트
 
-- `route_plan.loop_route`(경로·맛집 단계에서 서버가 채움): 도착 앵커에서 **승용차 시간이 최단·최장**인 명소를 고른 뒤, **앵커 → 최근접 → 최원거리 → 앵커** Directions 루프와 **Static Map URL**, **Google Maps 링크**, 방문 순서 `ordered_attraction_ids`를 제공합니다.  
-- 일자별 숙소 후보는 당일 명소까지 **최장 편도 약 60분 이내**를 우선으로 고릅니다(`max_commute_minutes_one_way=60`). 조건을 만족하는 후보가 없으면 완화하고 `commute_constraint_relaxed`로 표시합니다.  
-- `daily_schedule[].suggests_hotel_relocation`: 전일 방문 구역 중심에서 당일 구역 중심으로의 승용차 시간이 **60분을 넘으면** `true` — 같은 숙소를 유지하기 어려울 수 있음을 뜻합니다(추정).
+- `route_plan.loop_route`(경로·맛집 단계에서 서버가 채움): 도착 앵커를 기준으로 **Distance Matrix의 승용차(분)** 를 채운 뒤, **Nearest Neighbor + 2-opt**로 모든 명소를 한 번씩 도는 순서를 근사합니다. 직선 사영이 아닙니다. **Directions**로 같은 순서의 웨이포인트(최대 25개)를 묶어 **Static Map URL**·**Google Maps 링크**·`ordered_attraction_ids`를 제공합니다.  
+- 일자별 숙소 후보는 당일 명소까지 **최장 편도 약 60분 이내**를 우선으로 고릅니다(`max_commute_minutes_one_way=60`). 조건을 만족하는 후보가 없으면 완화하고 `commute_constraint_relaxed`로 표시합니다. Nearby 반경은 당일 명소 분포에 맞춰 넓힙니다.  
+- `daily_schedule[].suggests_hotel_relocation`: 전일 방문 구역 중심에서 당일 구역 중심으로의 승용차 시간이 **60분을 넘으면** `true` — 같은 숙소를 유지하기 어려울 수 있음을 뜻합니다(추정).  
+- 일정이 날짜별인데 검색이 실패하면 **날짜 블록만** 유지하고(`hotel_search_note_ko`) 레거시 **단일 평면 목록**으로 떨어지지 않도록 합니다(`mcp_servers/hotel/services.py`).
 
 ## 렌트카를 고른 경우
 
