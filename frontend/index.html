@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>여행 일정 설계 | Trip Agent</title>
-  <link rel="stylesheet" href="styles.css?v=19">
+  <link rel="stylesheet" href="styles.css?v=20">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <!-- Travelpayouts 추적 스크립트 -->
   <script data-noptimize="1" data-cfasync="false" data-wpfc-render="false">
@@ -54,22 +54,24 @@
 
     <main>
       <nav id="step-indicator" class="step-indicator" aria-label="여행 일정 설계 단계">
-        <div class="step-flow">
+        <div class="step-flow step-flow--dense">
           <div class="step-node" data-step="input"><span class="num">1</span>여행 정보</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="flights"><span class="num">2</span>항공편 선택</div>
+          <div class="step-node" data-step="flights"><span class="num">2</span>항공편</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="rental"><span class="num">3</span>렌트카/대중교통</div>
+          <div class="step-node" data-step="rental"><span class="num">3</span>렌트·교통</div>
           <span class="step-arrow">→</span>
           <div class="step-node" data-step="attractions"><span class="num">4</span>명소 선택</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="itinerary"><span class="num">5</span>여행 일정</div>
+          <div class="step-node" data-step="route_plan"><span class="num">5</span>동선 계획</div>
           <span class="step-arrow">→</span>
           <div class="step-node" data-step="accommodation"><span class="num">6</span>숙소 선택</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="confirm"><span class="num">7</span>일정 확정</div>
+          <div class="step-node" data-step="meals"><span class="num">7</span>맛집 선택</div>
           <span class="step-arrow">→</span>
-          <div class="step-node" data-step="booking"><span class="num">8</span>예약 안내</div>
+          <div class="step-node" data-step="itinerary_confirm"><span class="num">8</span>일정 확정</div>
+          <span class="step-arrow">→</span>
+          <div class="step-node" data-step="booking"><span class="num">9</span>예약 안내</div>
         </div>
       </nav>
 
@@ -333,7 +335,7 @@
 
       <section id="step-attractions" class="card hidden">
         <h2>4. 명소 선택</h2>
-        <p class="muted" style="margin-bottom: 1rem;">목적지 주변 명소 후보에서 방문할 곳을 고릅니다. 동선·맛집은 <strong>5. 여행 일정</strong> 단계에서 이어집니다. 브라우저·<strong>저장</strong>·파일 내보내기에 선택 상태가 함께 저장됩니다.</p>
+        <p class="muted" style="margin-bottom: 1rem;">목적지 주변 명소 후보에서 방문할 곳을 고릅니다. 이후 <strong>동선 계획 → 숙소 → 맛집 → 일정 확정</strong> 순으로 이어집니다. 브라우저·<strong>저장</strong>·파일 내보내기에 선택 상태가 함께 저장됩니다.</p>
         <div id="itinerary-step-panel-mount-attractions">
           <div id="itinerary-step-panel" class="itinerary-step-panel">
             <div id="itinerary-workflow-root"></div>
@@ -346,8 +348,8 @@
       </section>
 
       <section id="step-itinerary-plan" class="card hidden">
-        <h2>5. 여행 일정</h2>
-        <p class="muted" style="margin-bottom: 1rem;"><strong>경로·맛집 계획 받기</strong> → 맛집 우선순위 → 일정 확정까지 이 화면에서 진행합니다. 명소를 바꾸려면 위 단계 표에서 <strong>4. 명소 선택</strong>으로 이동하거나 아래 <strong>뒤로 (명소 선택)</strong>를 누르세요.</p>
+        <h2 id="itinerary-plan-heading">5. 동선 계획</h2>
+        <p id="itinerary-plan-lead" class="muted" data-itinerary-plan-lead style="margin-bottom: 1rem;">동선·지도·일자 배정을 확인합니다. 명소를 바꾸려면 위 단계에서 <strong>4. 명소 선택</strong>으로 이동하세요.</p>
         <div id="itinerary-step-panel-mount-plan"></div>
       </section>
 
@@ -357,14 +359,21 @@
         <div id="accommodations-list" class="options-grid"></div>
         <div id="local-transport-info"></div>
         <div style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
-          <button id="btn-confirm-booking">일정 확정</button>
-          <button id="btn-back-accommodation" class="secondary">뒤로</button>
+          <button type="button" id="btn-accommodation-next" class="btn-primary">다음 (맛집 선택)</button>
+          <button type="button" id="btn-back-accommodation" class="secondary">뒤로</button>
         </div>
       </section>
 
       <section id="step-confirm" class="card hidden">
-        <h2>7. 일정 확정 · 예약 안내</h2>
+        <h2>8. 일정 확정</h2>
+        <p class="muted" style="margin-bottom: 1rem;">확정된 일정과 숙소 선택을 확인한 뒤 예약 안내를 받으세요.</p>
+        <div id="itinerary-confirm-summary"></div>
+        <h3 id="booking-guidance-heading" class="hidden" style="margin-top: 1.25rem; font-size: 1.1rem;">9. 예약 안내</h3>
         <div id="booking-guidance"></div>
+        <div style="margin-top: 1rem;">
+          <button type="button" id="btn-request-booking-guidance" class="btn-primary">예약 안내 받기</button>
+          <button type="button" id="btn-back-confirm" class="secondary" style="margin-left: 0.5rem;">뒤로 (맛집 선택)</button>
+        </div>
       </section>
 
       <section id="loading" class="card hidden">
@@ -378,7 +387,7 @@
   </div>
   <script src="airports.js?v=9"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="app.js?v=42"></script>
+  <script src="app.js?v=43"></script>
 </body>
 
 </html>

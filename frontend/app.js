@@ -117,6 +117,7 @@ function saveItineraryDraft() {
       itineraries: state.itineraries,
       lastCommittedAttractionIds: state.lastCommittedAttractionIds,
       itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
+      bookingGuidanceReceived: !!state.bookingGuidanceReceived,
     };
     localStorage.setItem(ITINERARY_DRAFT_KEY, JSON.stringify(draft));
   } catch (e) {
@@ -159,6 +160,12 @@ function restoreItineraryDraft() {
       : null;
     if (draft.itineraryMealsUiPhase === 'route' || draft.itineraryMealsUiPhase === 'meals') {
       state.itineraryMealsUiPhase = draft.itineraryMealsUiPhase;
+    }
+    if (typeof draft.bookingGuidanceReceived === 'boolean') {
+      state.bookingGuidanceReceived = draft.bookingGuidanceReceived;
+    }
+    if (state.itineraryWorkflowStep === 'meals' && state.itineraryMealsUiPhase === 'route') {
+      state.itineraryWorkflowStep = 'route_plan';
     }
     const si0 = state.selectedItinerary;
     const hasDaily = si0 && typeof si0 === 'object' && Array.isArray(si0.daily_plan) && si0.daily_plan.length > 0;
@@ -416,6 +423,7 @@ function getFullPlanState() {
     selectedAttractionIds: state.selectedAttractionIds,
     mealChoices: state.mealChoices,
     itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
+    bookingGuidanceReceived: !!state.bookingGuidanceReceived,
     lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
     accommodationSelectionByDate: state.accommodationSelectionByDate || {},
@@ -460,6 +468,7 @@ function loadPlanIntoState(data) {
   state.itineraryMealsUiPhase = (data.itineraryMealsUiPhase === 'meals' || data.itineraryMealsUiPhase === 'route')
     ? data.itineraryMealsUiPhase
     : 'route';
+  state.bookingGuidanceReceived = !!data.bookingGuidanceReceived;
   state.lastCommittedAttractionIds = Array.isArray(data.lastCommittedAttractionIds)
     ? data.lastCommittedAttractionIds.map(String)
     : null;
@@ -577,14 +586,19 @@ async function openPlan(planId) {
 }
 
 function resolveCurrentStep() {
-  if (state.selectedAccommodation) return 'booking';
-  if (state.accommodations?.length) return 'accommodation';
-  if (state.selectedItinerary && !state.accommodations?.length) return 'itinerary';
+  if (state.bookingGuidanceReceived) return 'booking';
+  if (selectedItineraryLooksFinal(state.selectedItinerary)) return 'itinerary_confirm';
   const ws = state.itineraryWorkflowStep;
   if (ws === 'attractions') return 'attractions';
-  if (ws === 'meals' || ws === 'complete' || ws === 'legacy') return 'itinerary';
-  if (state.itineraries?.length) return 'itinerary';
-  if (state.itineraryRouteBundle || state.selectedItinerary) return 'itinerary';
+  if (ws === 'meals') return 'meals';
+  if (ws === 'pick_lodging') return 'accommodation';
+  if (ws === 'route_plan') return 'route_plan';
+  if (state.accommodations?.length
+    || Object.keys(state.accommodationSelectionByDate || {}).length > 0
+    || Object.keys(state.accommodationSelectionByGroup || {}).length > 0) return 'accommodation';
+  if (state.itineraryRouteBundle) return 'route_plan';
+  if (ws === 'complete' || ws === 'legacy') return 'itinerary_confirm';
+  if (state.itineraries?.length) return 'route_plan';
   if (state.itineraryAttractionCatalog?.length) return 'attractions';
   if (state.selectedLocalTransport || state.localTransport?.length) return 'rental';
   if (state.flightSkipped && !buildSelectedFlight()) return 'rental';
@@ -631,6 +645,7 @@ function newPlan() {
   state.mealChoices = {};
   state.lastCommittedAttractionIds = null;
   state.itineraryMealsUiPhase = 'route';
+  state.bookingGuidanceReceived = false;
   state.accommodations = [];
   state.accommodationSelectionByDate = {};
   state.accommodationSelectionByGroup = {};
@@ -695,36 +710,25 @@ let state = {
   currentPlanName: null,
   /** 일정 확정(finalize) 당시 명소 id 스냅샷 — 선택이 바뀌면 일정 무효·재생성 */
   lastCommittedAttractionIds: null,
-  /** 경로·맛집 단계 하위: route(동선·지도) | meals(맛집 우선순위) */
+  /** 경로·맛집 단계 하위: route(동선·지도) | meals(맛집 우선순위) — 구버전 호환 */
   itineraryMealsUiPhase: 'route',
+  /** 예약 안내 API 응답을 받아 9단계 칩을 켠 경우 */
+  bookingGuidanceReceived: false,
 };
 
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
-const STEP_IDS = {
-  'step-input': 'input',
-  'step-origin-airports': 'input',
-  'step-destination-airports': 'input',
-  'step-flights': 'flights',
-  'step-rental-decide': 'rental',
-  'step-rental': 'rental',
-  'step-itinerary-decide': 'attractions',
-  'step-attractions': 'attractions',
-  'step-itinerary-plan': 'itinerary',
-  'step-accommodation-decide': 'accommodation',
-  'step-accommodation': 'accommodation',
-  'step-confirm': 'booking',
-};
-
+/** 상단 칩 data-step 값 → 복원 시 resolveCurrentStep과 맞춤 */
 const STEP_TO_SECTION = {
   input: 'step-input',
   flights: 'step-flights',
   rental: 'step-rental',
   attractions: 'step-attractions',
-  itinerary: 'step-itinerary-plan',
+  route_plan: 'step-itinerary-plan',
   accommodation: 'step-accommodation',
-  confirm: 'step-confirm',
+  meals: 'step-itinerary-plan',
+  itinerary_confirm: 'step-confirm',
   booking: 'step-confirm',
 };
 
@@ -740,6 +744,7 @@ function mountItineraryStepPanel(which) {
 /** 저장·복원된 확정 일정(요약·일자별). 일정 옵션 카드·건너뛰기 스텁은 제외. */
 function selectedItineraryLooksFinal(si) {
   if (!si || typeof si !== 'object') return false;
+  if (si.preview_only) return false;
   if (si.option_id) return false;
   if (si.skipped) return false;
   if (si.summary || si.title) return true;
@@ -798,12 +803,21 @@ function isAttractionsSectionVisible() {
 function goToItinerarySectionForState() {
   const ws = state.itineraryWorkflowStep;
   const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
-  if (selectedItineraryLooksFinal(state.selectedItinerary) && ws !== 'meals' && ws !== 'attractions') {
-    mountItineraryStepPanel('plan');
-    show('step-itinerary-plan');
+  if (selectedItineraryLooksFinal(state.selectedItinerary) && ws === 'complete') {
+    renderStepConfirmFromItinerary(state.selectedItinerary);
+    show('step-confirm');
     return;
   }
-  if (ws === 'attractions' || (!hasPlan && state.itineraryAttractionCatalog?.length && ws !== 'meals' && ws !== 'complete')) {
+  if (ws === 'meals' || ws === 'route_plan') {
+    mountItineraryStepPanel('plan');
+    updateItineraryPlanHeading(ws === 'meals' ? 'meals' : 'route');
+    show('step-itinerary-plan');
+    if (state.itineraryRouteBundle) {
+      renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+    }
+    return;
+  }
+  if (ws === 'attractions' || (!hasPlan && state.itineraryAttractionCatalog?.length && ws !== 'complete')) {
     mountItineraryStepPanel('attractions');
     show('step-attractions');
     return;
@@ -816,16 +830,11 @@ function show(id, fromStepClick = false) {
   $$('section').forEach(s => s.classList.add('hidden'));
   const el = $(`#${id}`);
   if (el) el.classList.remove('hidden');
-  const step = STEP_IDS[id];
-  if (step) {
-    $$('#step-indicator .step-node').forEach(node => {
-      node.classList.toggle('active', node.dataset.step === step);
-      node.classList.remove('completed');
-    });
-    updateStepCompletedState();
-    if (fromStepClick && step) {
-      refreshStepView(step);
-    }
+  if (!['loading', 'error'].includes(id)) {
+    syncStepIndicatorActive(id);
+  }
+  if (fromStepClick && !['loading', 'error'].includes(id)) {
+    refreshStepViewForSection(id);
   }
   if (id === 'step-flights') {
     updateFlightNextButtonLabel();
@@ -848,7 +857,16 @@ function show(id, fromStepClick = false) {
 
 function updateStepCompletedState() {
   const nodes = $$('#step-indicator .step-node');
-  const steps = ['input', 'flights', 'rental', 'attractions', 'itinerary', 'accommodation', 'confirm', 'booking'];
+  const steps = ['input', 'flights', 'rental', 'attractions', 'route_plan', 'accommodation', 'meals', 'itinerary_confirm', 'booking'];
+  const mealDatesOk = () => {
+    const rb = state.itineraryRouteBundle;
+    const dates = rb?.trip_dates || [];
+    if (!dates.length || !state.mealChoices) return false;
+    return dates.every((d) => {
+      const m = state.mealChoices[d];
+      return m?.lunch?.first && m?.lunch?.second && m?.dinner?.first && m?.dinner?.second;
+    });
+  };
   steps.forEach((s, i) => {
     const node = nodes[i];
     if (!node) return;
@@ -856,15 +874,84 @@ function updateStepCompletedState() {
       || s === 'flights' && buildSelectedFlight()
       || s === 'rental' && (state.localTransport?.length > 0 || state.selectedLocalTransport)
       || s === 'attractions' && (state.itineraryAttractionCatalog?.length > 0 || state.selectedAttractionIds?.length > 0)
-      || s === 'itinerary' && (state.itineraryRouteBundle || state.selectedItinerary || state.itineraries?.length > 0
-        || state.itineraryWorkflowStep === 'meals' || state.itineraryWorkflowStep === 'complete' || state.itineraryWorkflowStep === 'legacy')
-      || s === 'accommodation' && (state.accommodations?.length > 0 || state.selectedAccommodation)
-      || s === 'confirm' && state.accommodations?.length > 0
-      || s === 'booking' && state.selectedAccommodation;
+      || s === 'route_plan' && (!!state.itineraryRouteBundle || state.itineraryWorkflowStep === 'route_plan')
+      || s === 'accommodation' && (state.accommodations?.length > 0
+        || Object.keys(state.accommodationSelectionByDate || {}).length > 0
+        || Object.keys(state.accommodationSelectionByGroup || {}).length > 0
+        || state.selectedAccommodation)
+      || s === 'meals' && (mealDatesOk() || state.itineraryWorkflowStep === 'meals')
+      || s === 'itinerary_confirm' && selectedItineraryLooksFinal(state.selectedItinerary)
+      || s === 'booking' && state.bookingGuidanceReceived;
     if (hasData && !node.classList.contains('active')) {
       node.classList.add('completed');
     }
   });
+}
+
+function refreshItineraryPlanSection() {
+  mountItineraryStepPanel('plan');
+  const ws = state.itineraryWorkflowStep;
+  if (ws === 'meals' || ws === 'route_plan') {
+    if (state.itineraryRouteBundle) {
+      updateItineraryPlanHeading(ws === 'meals' ? 'meals' : 'route');
+      renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+    }
+    return;
+  }
+  if (selectedItineraryLooksFinal(state.selectedItinerary)) {
+    renderItineraryWorkflow({ itinerary_step: 'complete', final_itinerary: state.selectedItinerary });
+    return;
+  }
+  if (state.itineraries?.length) {
+    renderItineraries(state.itineraries);
+    return;
+  }
+  if (state.itineraryAttractionCatalog?.length) {
+    const root = $('#itinerary-workflow-root');
+    if (root) {
+      root.innerHTML = '<p class="muted">아직 동선·맛집 계획이 없습니다. <strong>4. 명소 선택</strong>에서 명소를 고른 뒤 「경로·맛집 계획 받기」를 누르거나, 저장·불러오기로 이전 진행을 복원하세요.</p>';
+    }
+    updateItineraryNextButton();
+  }
+}
+
+function refreshStepConfirmSection() {
+  if (state.selectedItinerary && selectedItineraryLooksFinal(state.selectedItinerary)) {
+    renderStepConfirmFromItinerary(state.selectedItinerary);
+  }
+}
+
+function refreshStepViewForSection(sectionId) {
+  switch (sectionId) {
+    case 'step-input':
+    case 'step-origin-airports':
+    case 'step-destination-airports':
+      refreshStepView('input');
+      break;
+    case 'step-flights':
+      refreshStepView('flights');
+      break;
+    case 'step-rental-decide':
+    case 'step-rental':
+      refreshStepView('rental');
+      break;
+    case 'step-itinerary-decide':
+    case 'step-attractions':
+      refreshStepView('attractions');
+      break;
+    case 'step-itinerary-plan':
+      refreshItineraryPlanSection();
+      break;
+    case 'step-accommodation-decide':
+    case 'step-accommodation':
+      refreshStepView('accommodation');
+      break;
+    case 'step-confirm':
+      refreshStepConfirmSection();
+      break;
+    default:
+      break;
+  }
 }
 
 function refreshStepView(step) {
@@ -927,22 +1014,6 @@ function refreshStepView(step) {
             ? inclusiveCalendarDays(state.travelInput.start_date, state.travelInput.end_date)
             : (state.itineraryAttractionCatalog?.length ? Math.ceil(state.itineraryAttractionCatalog.length / 3) : 1)),
       });
-    }
-  }
-  if (step === 'itinerary') {
-    mountItineraryStepPanel('plan');
-    if (state.itineraryWorkflowStep === 'meals' && state.itineraryRouteBundle) {
-      renderItineraryWorkflow(state.itineraryRouteBundle);
-    } else if (selectedItineraryLooksFinal(state.selectedItinerary)) {
-      renderItineraryWorkflow({ itinerary_step: 'complete', final_itinerary: state.selectedItinerary });
-    } else if (state.itineraries?.length) {
-      renderItineraries(state.itineraries);
-    } else if (state.itineraryAttractionCatalog?.length) {
-      const root = $('#itinerary-workflow-root');
-      if (root) {
-        root.innerHTML = '<p class="muted">아직 동선·맛집 계획이 없습니다. <strong>4. 명소 선택</strong>에서 명소를 고른 뒤 「경로·맛집 계획 받기」를 누르거나, 저장·불러오기로 이전 진행을 복원하세요.</p>';
-      }
-      updateItineraryNextButton();
     }
   }
   if (step === 'accommodation') {
@@ -1017,8 +1088,9 @@ function showFlightSummaryForEdit(sf) {
 
 function navigateToStep(stepName) {
   if (stepName === 'attractions') {
-    // 맛집 단계에서 명소로 돌아갈 때만 동선·맛집 초안 삭제. 완성 일정(complete)은 명소만 살펴보는 경우가 많아 상태 유지.
-    if (state.itineraryWorkflowStep === 'meals') {
+    if (state.itineraryWorkflowStep === 'meals'
+      || state.itineraryWorkflowStep === 'route_plan'
+      || state.itineraryWorkflowStep === 'pick_lodging') {
       state.itineraryWorkflowStep = 'attractions';
       state.itineraryRouteBundle = null;
       saveItineraryDraft();
@@ -1028,9 +1100,62 @@ function navigateToStep(stepName) {
       saveItineraryDraft();
     }
   }
-  // 5. 여행 일정: 상단 단계 클릭은 항상 일정 화면으로 연다(명소만 확인한 뒤 복귀 포함).
-  // 예전에는 동선 전·카탈로그만 있을 때 4단계로 되돌렸는데, 저장 본문이 비어 보이는 경우에도 막혀 4↔5 이동이 안 됨.
-  // 본문이 없으면 refreshStepView가 안내문을 띄운다.
+  if (stepName === 'route_plan') {
+    state.itineraryWorkflowStep = 'route_plan';
+    state.itineraryMealsUiPhase = 'route';
+    if (!state.itineraryRouteBundle) {
+      goToItinerarySectionForState();
+      refreshStepViewForSection(document.querySelector('main section.card:not(.hidden)')?.id || 'step-attractions');
+      saveItineraryDraft();
+      return;
+    }
+    mountItineraryStepPanel('plan');
+    updateItineraryPlanHeading('route');
+    show('step-itinerary-plan', true);
+    saveItineraryDraft();
+    return;
+  }
+  if (stepName === 'meals') {
+    if (!state.itineraryRouteBundle) {
+      alert('먼저 동선·맛집 후보를 받아 주세요. 4단계에서 명소를 고른 뒤 「경로·맛집 계획 받기」를 이용하세요.');
+      navigateToStep('attractions');
+      return;
+    }
+    state.itineraryWorkflowStep = 'meals';
+    state.itineraryMealsUiPhase = 'meals';
+    mountItineraryStepPanel('plan');
+    updateItineraryPlanHeading('meals');
+    show('step-itinerary-plan', true);
+    saveItineraryDraft();
+    return;
+  }
+  if (stepName === 'itinerary_confirm') {
+    state.bookingGuidanceReceived = false;
+    if (selectedItineraryLooksFinal(state.selectedItinerary)) {
+      renderStepConfirmFromItinerary(state.selectedItinerary);
+      show('step-confirm', true);
+      return;
+    }
+    alert('일정 확정 데이터가 없습니다. 맛집 선택 후 「일정 확정」을 완료해 주세요.');
+    navigateToStep(state.itineraryRouteBundle ? 'meals' : 'attractions');
+    return;
+  }
+  if (stepName === 'booking') {
+    if (!selectedItineraryLooksFinal(state.selectedItinerary)) {
+      alert('먼저 일정을 확정해 주세요.');
+      navigateToStep('meals');
+      return;
+    }
+    state.bookingGuidanceReceived = true;
+    show('step-confirm', true);
+    return;
+  }
+  if (stepName === 'accommodation') {
+    if (state.accommodations?.length) state.itineraryWorkflowStep = 'pick_lodging';
+    show('step-accommodation', true);
+    saveItineraryDraft();
+    return;
+  }
   const sectionId = STEP_TO_SECTION[stepName];
   if (!sectionId) return;
   show(sectionId, true);
@@ -1049,13 +1174,15 @@ function showAgentError(msg, opts = {}) {
     && state.itineraryAttractionCatalog?.length
     && (state.itineraryWorkflowStep === 'attractions'
       || state.itineraryWorkflowStep === 'meals'
+      || state.itineraryWorkflowStep === 'route_plan'
+      || state.itineraryWorkflowStep === 'pick_lodging'
       || state.itineraryWorkflowStep === 'complete'
       || state.itineraryWorkflowStep === 'legacy')
   ) {
     alert(msg);
     goToItinerarySectionForState();
-    const st = state.itineraryWorkflowStep === 'attractions' ? 'attractions' : 'itinerary';
-    refreshStepView(st);
+    if (state.itineraryWorkflowStep === 'attractions') refreshStepView('attractions');
+    else refreshItineraryPlanSection();
     saveItineraryDraft();
     return;
   }
@@ -2489,6 +2616,108 @@ function enrichSelectedItineraryWithRouteBundle(si) {
   return out;
 }
 
+/** 동선 번들만으로 숙소 MCP에 넘길 최소 일정 객체(맛집·최종 확정 전). */
+function buildStubItineraryFromRouteBundle(rb) {
+  if (!rb || typeof rb !== 'object' || !rb.route_plan) return null;
+  const dest = (state.travelInput?.destination || '').trim();
+  const ds = rb.route_plan.daily_schedule;
+  if (!Array.isArray(ds) || !ds.length) return null;
+  const daily_plan = ds.map((row) => ({
+    date: row.date,
+    morning_attraction_id: row.morning_attraction_id,
+    afternoon_attraction_id: row.afternoon_attraction_id,
+    extra_attraction_ids: row.extra_attraction_ids || [],
+    route_notes: row.route_notes,
+  }));
+  return {
+    title: `${dest || '목적지'} 동선 초안`,
+    summary: '맛집·일정 확정 전 동선 기준입니다.',
+    preview_only: true,
+    route_plan: rb.route_plan,
+    daily_plan,
+    neighborhoods: rb.neighborhoods || [],
+  };
+}
+
+function updateItineraryPlanHeading(phase) {
+  const h2 = $('#itinerary-plan-heading');
+  const lead = $('#itinerary-plan-lead');
+  if (!h2 || !lead) return;
+  if (phase === 'meals') {
+    h2.textContent = '7. 맛집 선택';
+    lead.textContent = '날짜별 점심·저녁 1·2순위를 고른 뒤 하단 「일정 확정」으로 넘어갑니다. 위 단계 표에서 동선·숙소로 돌아갈 수 있습니다.';
+  } else {
+    h2.textContent = '5. 동선 계획';
+    lead.textContent = '동선·지도·일자 배정을 확인한 뒤 「다음 (숙소 선택)」으로 진행합니다. 명소를 바꾸려면 「4. 명소 선택」으로 이동하세요.';
+  }
+}
+
+/** 상단 단계 표: 화면·itineraryWorkflowStep 기준으로 활성 칩 동기화 */
+function syncStepIndicatorActive(sectionId) {
+  const sid = sectionId
+    || document.querySelector('main section.card:not(.hidden)')?.id
+    || '';
+  let step = null;
+  switch (sid) {
+    case 'step-input':
+    case 'step-origin-airports':
+    case 'step-destination-airports':
+      step = 'input';
+      break;
+    case 'step-flights':
+      step = 'flights';
+      break;
+    case 'step-rental-decide':
+    case 'step-rental':
+      step = 'rental';
+      break;
+    case 'step-itinerary-decide':
+    case 'step-attractions':
+      step = 'attractions';
+      break;
+    case 'step-itinerary-plan': {
+      const ws = state.itineraryWorkflowStep;
+      if (ws === 'meals') step = 'meals';
+      else if (ws === 'complete' || ws === 'legacy') step = 'itinerary_confirm';
+      else step = 'route_plan';
+      break;
+    }
+    case 'step-accommodation-decide':
+    case 'step-accommodation':
+      step = 'accommodation';
+      break;
+    case 'step-confirm':
+      step = state.bookingGuidanceReceived ? 'booking' : 'itinerary_confirm';
+      break;
+    default:
+      step = null;
+  }
+  if (!step) return;
+  $$('#step-indicator .step-node').forEach((node) => {
+    node.classList.toggle('active', node.dataset.step === step);
+  });
+  updateStepCompletedState();
+}
+
+function renderStepConfirmFromItinerary(fi) {
+  const box = $('#itinerary-confirm-summary');
+  if (!box) return;
+  if (!fi || typeof fi !== 'object') {
+    box.innerHTML = '<p class="muted">일정 데이터가 없습니다.</p>';
+    return;
+  }
+  box.innerHTML = `
+    <h3>${escapeHtml(fi.title || '확정 일정')}</h3>
+    <p>${escapeHtml(fi.summary || '')}</p>
+    <h4>일자별 요약</h4>
+    ${renderFinalDailyPlanTableHtml(fi)}`;
+  const bg = $('#booking-guidance');
+  if (bg) bg.innerHTML = '';
+  const gh = $('#booking-guidance-heading');
+  if (gh) gh.classList.add('hidden');
+  state.bookingGuidanceReceived = false;
+}
+
 function mergePreservedMealChoices(prev, routeBundle) {
   if (!routeBundle || typeof routeBundle !== 'object') return {};
   const dates = routeBundle.trip_dates || [];
@@ -2681,11 +2910,14 @@ function updateItineraryNextButton() {
     btn.textContent = shortcut ? '여행 일정으로' : '경로·맛집 계획 받기';
     btn.disabled = !shortcut && !hasSelection;
     if (btnBack) btnBack.textContent = '뒤로 (렌트카/대중교통)';
-  } else if (ws === 'meals') {
-    const sub = state.itineraryMealsUiPhase === 'meals' ? 'meals' : 'route';
-    btn.textContent = sub === 'route' ? '맛집 우선순위 선택 →' : '일정 확정';
-    btn.disabled = false;
+  } else if (ws === 'route_plan') {
+    btn.textContent = '다음 (숙소 선택)';
+    btn.disabled = !state.itineraryRouteBundle;
     if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
+  } else if (ws === 'meals') {
+    btn.textContent = '일정 확정';
+    btn.disabled = false;
+    if (btnBack) btnBack.textContent = '뒤로 (숙소 선택)';
   } else if (ws === 'complete') {
     if (onAttractions) {
       btn.textContent = shortcut ? '여행 일정으로' : '경로·맛집 계획 받기';
@@ -3002,7 +3234,9 @@ function renderItineraryWorkflow(data) {
     return;
   }
   if (step === 'select_meals') {
-    state.itineraryWorkflowStep = 'meals';
+    if (state.itineraryWorkflowStep !== 'meals' && state.itineraryWorkflowStep !== 'route_plan') {
+      state.itineraryWorkflowStep = 'route_plan';
+    }
     const rb = data;
     const dates = rb.trip_dates || [];
     const rp = rb.route_plan || {};
@@ -3037,7 +3271,7 @@ function renderItineraryWorkflow(data) {
       });
       stayHtml += '</ul>';
     }
-    const mealUi = state.itineraryMealsUiPhase === 'meals' ? 'meals' : 'route';
+    const mealUi = state.itineraryWorkflowStep === 'meals' ? 'meals' : 'route';
     let html = `<div class="itinerary-phase"><div class="itinerary-substep itinerary-substep--route" style="display:${mealUi === 'route' ? 'block' : 'none'}"><h3>동선·추천 동네</h3>`;
     if (lodging) html += `<p>${escapeHtml(lodging)}</p>`;
     if (stayHtml) html += stayHtml;
@@ -3094,8 +3328,8 @@ function renderItineraryWorkflow(data) {
       });
       html += '</ul>';
     }
-    html += `<p class="itinerary-substep-nav"><button type="button" class="btn-primary" id="btn-itinerary-sub-open-meals">맛집 우선순위 선택 →</button></p></div>`;
-    html += `<div class="itinerary-substep itinerary-substep--meals" style="display:${mealUi === 'meals' ? 'block' : 'none'}"><p class="itinerary-substep-nav"><button type="button" class="secondary" id="btn-itinerary-sub-back-route">← 동선·지도로</button></p>`;
+    html += '</div>';
+    html += `<div class="itinerary-substep itinerary-substep--meals" style="display:${mealUi === 'meals' ? 'block' : 'none'}">`;
     html += '<h3>맛집 (명소당 3곳, 평점순) — 날짜별 점심·저녁 1·2순위</h3>';
     html += '<p class="muted" style="font-size:0.9rem;margin:-0.25rem 0 0.75rem;">점심 후보는 <strong>오전</strong> 일정 명소에서, 저녁 후보는 <strong>오후</strong> 일정 명소에서 승용차 이동 시간(분)을 안내합니다(Google Directions, API·좌표 있을 때). 카드에서 소개·링크를 확인한 뒤 선택하세요.</p>';
     const destHint = (state.travelInput?.destination || '').trim();
@@ -3148,19 +3382,11 @@ function renderItineraryWorkflow(data) {
     });
     html += '</div></div>';
     root.innerHTML = html;
-    requestAnimationFrame(() => {
-      initItineraryRouteMapFromPayload(rp.map_payload);
-    });
-    root.querySelector('#btn-itinerary-sub-open-meals')?.addEventListener('click', () => {
-      state.itineraryMealsUiPhase = 'meals';
-      saveItineraryDraft();
-      renderItineraryWorkflow({ ...rb, itinerary_step: 'select_meals' });
-    });
-    root.querySelector('#btn-itinerary-sub-back-route')?.addEventListener('click', () => {
-      state.itineraryMealsUiPhase = 'route';
-      saveItineraryDraft();
-      renderItineraryWorkflow({ ...rb, itinerary_step: 'select_meals' });
-    });
+    if (mealUi === 'route') {
+      requestAnimationFrame(() => {
+        initItineraryRouteMapFromPayload(rp.map_payload);
+      });
+    }
     const syncMealCardHighlight = () => {
       root.querySelectorAll('.meal-day-block').forEach((block) => {
         const lunchIds = new Set();
@@ -3238,7 +3464,8 @@ function applyItineraryResponse(data) {
     if (prevDates !== nextDates) state.itineraryMealsUiPhase = 'route';
     state.mealChoices = mergePreservedMealChoices(state.mealChoices, data);
     state.selectedItinerary = null;
-    state.itineraryWorkflowStep = 'meals';
+    state.itineraryWorkflowStep = 'route_plan';
+    updateItineraryPlanHeading('route');
     renderItineraryWorkflow(data);
     mountItineraryStepPanel('plan');
     show('step-itinerary-plan');
@@ -3249,9 +3476,14 @@ function applyItineraryResponse(data) {
     state.selectedItinerary = data.final_itinerary;
     state.itineraryWorkflowStep = 'complete';
     state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
-    renderItineraryWorkflow(data);
+    state.bookingGuidanceReceived = false;
+    renderStepConfirmFromItinerary(data.final_itinerary);
+    const gh = $('#booking-guidance-heading');
+    if (gh) gh.classList.add('hidden');
+    const bg = $('#booking-guidance');
+    if (bg) bg.innerHTML = '';
     mountItineraryStepPanel('plan');
-    show('step-itinerary-plan');
+    show('step-confirm');
     saveItineraryDraft();
     return true;
   }
@@ -3374,23 +3606,29 @@ $('#btn-back-itineraries').addEventListener('click', () => {
     show('step-rental');
     return;
   }
-  if (ws === 'meals' && !onAttractions && state.itineraryMealsUiPhase === 'meals') {
-    state.itineraryMealsUiPhase = 'route';
-    if (state.itineraryRouteBundle) {
-      renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
-    }
+  if (ws === 'meals' && !onAttractions) {
+    show('step-accommodation');
     saveItineraryDraft();
-    updateItineraryNextButton();
     return;
   }
-  // 일정·맛집 화면(5단계)에서만 명소(4단계)로 — 이미 명소 화면이면 이전 단계(렌트)로
-  if ((ws === 'meals' || ws === 'complete') && !onAttractions) {
+  if (ws === 'route_plan' && !onAttractions) {
     state.itineraryWorkflowStep = 'attractions';
     state.itineraryRouteBundle = null;
     saveItineraryDraft();
     mountItineraryStepPanel('attractions');
     show('step-attractions', true);
     refreshStepView('attractions');
+    return;
+  }
+  if (ws === 'complete' && !onAttractions) {
+    state.itineraryWorkflowStep = 'meals';
+    mountItineraryStepPanel('plan');
+    updateItineraryPlanHeading('meals');
+    show('step-itinerary-plan', true);
+    if (state.itineraryRouteBundle) {
+      renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+    }
+    saveItineraryDraft();
     return;
   }
   if (ws === 'complete' && onAttractions) {
@@ -3439,6 +3677,7 @@ async function skipItineraryToAccommodation() {
     $('#local-transport-info').innerHTML = state.localTransport.length
       ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
+    state.itineraryWorkflowStep = 'pick_lodging';
     show('step-accommodation');
   } catch (err) {
     showError(err.message);
@@ -3495,25 +3734,120 @@ async function proceedFromItineraryCompleteToAccommodation() {
     $('#local-transport-info').innerHTML = state.localTransport.length
       ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
+    state.itineraryWorkflowStep = 'pick_lodging';
     show('step-accommodation');
   } catch (err) {
     showError(err.message);
   }
 }
 
+/** 동선 번들만 반영한 초안으로 숙소 후보를 불러옵니다. */
+async function proceedFromRoutePlanToAccommodation() {
+  const stub = buildStubItineraryFromRouteBundle(state.itineraryRouteBundle);
+  if (!stub) {
+    alert('동선 데이터가 없습니다.');
+    return;
+  }
+  state.selectedItinerary = stub;
+  show('loading');
+  try {
+    const payload = baseSessionPayload({
+      selected_flight: state.selectedFlight,
+      selected_itinerary: enrichSelectedItineraryWithRouteBundle(stub),
+      itinerary_attraction_catalog: state.itineraryAttractionCatalog,
+    });
+    const data = await callAgent(payload);
+    if (data?.error) throw new Error(data.error);
+    const acc = data?.accommodations || [];
+    const lt = data?.local_transport || [];
+    state.accommodations = Array.isArray(acc) ? acc : [];
+    state.accommodationSelectionByDate = {};
+    state.accommodationSelectionByGroup = {};
+    state.localTransport = normalizeLocalTransport(lt);
+    renderAccommodations(state.accommodations);
+    $('#local-transport-info').innerHTML = state.localTransport.length
+      ? formatLocalTransportSummaryHtml(state.localTransport)
+      : '';
+    state.itineraryWorkflowStep = 'pick_lodging';
+    show('step-accommodation');
+    saveItineraryDraft();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+/** 숙소 구간(일자별·거점별) 선택 결과를 예약 안내 요청용 객체로 만듭니다. */
+function buildSelectedAccommodationFromPicks() {
+  const acc = state.accommodations || [];
+  const isStayGroup = acc.length > 0 && acc[0]?.segment_type === 'stay_group_hint';
+  const isDaily = acc.length > 0 && acc[0]?.segment_type === 'daily_stay_hint';
+  if (isStayGroup) {
+    const missing = acc.filter((s) => {
+      const g = s.group_index != null ? String(s.group_index) : '';
+      return !state.accommodationSelectionByGroup?.[g];
+    });
+    if (missing.length) {
+      return { ok: false, message: '각 숙소 거점 구간마다 숙소 후보 중 하나를 선택해 주세요.' };
+    }
+    let tripTotal = 0;
+    for (const s of acc) {
+      const g = s.group_index != null ? String(s.group_index) : '';
+      const h = state.accommodationSelectionByGroup[g];
+      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+        tripTotal += h.total_stay_estimate_krw;
+      }
+    }
+    return {
+      ok: true,
+      value: {
+        mode: 'by_stay_group',
+        choices: { ...state.accommodationSelectionByGroup },
+        trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
+        nights_count: null,
+      },
+    };
+  }
+  if (isDaily) {
+    const missing = acc.filter((s) => !state.accommodationSelectionByDate?.[s.date]);
+    if (missing.length) {
+      return { ok: false, message: '여행일마다 숙소 후보 중 하나를 선택해 주세요.' };
+    }
+    let tripTotal = 0;
+    for (const s of acc) {
+      const h = state.accommodationSelectionByDate[s.date];
+      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+        tripTotal += h.total_stay_estimate_krw;
+      }
+    }
+    return {
+      ok: true,
+      value: {
+        mode: 'by_date',
+        choices: { ...state.accommodationSelectionByDate },
+        trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
+        nights_count: acc.length,
+      },
+    };
+  }
+  if (!state.selectedAccommodation) {
+    return { ok: false, message: '숙소를 선택해 주세요.' };
+  }
+  return { ok: true, value: state.selectedAccommodation };
+}
+
 $('#btn-accommodation-decide-go')?.addEventListener('click', () => proceedFromItineraryCompleteToAccommodation());
 $('#btn-accommodation-decide-skip')?.addEventListener('click', () => skipAccommodationToConfirm());
 $('#btn-back-accommodation-decide')?.addEventListener('click', () => {
   goToItinerarySectionForState();
-  const st = state.itineraryWorkflowStep === 'attractions' ? 'attractions' : 'itinerary';
-  refreshStepView(st);
+  if (state.itineraryWorkflowStep === 'attractions') refreshStepView('attractions');
+  else refreshItineraryPlanSection();
 });
 
 $('#btn-next-itineraries').addEventListener('click', async () => {
   const ws = state.itineraryWorkflowStep;
   const onAttractions = isAttractionsSectionVisible();
   if ((ws === 'attractions' || (ws === 'complete' && onAttractions)) && itineraryShortcutAllowed()) {
-    navigateToStep('itinerary');
+    navigateToStep(selectedItineraryLooksFinal(state.selectedItinerary) ? 'itinerary_confirm' : 'route_plan');
     return;
   }
   if (ws === 'attractions') {
@@ -3538,16 +3872,11 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     }
     return;
   }
+  if (ws === 'route_plan') {
+    await proceedFromRoutePlanToAccommodation();
+    return;
+  }
   if (ws === 'meals') {
-    if (state.itineraryMealsUiPhase !== 'meals') {
-      state.itineraryMealsUiPhase = 'meals';
-      if (state.itineraryRouteBundle) {
-        renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
-      }
-      saveItineraryDraft();
-      updateItineraryNextButton();
-      return;
-    }
     if (!collectAndValidateMealChoices()) return;
     show('loading');
     try {
@@ -3571,7 +3900,7 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
       alert('일정이 없습니다.');
       return;
     }
-    showAccommodationDecide();
+    navigateToStep('itinerary_confirm');
     return;
   }
   if (ws === 'legacy') {
@@ -3942,75 +4271,69 @@ function renderAccommodations(items) {
 }
 
 $('#btn-back-accommodation').addEventListener('click', () => {
+  state.itineraryWorkflowStep = 'route_plan';
+  saveItineraryDraft();
   goToItinerarySectionForState();
-  const st = state.itineraryWorkflowStep === 'attractions' ? 'attractions' : 'itinerary';
-  refreshStepView(st);
+  if (state.itineraryWorkflowStep === 'attractions') refreshStepView('attractions');
+  else refreshItineraryPlanSection();
 });
 
-$('#btn-confirm-booking').addEventListener('click', async () => {
-  const acc = state.accommodations || [];
-  const isStayGroup = acc.length > 0 && acc[0]?.segment_type === 'stay_group_hint';
-  const isDaily = acc.length > 0 && acc[0]?.segment_type === 'daily_stay_hint';
-  if (isStayGroup) {
-    const missing = acc.filter((s) => {
-      const g = s.group_index != null ? String(s.group_index) : '';
-      return !state.accommodationSelectionByGroup?.[g];
-    });
-    if (missing.length) {
-      alert('각 숙소 거점 구간마다 숙소 후보 중 하나를 선택해 주세요.');
-      return;
-    }
-    let tripTotal = 0;
-    for (const s of acc) {
-      const g = s.group_index != null ? String(s.group_index) : '';
-      const h = state.accommodationSelectionByGroup[g];
-      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
-        tripTotal += h.total_stay_estimate_krw;
-      }
-    }
-    state.selectedAccommodation = {
-      mode: 'by_stay_group',
-      choices: { ...state.accommodationSelectionByGroup },
-      trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
-      nights_count: null,
-    };
-  } else if (isDaily) {
-    const missing = acc.filter((s) => !state.accommodationSelectionByDate?.[s.date]);
-    if (missing.length) {
-      alert('여행일마다 숙소 후보 중 하나를 선택해 주세요.');
-      return;
-    }
-    let tripTotal = 0;
-    for (const s of acc) {
-      const h = state.accommodationSelectionByDate[s.date];
-      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
-        tripTotal += h.total_stay_estimate_krw;
-      }
-    }
-    state.selectedAccommodation = {
-      mode: 'by_date',
-      choices: { ...state.accommodationSelectionByDate },
-      trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
-      nights_count: acc.length,
-    };
-  } else if (!state.selectedAccommodation) {
-    alert('숙소를 선택해 주세요.');
+$('#btn-accommodation-next')?.addEventListener('click', () => {
+  const built = buildSelectedAccommodationFromPicks();
+  if (!built.ok) {
+    alert(built.message);
     return;
   }
+  state.selectedAccommodation = built.value;
+  state.itineraryWorkflowStep = 'meals';
+  state.itineraryMealsUiPhase = 'meals';
+  saveItineraryDraft();
+  mountItineraryStepPanel('plan');
+  updateItineraryPlanHeading('meals');
+  if (state.itineraryRouteBundle) {
+    renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+  }
+  show('step-itinerary-plan');
+  updateItineraryNextButton();
+});
+
+$('#btn-request-booking-guidance')?.addEventListener('click', async () => {
+  const built = buildSelectedAccommodationFromPicks();
+  if (!built.ok) {
+    alert(built.message);
+    return;
+  }
+  state.selectedAccommodation = built.value;
   show('loading');
   try {
     const payload = baseSessionPayload({
       selected_flight: state.selectedFlight,
-      selected_itinerary: state.selectedItinerary,
+      selected_itinerary: enrichSelectedItineraryWithRouteBundle(state.selectedItinerary),
       selected_accommodation: state.selectedAccommodation,
     });
     const data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
-    $('#booking-guidance').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    const bg = $('#booking-guidance');
+    if (bg) bg.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    $('#booking-guidance-heading')?.classList.remove('hidden');
+    state.bookingGuidanceReceived = true;
+    saveItineraryDraft();
     show('step-confirm');
   } catch (err) {
     showError(err.message);
   }
+});
+
+$('#btn-back-confirm')?.addEventListener('click', () => {
+  state.itineraryWorkflowStep = 'meals';
+  state.bookingGuidanceReceived = false;
+  saveItineraryDraft();
+  mountItineraryStepPanel('plan');
+  updateItineraryPlanHeading('meals');
+  if (state.itineraryRouteBundle) {
+    renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+  }
+  show('step-itinerary-plan');
 });
 
 /* --- 달력 선택 --- */

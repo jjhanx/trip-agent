@@ -191,6 +191,16 @@ header p {
   min-width: max-content;
 }
 
+.step-flow--dense {
+  gap: 0.12rem;
+  font-size: 0.78rem;
+}
+
+.step-flow--dense .step-arrow {
+  opacity: 0.65;
+  font-size: 0.7rem;
+}
+
 .step-node {
   display: inline-flex;
   align-items: center;
