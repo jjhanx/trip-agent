@@ -116,6 +116,7 @@ function saveItineraryDraft() {
       selectedItinerary: state.selectedItinerary,
       itineraries: state.itineraries,
       lastCommittedAttractionIds: state.lastCommittedAttractionIds,
+      itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
     };
     localStorage.setItem(ITINERARY_DRAFT_KEY, JSON.stringify(draft));
   } catch (e) {
@@ -156,6 +157,9 @@ function restoreItineraryDraft() {
     state.lastCommittedAttractionIds = Array.isArray(draft.lastCommittedAttractionIds)
       ? draft.lastCommittedAttractionIds.map(String)
       : null;
+    if (draft.itineraryMealsUiPhase === 'route' || draft.itineraryMealsUiPhase === 'meals') {
+      state.itineraryMealsUiPhase = draft.itineraryMealsUiPhase;
+    }
     const si0 = state.selectedItinerary;
     const hasDaily = si0 && typeof si0 === 'object' && Array.isArray(si0.daily_plan) && si0.daily_plan.length > 0;
     if (
@@ -411,6 +415,7 @@ function getFullPlanState() {
     itineraryRouteBundle: state.itineraryRouteBundle,
     selectedAttractionIds: state.selectedAttractionIds,
     mealChoices: state.mealChoices,
+    itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
     lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
     accommodationSelectionByDate: state.accommodationSelectionByDate || {},
@@ -452,6 +457,9 @@ function loadPlanIntoState(data) {
   state.itineraryRouteBundle = data.itineraryRouteBundle && typeof data.itineraryRouteBundle === 'object' ? data.itineraryRouteBundle : null;
   state.selectedAttractionIds = Array.isArray(data.selectedAttractionIds) ? data.selectedAttractionIds : [];
   state.mealChoices = data.mealChoices && typeof data.mealChoices === 'object' ? data.mealChoices : {};
+  state.itineraryMealsUiPhase = (data.itineraryMealsUiPhase === 'meals' || data.itineraryMealsUiPhase === 'route')
+    ? data.itineraryMealsUiPhase
+    : 'route';
   state.lastCommittedAttractionIds = Array.isArray(data.lastCommittedAttractionIds)
     ? data.lastCommittedAttractionIds.map(String)
     : null;
@@ -622,6 +630,7 @@ function newPlan() {
   state.selectedAttractionIds = [];
   state.mealChoices = {};
   state.lastCommittedAttractionIds = null;
+  state.itineraryMealsUiPhase = 'route';
   state.accommodations = [];
   state.accommodationSelectionByDate = {};
   state.accommodationSelectionByGroup = {};
@@ -686,6 +695,8 @@ let state = {
   currentPlanName: null,
   /** 일정 확정(finalize) 당시 명소 id 스냅샷 — 선택이 바뀌면 일정 무효·재생성 */
   lastCommittedAttractionIds: null,
+  /** 경로·맛집 단계 하위: route(동선·지도) | meals(맛집 우선순위) */
+  itineraryMealsUiPhase: 'route',
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -934,12 +945,12 @@ function refreshStepView(step) {
       updateItineraryNextButton();
     }
   }
-  if (step === 'accommodation' && state.accommodations?.length) {
-    renderAccommodations(state.accommodations);
+  if (step === 'accommodation') {
     const ltEl = $('#local-transport-info');
     if (ltEl) ltEl.innerHTML = state.localTransport?.length
       ? formatLocalTransportSummaryHtml(state.localTransport)
       : '';
+    renderAccommodations(state.accommodations || []);
   }
 }
 
@@ -2457,6 +2468,27 @@ function getRestaurantOptionsForDay(routeBundle, dateStr) {
  * 명소 변경 후 새 동선 번들에서도 그날 후보에 남아 있는 식당만 맛집 선택을 이어 붙인다.
  * @param {Record<string, { lunch?: { first?: string, second?: string }, dinner?: { first?: string, second?: string } }>} prev
  */
+/** 확정 일정에 `route_plan`이 빠졌을 때(구 저장 등) 동선 번들로 보강해 숙소 MCP가 일자·거점을 계산하도록 함. */
+function enrichSelectedItineraryWithRouteBundle(si) {
+  if (!si || typeof si !== 'object') return si;
+  const rb = state.itineraryRouteBundle;
+  if (!rb || typeof rb !== 'object') return si;
+  const out = { ...si };
+  const curRp = out.route_plan;
+  const curDs = curRp && typeof curRp === 'object' && Array.isArray(curRp.daily_schedule)
+    ? curRp.daily_schedule
+    : [];
+  if (curDs.length) return out;
+  const brp = rb.route_plan;
+  if (brp && typeof brp === 'object' && Array.isArray(brp.daily_schedule) && brp.daily_schedule.length) {
+    out.route_plan = { ...(typeof curRp === 'object' && curRp ? curRp : {}), ...brp };
+  }
+  if ((!out.neighborhoods || !out.neighborhoods.length) && Array.isArray(rb.neighborhoods) && rb.neighborhoods.length) {
+    out.neighborhoods = rb.neighborhoods;
+  }
+  return out;
+}
+
 function mergePreservedMealChoices(prev, routeBundle) {
   if (!routeBundle || typeof routeBundle !== 'object') return {};
   const dates = routeBundle.trip_dates || [];
@@ -2650,7 +2682,8 @@ function updateItineraryNextButton() {
     btn.disabled = !shortcut && !hasSelection;
     if (btnBack) btnBack.textContent = '뒤로 (렌트카/대중교통)';
   } else if (ws === 'meals') {
-    btn.textContent = '일정 확정';
+    const sub = state.itineraryMealsUiPhase === 'meals' ? 'meals' : 'route';
+    btn.textContent = sub === 'route' ? '맛집 우선순위 선택 →' : '일정 확정';
     btn.disabled = false;
     if (btnBack) btnBack.textContent = '뒤로 (명소 선택)';
   } else if (ws === 'complete') {
@@ -3004,7 +3037,8 @@ function renderItineraryWorkflow(data) {
       });
       stayHtml += '</ul>';
     }
-    let html = `<div class="itinerary-phase"><h3>동선·추천 동네</h3>`;
+    const mealUi = state.itineraryMealsUiPhase === 'meals' ? 'meals' : 'route';
+    let html = `<div class="itinerary-phase"><div class="itinerary-substep itinerary-substep--route" style="display:${mealUi === 'route' ? 'block' : 'none'}"><h3>동선·추천 동네</h3>`;
     if (lodging) html += `<p>${escapeHtml(lodging)}</p>`;
     if (stayHtml) html += stayHtml;
     html += `<h4>일자별 동선·명소 위치</h4>
@@ -3060,6 +3094,8 @@ function renderItineraryWorkflow(data) {
       });
       html += '</ul>';
     }
+    html += `<p class="itinerary-substep-nav"><button type="button" class="btn-primary" id="btn-itinerary-sub-open-meals">맛집 우선순위 선택 →</button></p></div>`;
+    html += `<div class="itinerary-substep itinerary-substep--meals" style="display:${mealUi === 'meals' ? 'block' : 'none'}"><p class="itinerary-substep-nav"><button type="button" class="secondary" id="btn-itinerary-sub-back-route">← 동선·지도로</button></p>`;
     html += '<h3>맛집 (명소당 3곳, 평점순) — 날짜별 점심·저녁 1·2순위</h3>';
     html += '<p class="muted" style="font-size:0.9rem;margin:-0.25rem 0 0.75rem;">점심 후보는 <strong>오전</strong> 일정 명소에서, 저녁 후보는 <strong>오후</strong> 일정 명소에서 승용차 이동 시간(분)을 안내합니다(Google Directions, API·좌표 있을 때). 카드에서 소개·링크를 확인한 뒤 선택하세요.</p>';
     const destHint = (state.travelInput?.destination || '').trim();
@@ -3110,10 +3146,20 @@ function renderItineraryWorkflow(data) {
           <div class="meal-rest-grid">${cardsDinner}</div>
         </div></div>`;
     });
-    html += '</div>';
+    html += '</div></div>';
     root.innerHTML = html;
     requestAnimationFrame(() => {
       initItineraryRouteMapFromPayload(rp.map_payload);
+    });
+    root.querySelector('#btn-itinerary-sub-open-meals')?.addEventListener('click', () => {
+      state.itineraryMealsUiPhase = 'meals';
+      saveItineraryDraft();
+      renderItineraryWorkflow({ ...rb, itinerary_step: 'select_meals' });
+    });
+    root.querySelector('#btn-itinerary-sub-back-route')?.addEventListener('click', () => {
+      state.itineraryMealsUiPhase = 'route';
+      saveItineraryDraft();
+      renderItineraryWorkflow({ ...rb, itinerary_step: 'select_meals' });
     });
     const syncMealCardHighlight = () => {
       root.querySelectorAll('.meal-day-block').forEach((block) => {
@@ -3186,7 +3232,10 @@ function applyItineraryResponse(data) {
     return true;
   }
   if (data?.itinerary_step === 'select_meals') {
+    const prevDates = JSON.stringify(state.itineraryRouteBundle?.trip_dates || []);
+    const nextDates = JSON.stringify(data.trip_dates || []);
     state.itineraryRouteBundle = data;
+    if (prevDates !== nextDates) state.itineraryMealsUiPhase = 'route';
     state.mealChoices = mergePreservedMealChoices(state.mealChoices, data);
     state.selectedItinerary = null;
     state.itineraryWorkflowStep = 'meals';
@@ -3325,6 +3374,15 @@ $('#btn-back-itineraries').addEventListener('click', () => {
     show('step-rental');
     return;
   }
+  if (ws === 'meals' && !onAttractions && state.itineraryMealsUiPhase === 'meals') {
+    state.itineraryMealsUiPhase = 'route';
+    if (state.itineraryRouteBundle) {
+      renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+    }
+    saveItineraryDraft();
+    updateItineraryNextButton();
+    return;
+  }
   // 일정·맛집 화면(5단계)에서만 명소(4단계)로 — 이미 명소 화면이면 이전 단계(렌트)로
   if ((ws === 'meals' || ws === 'complete') && !onAttractions) {
     state.itineraryWorkflowStep = 'attractions';
@@ -3422,7 +3480,7 @@ async function proceedFromItineraryCompleteToAccommodation() {
   try {
     const payload = baseSessionPayload({
       selected_flight: state.selectedFlight,
-      selected_itinerary: state.selectedItinerary,
+      selected_itinerary: enrichSelectedItineraryWithRouteBundle(state.selectedItinerary),
       itinerary_attraction_catalog: state.itineraryAttractionCatalog,
     });
     const data = await callAgent(payload);
@@ -3481,6 +3539,15 @@ $('#btn-next-itineraries').addEventListener('click', async () => {
     return;
   }
   if (ws === 'meals') {
+    if (state.itineraryMealsUiPhase !== 'meals') {
+      state.itineraryMealsUiPhase = 'meals';
+      if (state.itineraryRouteBundle) {
+        renderItineraryWorkflow({ ...state.itineraryRouteBundle, itinerary_step: 'select_meals' });
+      }
+      saveItineraryDraft();
+      updateItineraryNextButton();
+      return;
+    }
     if (!collectAndValidateMealChoices()) return;
     show('loading');
     try {
@@ -3711,6 +3778,17 @@ function renderAccommodations(items) {
   const list = $('#accommodations-list');
   if (!list) return;
   const rows = Array.isArray(items) ? items : [];
+  if (rows.length === 0) {
+    list.innerHTML = `
+      <div class="acc-empty-state" role="status">
+        <p><strong>숙소 후보가 비어 있습니다.</strong> 일정에 <code>route_plan.daily_schedule</code>(또는 <code>daily_plan</code>)과 명소 카탈로그 좌표가 있어야 합니다.</p>
+        <p class="muted">5단계에서 「일정 확정」까지 마친 뒤 「다음 (숙소 선택)」으로 오거나, 아래를 눌러 다시 요청하세요. 서버에 <code>GOOGLE_PLACES_API_KEY</code>가 없으면 예시(mock) 숙소가 나옵니다.</p>
+        <p><button type="button" class="btn-primary" id="btn-acc-retry-load">숙소 후보 다시 불러오기</button></p>
+      </div>`;
+    const retry = list.querySelector('#btn-acc-retry-load');
+    retry?.addEventListener('click', () => proceedFromItineraryCompleteToAccommodation());
+    return;
+  }
   const isStayGroup = rows.length > 0 && rows[0]?.segment_type === 'stay_group_hint';
   const isDaily = rows.length > 0 && rows[0]?.segment_type === 'daily_stay_hint';
 

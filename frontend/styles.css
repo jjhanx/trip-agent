@@ -319,6 +319,28 @@ header p {
   margin: 0.25rem 0 0.5rem;
 }
 
+.acc-empty-state {
+  padding: 1rem 1.1rem;
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.15);
+  line-height: 1.5;
+}
+.acc-empty-state p {
+  margin: 0 0 0.65rem;
+}
+.acc-empty-state p:last-child {
+  margin-bottom: 0;
+}
+
+.itinerary-substep-nav {
+  margin: 1rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 /* 맛집 단계: 후보 카드(소개·링크) */
 .meal-day-block .meal-candidate-detail {
   margin-top: 1rem;

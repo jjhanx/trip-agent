@@ -285,9 +285,12 @@ def run_hotel_search(
                 rooms_for_pricing=rooms,
             )
             if per_group:
-                return _assign_types_to_daily_segments(
-                    per_group, accommodation_type, accommodation_priority
-                )
+                total_h = sum(len(s.get("hotels") or []) for s in per_group if isinstance(s, dict))
+                if total_h > 0:
+                    return _assign_types_to_daily_segments(
+                        per_group, accommodation_type, accommodation_priority
+                    )
+                # 거점 구간마다 Places 후보가 비면 일자별 검색·mock으로 폴백
 
         if daily:
             per_day = search_hotels_per_daily_segments(

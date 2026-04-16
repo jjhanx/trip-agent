@@ -80,6 +80,18 @@ class AccommodationExecutor(BaseAgentExecutor):
                 (self.settings.google_places_api_key or "").strip() or None,
                 (self.settings.travelpayouts_api_token or "").strip() or None,
             )
+        # 세그먼트형(일자별/거점 구간) 응답은 전체를 보내고, 레거시 평면 목록만 상위 5개로 제한
+        if (
+            isinstance(hotels, list)
+            and hotels
+            and isinstance(hotels[0], dict)
+            and hotels[0].get("segment_type")
+        ):
+            payload = hotels
+        elif isinstance(hotels, list):
+            payload = hotels[:5]
+        else:
+            payload = hotels
         await event_queue.enqueue_event(
-            new_agent_text_message(json.dumps(hotels[:5], ensure_ascii=False))
+            new_agent_text_message(json.dumps(payload, ensure_ascii=False))
         )
