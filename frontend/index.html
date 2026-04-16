@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>여행 일정 설계 | Trip Agent</title>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <!-- Travelpayouts 추적 스크립트 -->
   <script data-noptimize="1" data-cfasync="false" data-wpfc-render="false">
@@ -385,9 +385,16 @@
       </section>
     </main>
   </div>
+  <div id="acc-photo-lightbox" class="acc-photo-lightbox hidden" role="dialog" aria-modal="true" aria-label="숙소 사진 확대">
+    <button type="button" class="acc-photo-lightbox-backdrop" aria-label="닫기"></button>
+    <div class="acc-photo-lightbox-inner">
+      <button type="button" class="acc-photo-lightbox-close" aria-label="닫기">&times;</button>
+      <img class="acc-photo-lightbox-img" alt="" />
+    </div>
+  </div>
   <script src="airports.js?v=9"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="app.js?v=43"></script>
+  <script src="app.js?v=44"></script>
 </body>
 
 </html>

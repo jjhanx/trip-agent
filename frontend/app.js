@@ -3938,9 +3938,9 @@ function accommodationGalleryHtml(a) {
     ? a.image_urls.slice(0, 6)
     : (a.image_url ? [a.image_url] : []);
   if (!imgs.length) return '';
-  return `<div class="accommodation-gallery">${imgs.map((u) => {
+  return `<div class="accommodation-gallery acc-gallery-thumbs">${imgs.map((u) => {
     const href = String(u).replace(/"/g, '%22');
-    return `<a href="${href}" target="_blank" rel="noopener" class="acc-thumb-wrap"><img src="${href}" alt="" class="acc-thumb" loading="lazy"></a>`;
+    return `<button type="button" class="acc-thumb-btn" data-full-src="${href}" aria-label="사진 크게 보기" title="크게 보기"><span class="acc-thumb-sizer"><img src="${href}" alt="" class="acc-thumb" loading="lazy"></span></button>`;
   }).join('')}</div>`;
 }
 
@@ -4055,6 +4055,132 @@ function accommodationCardInnerHtml(a, driveScope) {
   return `${accommodationGalleryHtml(a)}<div class="accommodation-card-body">${accommodationCardBodyHtml(a, driveScope)}</div>`;
 }
 
+function openAccPhotoLightbox(src) {
+  if (!src) return;
+  const box = document.getElementById('acc-photo-lightbox');
+  const img = document.querySelector('#acc-photo-lightbox .acc-photo-lightbox-img');
+  if (!box || !img) return;
+  img.src = src;
+  img.alt = '숙소 사진';
+  box.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeAccPhotoLightbox() {
+  const box = document.getElementById('acc-photo-lightbox');
+  const img = document.querySelector('#acc-photo-lightbox .acc-photo-lightbox-img');
+  if (box) box.classList.add('hidden');
+  if (img) img.removeAttribute('src');
+  document.body.style.overflow = '';
+}
+
+function initAccommodationPhotoLightbox() {
+  const box = document.getElementById('acc-photo-lightbox');
+  if (!box || box.dataset.bound === '1') return;
+  box.dataset.bound = '1';
+  box.querySelector('.acc-photo-lightbox-backdrop')?.addEventListener('click', closeAccPhotoLightbox);
+  box.querySelector('.acc-photo-lightbox-close')?.addEventListener('click', closeAccPhotoLightbox);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && box && !box.classList.contains('hidden')) closeAccPhotoLightbox();
+  });
+}
+
+/** @param {Event} e */
+function handleAccommodationStayCheckChange(e) {
+  const inp = e.target?.closest?.('.acc-stay-check');
+  const list = $('#accommodations-list');
+  if (!inp || !list?.contains(inp)) return;
+  const rows = state.accommodations || [];
+  const mode = inp.dataset.mode;
+  if (mode === 'group') {
+    const gk = inp.dataset.groupKey;
+    const si = parseInt(inp.dataset.segIdx, 10);
+    const hi = parseInt(inp.dataset.hotelIdx, 10);
+    const hotel = rows[si]?.hotels?.[hi];
+    if (gk == null || gk === '') return;
+    const segEl = inp.closest('.acc-group-segment');
+    if (inp.checked) {
+      if (!hotel) return;
+      segEl?.querySelectorAll('.acc-stay-check').forEach((c) => {
+        if (c !== inp) c.checked = false;
+      });
+      segEl?.querySelectorAll('.acc-card-by-group').forEach((x) => x.classList.remove('selected'));
+      inp.closest('.acc-card-by-group')?.classList.add('selected');
+      state.accommodationSelectionByGroup[gk] = hotel;
+    } else {
+      inp.closest('.acc-card-by-group')?.classList.remove('selected');
+      delete state.accommodationSelectionByGroup[gk];
+    }
+    const foot = list.querySelector('.acc-trip-footer');
+    if (foot) foot.innerHTML = groupTripFooterInnerHtml(rows);
+    return;
+  }
+  if (mode === 'date') {
+    const date = inp.dataset.date;
+    const si = parseInt(inp.dataset.segIdx, 10);
+    const hi = parseInt(inp.dataset.hotelIdx, 10);
+    const hotel = rows[si]?.hotels?.[hi];
+    if (!date) return;
+    const segEl = inp.closest('.acc-day-segment');
+    if (inp.checked) {
+      if (!hotel) return;
+      segEl?.querySelectorAll('.acc-stay-check').forEach((c) => {
+        if (c !== inp) c.checked = false;
+      });
+      segEl?.querySelectorAll('.acc-card-by-date').forEach((x) => x.classList.remove('selected'));
+      inp.closest('.acc-card-by-date')?.classList.add('selected');
+      state.accommodationSelectionByDate[date] = hotel;
+    } else {
+      inp.closest('.acc-card-by-date')?.classList.remove('selected');
+      delete state.accommodationSelectionByDate[date];
+    }
+    const foot = list.querySelector('.acc-trip-footer');
+    if (foot) foot.innerHTML = dailyTripFooterInnerHtml(rows);
+    return;
+  }
+  if (mode === 'legacy') {
+    const idx = parseInt(inp.dataset.legacyIdx, 10);
+    const hotel = rows[idx];
+    if (inp.checked) {
+      if (!hotel) return;
+      list.querySelectorAll('.acc-stay-check[data-mode="legacy"]').forEach((c) => {
+        if (c !== inp) c.checked = false;
+      });
+      list.querySelectorAll('.acc-legacy-card').forEach((x) => x.classList.remove('selected'));
+      inp.closest('.acc-legacy-card')?.classList.add('selected');
+      state.selectedAccommodation = hotel;
+    } else {
+      inp.closest('.acc-legacy-card')?.classList.remove('selected');
+      state.selectedAccommodation = null;
+    }
+  }
+}
+
+function initAccommodationListDelegates() {
+  initAccommodationPhotoLightbox();
+  const list = $('#accommodations-list');
+  if (!list || list.dataset.delegBound === '1') return;
+  list.dataset.delegBound = '1';
+  list.addEventListener('change', handleAccommodationStayCheckChange);
+  list.addEventListener('click', (e) => {
+    const thumb = e.target.closest('.acc-thumb-btn');
+    if (thumb && list.contains(thumb)) {
+      e.preventDefault();
+      e.stopPropagation();
+      openAccPhotoLightbox(thumb.getAttribute('data-full-src'));
+      return;
+    }
+    if (e.target.closest('a, button.acc-thumb-btn, input, label.acc-card-pick, textarea, select')) return;
+    const card = e.target.closest('.acc-card-by-group, .acc-card-by-date, .acc-legacy-card');
+    if (!card || !list.contains(card)) return;
+    const chk = card.querySelector('.acc-stay-check');
+    if (chk && !chk.checked) {
+      chk.checked = true;
+      chk.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+}
+
 function sumTripEstimateFromDailySelections(segments) {
   const sel = state.accommodationSelectionByDate || {};
   let sum = 0;
@@ -4134,9 +4260,11 @@ function renderAccommodations(items) {
         const selected = selId && id && selId === id;
         const ds = driveScopeFromHotel(h);
         const inner = accommodationCardInnerHtml(h, ds);
+        const pick = `<label class="acc-card-pick"><input type="checkbox" class="acc-stay-check" data-mode="group" data-group-key="${escapeHtml(gi)}" data-seg-idx="${si}" data-hotel-idx="${hi}"${selected ? ' checked' : ''} /><span class="acc-card-pick-text">이 숙소 선택</span></label>`;
         return `
-    <div class="option-item accommodation-card acc-card-by-group${selected ? ' selected' : ''}" role="button" tabindex="0" data-seg-idx="${si}" data-group-key="${escapeHtml(gi)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
-      ${inner}
+    <div class="option-item accommodation-card acc-card-by-group${selected ? ' selected' : ''}" data-seg-idx="${si}" data-group-key="${escapeHtml(gi)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
+      ${pick}
+      <div class="acc-card-main">${inner}</div>
     </div>`;
       }).join('');
       const hint = seg.overnight_area_hint ? `<p class="acc-seg-hint">${escapeHtml(seg.overnight_area_hint)}</p>` : '';
@@ -4166,22 +4294,7 @@ function renderAccommodations(items) {
   </section>`;
     }).join('') + `<footer class="acc-trip-footer">${groupTripFooterInnerHtml(rows)}</footer>`;
 
-    list.querySelectorAll('.acc-card-by-group').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        if (e.target?.closest('a')) return;
-        const gk = el.dataset.groupKey;
-        const si = parseInt(el.dataset.segIdx, 10);
-        const hi = parseInt(el.dataset.hotelIdx, 10);
-        const seg = rows[si];
-        const hotel = seg?.hotels?.[hi];
-        if (!hotel || gk == null || gk === '') return;
-        el.closest('.acc-group-segment')?.querySelectorAll('.acc-card-by-group').forEach((x) => x.classList.remove('selected'));
-        el.classList.add('selected');
-        state.accommodationSelectionByGroup[gk] = hotel;
-        const foot = list.querySelector('.acc-trip-footer');
-        if (foot) foot.innerHTML = groupTripFooterInnerHtml(rows);
-      });
-    });
+    initAccommodationListDelegates();
     return;
   }
 
@@ -4196,9 +4309,11 @@ function renderAccommodations(items) {
         const selected = selId && id && selId === id;
         const ds = driveScopeFromHotel(h);
         const inner = accommodationCardInnerHtml(h, ds);
+        const pick = `<label class="acc-card-pick"><input type="checkbox" class="acc-stay-check" data-mode="date" data-date="${escapeHtml(d)}" data-seg-idx="${si}" data-hotel-idx="${hi}"${selected ? ' checked' : ''} /><span class="acc-card-pick-text">이 숙소 선택</span></label>`;
         return `
-    <div class="option-item accommodation-card acc-card-by-date${selected ? ' selected' : ''}" role="button" tabindex="0" data-seg-idx="${si}" data-date="${escapeHtml(d)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
-      ${inner}
+    <div class="option-item accommodation-card acc-card-by-date${selected ? ' selected' : ''}" data-seg-idx="${si}" data-date="${escapeHtml(d)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
+      ${pick}
+      <div class="acc-card-main">${inner}</div>
     </div>`;
       }).join('');
       const hint = seg.overnight_area_hint ? `<p class="acc-seg-hint">${escapeHtml(seg.overnight_area_hint)}</p>` : '';
@@ -4232,42 +4347,26 @@ function renderAccommodations(items) {
   </section>`;
     }).join('') + `<footer class="acc-trip-footer">${dailyTripFooterInnerHtml(rows)}</footer>`;
 
-    list.querySelectorAll('.acc-card-by-date').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        if (e.target?.closest('a')) return;
-        const date = el.dataset.date;
-        const si = parseInt(el.dataset.segIdx, 10);
-        const hi = parseInt(el.dataset.hotelIdx, 10);
-        const seg = rows[si];
-        const hotel = seg?.hotels?.[hi];
-        if (!hotel || !date) return;
-        el.closest('.acc-day-segment')?.querySelectorAll('.acc-card-by-date').forEach((x) => x.classList.remove('selected'));
-        el.classList.add('selected');
-        state.accommodationSelectionByDate[date] = hotel;
-        const foot = list.querySelector('.acc-trip-footer');
-        if (foot) foot.innerHTML = dailyTripFooterInnerHtml(rows);
-      });
-    });
+    initAccommodationListDelegates();
     return;
   }
 
+  const legacySel = state.selectedAccommodation;
+  const legacySelId = legacySel && (legacySel.hotel_id ?? legacySel.place_id);
   list.innerHTML = rows.map((a, i) => {
     const ds = driveScopeFromHotel(a);
     const inner = accommodationCardInnerHtml(a, ds);
+    const id = a.hotel_id ?? a.place_id;
+    const selected = legacySelId && id && legacySelId === id;
+    const pick = `<label class="acc-card-pick"><input type="checkbox" class="acc-stay-check" data-mode="legacy" data-legacy-idx="${i}"${selected ? ' checked' : ''} /><span class="acc-card-pick-text">이 숙소 선택</span></label>`;
     return `
-    <div class="option-item accommodation-card acc-legacy-card" data-idx="${i}">
-      ${inner}
+    <div class="option-item accommodation-card acc-legacy-card${selected ? ' selected' : ''}" data-idx="${i}">
+      ${pick}
+      <div class="acc-card-main">${inner}</div>
     </div>`;
   }).join('');
 
-  list.querySelectorAll('.acc-legacy-card').forEach((el) => {
-    el.addEventListener('click', (e) => {
-      if (e.target?.closest('a')) return;
-      list.querySelectorAll('.acc-legacy-card').forEach((x) => x.classList.remove('selected'));
-      el.classList.add('selected');
-      state.selectedAccommodation = rows[parseInt(el.dataset.idx, 10)];
-    });
-  });
+  initAccommodationListDelegates();
 }
 
 $('#btn-back-accommodation').addEventListener('click', () => {
@@ -4547,6 +4646,7 @@ function initDestinationAirportSync() {
 }
 
 function initStepIndicator() {
+  initAccommodationPhotoLightbox();
   loadFormFromStorage();
   syncTravelInputFromForm();
   restoreItineraryDraft();
