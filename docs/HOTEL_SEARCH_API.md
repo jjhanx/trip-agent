@@ -31,6 +31,11 @@
 - **명소 카탈로그**(`itinerary_attraction_catalog`)에 `attr_lat` / `attr_lng`가 있고, 일정에 해당 **명소 id**가 있으면 그 좌표들을 사용합니다.  
 - 명소 좌표가 없으면 **목적지 문자열 지오코드** 주변으로만 검색하고, 주행 분 합산은 생략합니다.
 
+### 날짜별 vs 레거시(전체 명소)
+
+- 일정에 **`daily_schedule`(또는 `daily_plan`)** 이 있으면 **각 날짜에 배정된 명소만** 그날의 Distance Matrix 대상으로 삼고, 응답은 `segment_type: "daily_stay_hint"` **일자별 블록**으로 나뉩니다. 각 숙소 객체에는 `drive_time_scope: "single_day_attractions"` 가 붙습니다.  
+- 일별 세그먼트를 만들 수 없을 때만 **여행 전체 명소**를 한 번에 넣는 레거시 경로를 쓰며, 이때 `drive_time_scope: "all_trip_attractions"` 이고 UI에서 “전체 일정 기준”으로 안내합니다.
+
 ## 렌트카를 고른 경우
 
 세션은 숙소 단계 응답에서 **`local_transport`를 빈 배열**로 돌려, 렌트카·대중교통 카드를 다시 붙이지 않습니다. 이동 시간은 **숙소 카드 안의 “숙소 → 일정 명소(승용차)”** 블록에만 반영됩니다.

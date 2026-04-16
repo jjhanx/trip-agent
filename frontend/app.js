@@ -413,6 +413,7 @@ function getFullPlanState() {
     mealChoices: state.mealChoices,
     lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
+    accommodationSelectionByDate: state.accommodationSelectionByDate || {},
     selectedAccommodation: state.selectedAccommodation,
     localTransport: state.localTransport,
     selectedLocalTransport: state.selectedLocalTransport,
@@ -469,6 +470,9 @@ function loadPlanIntoState(data) {
     state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
   }
   state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
+  state.accommodationSelectionByDate = data.accommodationSelectionByDate && typeof data.accommodationSelectionByDate === 'object'
+    ? data.accommodationSelectionByDate
+    : {};
   state.selectedAccommodation = data.selectedAccommodation ?? null;
   state.localTransport = normalizeLocalTransport(data.localTransport);
   state.selectedLocalTransport = data.selectedLocalTransport ?? null;
@@ -615,6 +619,7 @@ function newPlan() {
   state.mealChoices = {};
   state.lastCommittedAttractionIds = null;
   state.accommodations = [];
+  state.accommodationSelectionByDate = {};
   state.selectedAccommodation = null;
   state.localTransport = [];
   state.selectedLocalTransport = null;
@@ -665,6 +670,8 @@ let state = {
   selectedAttractionIds: [],
   mealChoices: {},
   accommodations: [],
+  /** 일자별 숙소 후보 선택 { 'YYYY-MM-DD': hotelObj } */
+  accommodationSelectionByDate: {},
   selectedAccommodation: null,
   localTransport: [],
   selectedLocalTransport: null,
@@ -1319,6 +1326,7 @@ async function runSessionRentalSearchSkipFlight() {
     }
     if (data?.step === 'accommodation_and_transport') {
       state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
+      state.accommodationSelectionByDate = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
@@ -1786,6 +1794,7 @@ async function advanceToLocalTransportStep() {
     }
     if (data?.step === 'accommodation_and_transport') {
       state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
+      state.accommodationSelectionByDate = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
@@ -3194,6 +3203,7 @@ async function skipItineraryToAccommodation() {
     const acc = data?.accommodations || [];
     const lt = data?.local_transport || [];
     state.accommodations = Array.isArray(acc) ? acc : [];
+    state.accommodationSelectionByDate = {};
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
@@ -3248,6 +3258,7 @@ async function proceedFromItineraryCompleteToAccommodation() {
     const acc = data?.accommodations || [];
     const lt = data?.local_transport || [];
     state.accommodations = Array.isArray(acc) ? acc : [];
+    state.accommodationSelectionByDate = {};
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
@@ -3346,58 +3357,84 @@ const ACCOMMODATION_TYPE_KO = {
   mountain_lodge: '산장',
 };
 
-function renderAccommodations(items) {
-  const list = $('#accommodations-list');
-  if (!list) return;
-  list.innerHTML = items.map((a, i) => {
-    const typeKo = ACCOMMODATION_TYPE_KO[a.accommodation_type] || a.accommodation_type || '';
-    const imgs = Array.isArray(a.image_urls) && a.image_urls.length
-      ? a.image_urls.slice(0, 6)
-      : (a.image_url ? [a.image_url] : []);
-    const gallery = imgs.length
-      ? `<div class="accommodation-gallery">${imgs.map((u) => {
-        const href = String(u).replace(/"/g, '%22');
-        return `<a href="${href}" target="_blank" rel="noopener" class="acc-thumb-wrap"><img src="${href}" alt="" class="acc-thumb" loading="lazy"></a>`;
-      }).join('')}</div>`
-      : '';
-    const hlRaw = Array.isArray(a.feature_highlights) && a.feature_highlights.length
-      ? a.feature_highlights
-      : (Array.isArray(a.amenities) ? a.amenities : []);
-    const chips = hlRaw.length
-      ? `<div class="acc-chips">${hlRaw.map((x) => `<span class="acc-chip">${escapeHtml(String(x))}</span>`).join('')}</div>`
-      : '';
-    const nights = a.stay_nights != null ? `${Number(a.stay_nights)}박` : '';
+/** @param {Record<string, unknown>} h */
+function driveScopeFromHotel(h) {
+  if (h.drive_time_scope === 'all_trip_attractions') return 'all_trip';
+  if (h.drive_time_scope === 'single_day_attractions') return 'single_day';
+  return 'single_day';
+}
+
+function accommodationGalleryHtml(a) {
+  const imgs = Array.isArray(a.image_urls) && a.image_urls.length
+    ? a.image_urls.slice(0, 6)
+    : (a.image_url ? [a.image_url] : []);
+  if (!imgs.length) return '';
+  return `<div class="accommodation-gallery">${imgs.map((u) => {
+    const href = String(u).replace(/"/g, '%22');
+    return `<a href="${href}" target="_blank" rel="noopener" class="acc-thumb-wrap"><img src="${href}" alt="" class="acc-thumb" loading="lazy"></a>`;
+  }).join('')}</div>`;
+}
+
+/** @param {'single_day'|'all_trip'} driveScope */
+function accommodationDriveBlockHtml(a, driveScope) {
+  const rows = Array.isArray(a.attraction_drive_times) ? a.attraction_drive_times : [];
+  if (!rows.length && a.total_driving_minutes_sum == null) return '';
+  const lis = rows.map((d) => `<li>${escapeHtml(d.name || '')} — 승용차 약 <strong>${d.minutes != null ? d.minutes : '?'}</strong>분 (편도)</li>`).join('');
+  const maxM = a.max_driving_minutes_one_way;
+  let sumLine = '';
+  if (a.total_driving_minutes_sum != null) {
+    if (driveScope === 'all_trip') {
+      sumLine = `<p class="acc-drive-sum acc-drive-sum-legacy muted">전체 일정에 포함된 명소 기준 편도 분 합(참고·날짜별 합계 아님): 약 <strong>${a.total_driving_minutes_sum}</strong>분${maxM != null ? ` · 그중 최장 편도 약 <strong>${maxM}</strong>분` : ''}</p>`;
+    } else {
+      sumLine = `<p class="acc-drive-sum">이날 방문 구간 편도 주행 분 합(추정): 약 <strong>${a.total_driving_minutes_sum}</strong>분${maxM != null ? ` · 최장 편도 약 <strong>${maxM}</strong>분` : ''}</p>`;
+    }
+  }
+  const title = driveScope === 'all_trip'
+    ? '숙소 → 일정 명소(승용차, 전체 일정 기준)'
+    : '숙소 → 이날 방문 명소(승용차)';
+  return `<div class="acc-drive-block"><p class="acc-drive-title"><strong>${title}</strong></p><ul class="acc-drive-list">${lis}</ul>${sumLine}</div>`;
+}
+
+/** @param {'single_day'|'all_trip'} driveScope */
+function accommodationCardBodyHtml(a, driveScope) {
+  const typeKo = ACCOMMODATION_TYPE_KO[a.accommodation_type] || a.accommodation_type || '';
+  const hlRaw = Array.isArray(a.feature_highlights) && a.feature_highlights.length
+    ? a.feature_highlights
+    : (Array.isArray(a.amenities) ? a.amenities : []);
+  const chips = hlRaw.length
+    ? `<div class="acc-chips">${hlRaw.map((x) => `<span class="acc-chip">${escapeHtml(String(x))}</span>`).join('')}</div>`
+    : '';
+  const nights = a.stay_nights != null ? `${Number(a.stay_nights)}박` : '';
+  const basis = a.price_basis_note ? ` <span class="muted">(${escapeHtml(String(a.price_basis_note))})</span>` : '';
+  let priceClean = '';
+  if (a.price_per_night_krw) {
     const total = a.total_stay_estimate_krw
       ? ` · 합계 약 ${a.total_stay_estimate_krw.toLocaleString()}원`
       : '';
-    const priceClean = a.price_per_night_krw
-      ? `<p class="acc-price">${a.price_per_night_krw.toLocaleString()}원/박${nights ? ' · ' + nights : ''}${total}</p>`
-      : (a.location ? `<p class="acc-price muted">가격 정보는 링크에서 확인</p>` : '');
-    const flags = [a.breakfast_included ? '조식 포함' : (a.breakfast_included === false ? '조식 미포함' : null), a.kitchen ? '주방' : null].filter(Boolean);
-    const flagLine = flags.length ? `<p class="acc-flags">${flags.map((t) => escapeHtml(t)).join(' · ')}</p>` : '';
-    const bed = a.bedroom_summary ? `<p class="acc-meta"><strong>침실·구성</strong> ${escapeHtml(a.bedroom_summary)}</p>` : '';
-    const park = a.parking_fee_text ? `<p class="acc-meta"><strong>주차</strong> ${escapeHtml(a.parking_fee_text)}</p>` : '';
-    const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·케이블카·주차 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
-    const driveBlock = (() => {
-      const rows = Array.isArray(a.attraction_drive_times) ? a.attraction_drive_times : [];
-      if (!rows.length && a.total_driving_minutes_sum == null) return '';
-      const lis = rows.map((d) => `<li>${escapeHtml(d.name || '')} — 승용차 약 <strong>${d.minutes != null ? d.minutes : '?'}</strong>분 (편도)</li>`).join('');
-      const sum = a.total_driving_minutes_sum != null
-        ? `<p class="acc-drive-sum">명소까지 편도 주행 분 합계(추정): 약 <strong>${a.total_driving_minutes_sum}</strong>분</p>`
-        : '';
-      return `<div class="acc-drive-block"><p class="acc-drive-title"><strong>숙소 → 일정 명소(승용차)</strong></p><ul class="acc-drive-list">${lis}</ul>${sum}</div>`;
-    })();
-    const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
-    const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
-      ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (URL)</a></p>`
-      : '';
-    const rating = a.rating != null ? `<span class="acc-rating">★ ${escapeHtml(String(a.rating))}</span>` : '';
-    return `
-    <div class="option-item accommodation-card" data-idx="${i}">
-      ${gallery}
-      <div class="accommodation-card-body">
+    priceClean = `<p class="acc-price">${a.price_per_night_krw.toLocaleString()}원/박${nights ? ' · ' + nights : ''}${total}</p>`;
+  } else if (a.total_stay_estimate_krw) {
+    priceClean = `<p class="acc-price">합계 약 ${a.total_stay_estimate_krw.toLocaleString()}원 (추정)${nights ? ' · ' + nights : ''}${basis}</p>`;
+  } else {
+    priceClean = a.location ? '<p class="acc-price muted">가격 추정 미표시 — 예약 링크 또는 Hotellook 연동 시 표시</p>' : '';
+  }
+  const flags = [a.breakfast_included ? '조식 포함' : (a.breakfast_included === false ? '조식 미포함' : null), a.kitchen ? '주방' : null].filter(Boolean);
+  const flagLine = flags.length ? `<p class="acc-flags">${flags.map((t) => escapeHtml(t)).join(' · ')}</p>` : '';
+  const bed = a.bedroom_summary ? `<p class="acc-meta"><strong>침실·구성</strong> ${escapeHtml(a.bedroom_summary)}</p>` : '';
+  const park = a.parking_fee_text ? `<p class="acc-meta"><strong>주차</strong> ${escapeHtml(a.parking_fee_text)}</p>` : '';
+  const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·주행 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
+  const driveBlock = accommodationDriveBlockHtml(a, driveScope);
+  const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
+  const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
+    ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (URL)</a></p>`
+    : '';
+  const rating = a.rating != null ? `<span class="acc-rating">★ ${escapeHtml(String(a.rating))}</span>` : '';
+  const segNote = a.segment_stay_date
+    ? `<p class="acc-seg-date-note muted">기준일: ${escapeHtml(String(a.segment_stay_date))} (이날 방문 명소 동선)</p>`
+    : '';
+  return `
         <h3>${escapeHtml(a.name || '')}${typeKo ? ` <span class="acc-type-badge">${escapeHtml(typeKo)}</span>` : ''} ${rating}</h3>
         <p class="acc-location">${escapeHtml(a.location || '')}</p>
+        ${segNote}
         ${rationale}
         ${priceClean}
         ${flagLine}
@@ -3406,16 +3443,113 @@ function renderAccommodations(items) {
         ${chips}
         ${driveBlock}
         ${fit}
-        ${url}
-      </div>
+        ${url}`;
+}
+
+/** @param {'single_day'|'all_trip'} driveScope */
+function accommodationCardInnerHtml(a, driveScope) {
+  return `${accommodationGalleryHtml(a)}<div class="accommodation-card-body">${accommodationCardBodyHtml(a, driveScope)}</div>`;
+}
+
+function sumTripEstimateFromDailySelections(segments) {
+  const sel = state.accommodationSelectionByDate || {};
+  let sum = 0;
+  let n = 0;
+  for (const seg of segments) {
+    const d = seg.date;
+    const h = sel[d];
+    if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+      sum += h.total_stay_estimate_krw;
+      n++;
+    }
+  }
+  return { sum, n, totalDays: segments.length };
+}
+
+function dailyTripFooterInnerHtml(segments) {
+  const { sum, n, totalDays } = sumTripEstimateFromDailySelections(segments);
+  if (n === 0) {
+    return '<p class="acc-trip-total muted">날짜마다 숙소를 한 곳씩 고르면, 일행·객실 수를 반영한 요금 합산(추정)이 여기에 표시됩니다.</p>';
+  }
+  const pct = n < totalDays ? ` (${n}/${totalDays}일 선택됨)` : '';
+  return `<p class="acc-trip-total"><strong>선택 숙소 요금 합산(추정)</strong> 약 ${sum.toLocaleString()}원${pct}<span class="muted"> · 날짜별 1박·객실 수는 상단 안내 및 각 카드 참고</span></p>`;
+}
+
+function renderAccommodations(items) {
+  const list = $('#accommodations-list');
+  if (!list) return;
+  const rows = Array.isArray(items) ? items : [];
+  const isDaily = rows.length > 0 && rows[0]?.segment_type === 'daily_stay_hint';
+
+  if (isDaily) {
+    list.innerHTML = rows.map((seg, si) => {
+      const d = seg.date || '';
+      const hotels = Array.isArray(seg.hotels) ? seg.hotels : [];
+      const sel = state.accommodationSelectionByDate?.[d];
+      const selId = sel?.hotel_id ?? sel?.place_id;
+      const cards = hotels.map((h, hi) => {
+        const id = h.hotel_id ?? h.place_id;
+        const selected = selId && id && selId === id;
+        const ds = driveScopeFromHotel(h);
+        const inner = accommodationCardInnerHtml(h, ds);
+        return `
+    <div class="option-item accommodation-card acc-card-by-date${selected ? ' selected' : ''}" role="button" tabindex="0" data-seg-idx="${si}" data-date="${escapeHtml(d)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
+      ${inner}
+    </div>`;
+      }).join('');
+      const hint = seg.overnight_area_hint ? `<p class="acc-seg-hint">${escapeHtml(seg.overnight_area_hint)}</p>` : '';
+      const route = seg.day_route_summary ? `<p class="acc-seg-route muted">${escapeHtml(seg.day_route_summary)}</p>` : '';
+      const party = seg.party_rooms_hint ? `<p class="acc-seg-party muted">${escapeHtml(seg.party_rooms_hint)}</p>` : '';
+      const anames = Array.isArray(seg.attraction_names_today) && seg.attraction_names_today.length
+        ? `<p class="acc-seg-attr"><strong>이날 방문</strong> ${seg.attraction_names_today.map((x) => escapeHtml(String(x))).join(' · ')}</p>`
+        : '';
+      return `
+  <section class="acc-day-segment" aria-labelledby="acc-head-${si}">
+    <header class="acc-day-header" id="acc-head-${si}">
+      <h2 class="acc-day-title">${escapeHtml(d)} <span class="acc-day-badge">이날 숙소 후보</span></h2>
+      ${hint}
+      ${anames}
+      ${route}
+      ${party}
+    </header>
+    <div class="acc-day-cards">${cards}</div>
+  </section>`;
+    }).join('') + `<footer class="acc-trip-footer">${dailyTripFooterInnerHtml(rows)}</footer>`;
+
+    list.querySelectorAll('.acc-card-by-date').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target?.closest('a')) return;
+        const date = el.dataset.date;
+        const si = parseInt(el.dataset.segIdx, 10);
+        const hi = parseInt(el.dataset.hotelIdx, 10);
+        const seg = rows[si];
+        const hotel = seg?.hotels?.[hi];
+        if (!hotel || !date) return;
+        el.closest('.acc-day-segment')?.querySelectorAll('.acc-card-by-date').forEach((x) => x.classList.remove('selected'));
+        el.classList.add('selected');
+        state.accommodationSelectionByDate[date] = hotel;
+        const foot = list.querySelector('.acc-trip-footer');
+        if (foot) foot.innerHTML = dailyTripFooterInnerHtml(rows);
+      });
+    });
+    return;
+  }
+
+  list.innerHTML = rows.map((a, i) => {
+    const ds = driveScopeFromHotel(a);
+    const inner = accommodationCardInnerHtml(a, ds);
+    return `
+    <div class="option-item accommodation-card acc-legacy-card" data-idx="${i}">
+      ${inner}
     </div>`;
   }).join('');
-  list.querySelectorAll('.option-item').forEach(el => {
+
+  list.querySelectorAll('.acc-legacy-card').forEach((el) => {
     el.addEventListener('click', (e) => {
       if (e.target?.closest('a')) return;
-      list.querySelectorAll('.option-item').forEach(x => x.classList.remove('selected'));
+      list.querySelectorAll('.acc-legacy-card').forEach((x) => x.classList.remove('selected'));
       el.classList.add('selected');
-      state.selectedAccommodation = items[parseInt(el.dataset.idx, 10)];
+      state.selectedAccommodation = rows[parseInt(el.dataset.idx, 10)];
     });
   });
 }
@@ -3427,7 +3561,31 @@ $('#btn-back-accommodation').addEventListener('click', () => {
 });
 
 $('#btn-confirm-booking').addEventListener('click', async () => {
-  if (!state.selectedAccommodation) { alert('숙소를 선택해 주세요.'); return; }
+  const acc = state.accommodations || [];
+  const isDaily = acc.length > 0 && acc[0]?.segment_type === 'daily_stay_hint';
+  if (isDaily) {
+    const missing = acc.filter((s) => !state.accommodationSelectionByDate?.[s.date]);
+    if (missing.length) {
+      alert('여행일마다 숙소 후보 중 하나를 선택해 주세요.');
+      return;
+    }
+    let tripTotal = 0;
+    for (const s of acc) {
+      const h = state.accommodationSelectionByDate[s.date];
+      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+        tripTotal += h.total_stay_estimate_krw;
+      }
+    }
+    state.selectedAccommodation = {
+      mode: 'by_date',
+      choices: { ...state.accommodationSelectionByDate },
+      trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
+      nights_count: acc.length,
+    };
+  } else if (!state.selectedAccommodation) {
+    alert('숙소를 선택해 주세요.');
+    return;
+  }
   show('loading');
   try {
     const payload = baseSessionPayload({

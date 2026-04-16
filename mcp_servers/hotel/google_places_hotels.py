@@ -1,4 +1,4 @@
-"""Google Places(Nearby) + Distance Matrix로 일정 명소 대비 주행시간이 짧은 숙소 후보를 고른다."""
+"""Google Places(Nearby) + Distance Matrix — 일자·명소 구간별 숙소 후보."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import time
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -52,14 +53,12 @@ def _centroid(points: list[dict[str, Any]]) -> tuple[float, float]:
 
 
 def _radius_for_points(center: tuple[float, float], points: list[dict[str, Any]]) -> int:
-    """명소까지 거리 + 여유로 Nearby 반경(미터), 최대 50km."""
     clat, clng = center
     max_km = 0.0
     for p in points:
         km = _haversine_km(clat, clng, p["lat"], p["lng"])
         max_km = max(max_km, km)
-    # 반경은 중심에서 가장 먼 명소까지 + 약 15km 버퍼, 최소 8km
-    r = int(max(8000, (max_km + 15) * 1000))
+    r = int(max(8000, (max_km + 12) * 1000))
     return min(50000, r)
 
 
@@ -79,7 +78,6 @@ def nearby_lodging(
     api_key: str,
     page_token: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Returns (results, next_page_token)."""
     params: dict[str, Any] = {
         "location": f"{lat},{lng}",
         "radius": str(radius_m),
@@ -122,10 +120,8 @@ def distance_matrix_durations_minutes(
     dest_points: list[dict[str, Any]],
     api_key: str,
 ) -> list[tuple[str, int | None]]:
-    """각 목적지까지 편도 주행 분. 이름은 dest_points[].name."""
     if not dest_points:
         return []
-    # 한 요청당 destination 최대 ~25 (문서상 25 destinations)
     origins = f"{origin_lat},{origin_lng}"
     parts: list[str] = []
     for p in dest_points[:25]:
@@ -174,17 +170,22 @@ def _score_total_minutes(pairs: list[tuple[str, int | None]]) -> float:
     return float(s)
 
 
-def search_route_optimized_hotels(
+def _max_minutes(pairs: list[tuple[str, int | None]]) -> int:
+    vals = [m for _, m in pairs if m is not None]
+    return max(vals) if vals else 0
+
+
+def rank_hotels_for_attraction_points(
     *,
     location_label: str,
     attraction_points: list[dict[str, Any]],
-    check_in: str,
-    check_out: str,
-    travelers_total: int,
-    api_key: str | None,
+    api_key: str,
+    max_hotels: int = 3,
+    top_candidates: int = 8,
+    itinerary_scope: str = "single_day",
 ) -> list[dict[str, Any]] | None:
-    """실패 시 None (호출 측에서 mock으로 폴백)."""
-    key = (api_key or os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip()
+    """특정 일(또는 구간)의 명소 집합에 대해서만 주행 분을 계산해 상위 숙소를 고른다."""
+    key = (api_key or "").strip()
     if not key:
         return None
 
@@ -199,7 +200,6 @@ def search_route_optimized_hotels(
         center = g
         radius = 15000
 
-    # Nearby 후보 수집 (최대 2페이지)
     raw: list[dict[str, Any]] = []
     tok: str | None = None
     for _ in range(2):
@@ -207,7 +207,7 @@ def search_route_optimized_hotels(
         raw.extend(batch)
         if not tok:
             break
-        time.sleep(2.0)  # next_page_token 유효화 대기
+        time.sleep(2.0)
 
     if not raw:
         return None
@@ -218,10 +218,10 @@ def search_route_optimized_hotels(
         return (-rating * math.log10(nrat + 10), -nrat)
 
     raw.sort(key=sort_key)
-    candidates = raw[:8]
+    candidates = raw[:top_candidates]
 
-    scored: list[tuple[float, dict[str, Any], list[tuple[str, int | None]]]] = []
     dest_for_matrix = points[:25] if points else []
+    scored: list[tuple[float, float, dict[str, Any], list[tuple[str, int | None]]]] = []
     for c in candidates:
         pid = c.get("place_id")
         if not pid:
@@ -238,28 +238,28 @@ def search_route_optimized_hotels(
                 float(hlat), float(hlng), dest_for_matrix, key
             )
             total = _score_total_minutes(pairs)
+            mx = float(_max_minutes(pairs))
         else:
             pairs = []
             total = 0.0
-        scored.append((total, det, pairs))
+            mx = 0.0
+        scored.append((total, mx, det, pairs))
 
     if not scored:
         return None
 
     if dest_for_matrix:
-        scored.sort(key=lambda x: x[0])
+        scored.sort(key=lambda x: (x[0], x[1]))
     else:
         scored.sort(
             key=lambda x: (
-                -float((x[1] or {}).get("rating") or 0),
-                -float((x[1] or {}).get("user_ratings_total") or 0),
+                -float((x[2] or {}).get("rating") or 0),
+                -float((x[2] or {}).get("user_ratings_total") or 0),
             )
         )
-    nights = max(1, _nights_between(check_in, check_out))
-    guests = max(1, travelers_total)
 
-    out: list[dict[str, Any]] = []
-    for _, det, pairs in scored[:5]:
+    out_hotels: list[dict[str, Any]] = []
+    for total_min, max_min, det, pairs in scored[:max_hotels]:
         pid = det.get("place_id") or ""
         photos = det.get("photos") or []
         image_urls: list[str] = []
@@ -277,24 +277,36 @@ def search_route_optimized_hotels(
         drive_rows = [
             {"name": name, "minutes": m} for name, m in pairs if m is not None
         ]
-        unknown = sum(1 for _, m in pairs if m is None)
         sum_m = sum(m for _, m in pairs if m is not None)
-        note = (
-            f"렌트(승용차) 기준 숙소→각 명소 편도 주행 분 합계 약 {sum_m}분"
-            if pairs
-            else "명소 좌표가 없어 주행 분은 표시하지 않았습니다(목적지 중심 검색)."
-        )
+        max_m = _max_minutes(pairs)
+        unknown = sum(1 for _, m in pairs if m is None)
+        if pairs:
+            if itinerary_scope == "full_trip":
+                note = (
+                    f"여행 일정에 포함된 전체 명소 기준(날짜 구분 없음): "
+                    f"편도 주행 분 합 약 {sum_m}분, 최장 편도 약 {max_m}분 (렌트·승용차). "
+                    "실제 이동은 날짜·동선별로 달라집니다."
+                )
+            else:
+                note = (
+                    f"이 날 방문하는 명소만 기준: 편도 주행 분 합 약 {sum_m}분, "
+                    f"최장 편도 약 {max_m}분 (렌트·승용차)"
+                )
+        else:
+            note = "명소 좌표 없음."
         if unknown:
-            note += f" (일부 구간 {unknown}건은 계산 실패)"
+            note += f" (실패 {unknown}건)"
         if len(attraction_points) > 25:
-            note += " — 명소가 많아 상위 25곳만 반영했습니다."
+            note += " — 명소가 많아 상위 25곳만 반영."
 
         maps_url = det.get("url") or f"https://www.google.com/maps/search/?api=1&query_place_id={pid}"
 
-        out.append(
+        out_hotels.append(
             {
                 "hotel_id": f"GP-{pid[:24]}",
                 "place_id": pid,
+                "hotel_lat": float(hlat),
+                "hotel_lng": float(hlng),
                 "name": det.get("name") or "숙소",
                 "location": det.get("formatted_address") or location_label,
                 "price_per_night_krw": None,
@@ -309,24 +321,163 @@ def search_route_optimized_hotels(
                 "booking_url": maps_url,
                 "accommodation_type": "hotel",
                 "image_urls": image_urls,
-                "stay_nights": nights,
+                "stay_nights": 1,
                 "total_stay_estimate_krw": None,
                 "selection_rationale": (
-                    f"Google Maps 기준으로 일정 명소까지의 주행 시간 합이 비교적 짧은 숙소 후보입니다. "
-                    f"(일행 {guests}명, 체크인 {check_in})"
+                    "당일 일정에 포함된 명소까지의 주행 시간을 기준으로 고른 후보입니다."
                 ),
                 "attraction_drive_times": drive_rows,
                 "total_driving_minutes_sum": int(sum_m) if pairs else None,
-                "optimization_metric": "sum_of_driving_minutes_hotel_to_attractions",
+                "max_driving_minutes_one_way": int(max_m) if pairs else None,
+                "optimization_metric": "daily_attractions_only_sum_and_max_leg",
+                "drive_time_scope": (
+                    "all_trip_attractions" if itinerary_scope == "full_trip" else "single_day_attractions"
+                ),
             }
         )
 
-    return out if out else None
+    return out_hotels if out_hotels else None
+
+
+def search_route_optimized_hotels(
+    *,
+    location_label: str,
+    attraction_points: list[dict[str, Any]],
+    check_in: str,
+    check_out: str,
+    travelers_total: int,
+    api_key: str | None,
+    hotellook_token: str | None = None,
+    rooms_for_pricing: int = 1,
+) -> list[dict[str, Any]] | None:
+    """전체 명소 한 덩어리(레거시 폴백)."""
+    key = (api_key or os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip()
+    if not key:
+        return None
+    hotels = rank_hotels_for_attraction_points(
+        location_label=location_label,
+        attraction_points=attraction_points,
+        api_key=key,
+        max_hotels=5,
+        top_candidates=8,
+        itinerary_scope="full_trip",
+    )
+    if not hotels:
+        return None
+    nights = max(1, _nights_between(check_in, check_out))
+    guests = max(1, travelers_total)
+    for h in hotels:
+        h["stay_nights"] = nights
+        h["selection_rationale"] = (
+            f"Google Maps 기준(전체 명소 합산 레거시). 일행 {guests}명, 체크인 {check_in}"
+        )
+        _attach_hotellook_price(h, check_in, check_out, hotellook_token, rooms_for_pricing)
+    return hotels
+
+
+def search_hotels_per_daily_segments(
+    *,
+    location_label: str,
+    daily_segments: list[dict[str, Any]],
+    check_in: str,
+    check_out: str,
+    travelers_total: int,
+    api_key: str | None,
+    hotellook_token: str | None = None,
+    rooms_for_pricing: int = 1,
+) -> list[dict[str, Any]] | None:
+    """일자별로 명소 구간만 두고 숙소 후보를 나눈다."""
+    key = (api_key or os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip()
+    if not key or not daily_segments:
+        return None
+
+    out_segments: list[dict[str, Any]] = []
+    guests = max(1, travelers_total)
+
+    for seg in daily_segments:
+        d = str(seg.get("date") or "")[:10]
+        pts = seg.get("points") or []
+        if not isinstance(pts, list) or not pts:
+            continue
+        ohint = seg.get("overnight_area_hint")
+        rnotes = (seg.get("route_notes") or "")[:400]
+        names = [p.get("name") or "" for p in pts if isinstance(p, dict)]
+
+        hotels = rank_hotels_for_attraction_points(
+            location_label=location_label,
+            attraction_points=pts,
+            api_key=key,
+            max_hotels=3,
+            top_candidates=8,
+        )
+        if not hotels:
+            continue
+
+        ci, co = _one_night_around_date(d)
+        for h in hotels:
+            h["segment_stay_date"] = d
+            h["selection_rationale"] = (
+                f"{d} 당일 방문({', '.join(names[:6])}{'…' if len(names) > 6 else ''}) 기준. 일행 {guests}명."
+            )
+            _attach_hotellook_price(h, ci, co, hotellook_token, rooms_for_pricing)
+
+        out_segments.append(
+            {
+                "segment_type": "daily_stay_hint",
+                "date": d,
+                "overnight_area_hint": ohint,
+                "day_route_summary": rnotes,
+                "attraction_names_today": names,
+                "hotels": hotels,
+                "party_rooms_hint": f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)",
+            }
+        )
+
+    return out_segments if out_segments else None
+
+
+def _attach_hotellook_price(
+    hotel: dict[str, Any],
+    check_in: str,
+    check_out: str,
+    token: str | None,
+    rooms: int,
+) -> None:
+    if not token:
+        return
+    try:
+        from mcp_servers.hotel.hotellook_prices import fetch_hotellook_min_price
+
+        lat = float(hotel.get("hotel_lat") or 0)
+        lng = float(hotel.get("hotel_lng") or 0)
+        if lat == 0 and lng == 0:
+            return
+        krw, cur_note, _ = fetch_hotellook_min_price(
+            str(hotel.get("name") or ""),
+            lat,
+            lng,
+            check_in[:10],
+            check_out[:10],
+            token,
+            rooms=rooms,
+        )
+        if krw:
+            hotel["total_stay_estimate_krw"] = krw
+            hotel["price_basis_note"] = f"Hotellook 캐시 {cur_note} · 객실 수 {rooms}"
+    except Exception as e:
+        logger.debug("hotellook attach skipped: %s", e)
+
+
+def _one_night_around_date(d: str) -> tuple[str, str]:
+    try:
+        a = datetime.strptime(d[:10], "%Y-%m-%d").date()
+        b = a + timedelta(days=1)
+        return a.isoformat(), b.isoformat()
+    except Exception:
+        return d, d
 
 
 def _nights_between(check_in: str, check_out: str) -> int:
-    from datetime import datetime
-
     try:
         a = datetime.strptime((check_in or "")[:10], "%Y-%m-%d").date()
         b = datetime.strptime((check_out or "")[:10], "%Y-%m-%d").date()
