@@ -12,7 +12,16 @@ import re
 from datetime import datetime
 from typing import Any
 
-from shared.directions_parking import driving_minutes_between, geocode_address
+from shared.directions_parking import (
+    driving_minutes_between,
+    geocode_address,
+    reverse_geocode_city_display_name,
+)
+from shared.loop_route_planner import (
+    add_attraction_markers_to_static_map,
+    fetch_loop_route_directions,
+    pick_closest_farthest_and_order,
+)
 from shared.google_place_details import fetch_place_details_raw
 
 logger = logging.getLogger(__name__)
@@ -277,7 +286,35 @@ async def enrich_route_bundle_with_directions_schedule(
             continue
         enriched.append(await _ensure_coords(dict(a), destination, api_key))
 
-    ordered = _nn_order(s_lat, s_lng, enriched)
+    ordered: list[dict[str, Any]] = []
+    loop_route_meta: dict[str, Any] = {}
+    try:
+        ordered, loop_meta = await pick_closest_farthest_and_order(
+            s_lat, s_lng, enriched, api_key
+        )
+        loop_route_meta = dict(loop_meta)
+        if ordered:
+            dir_meta = await fetch_loop_route_directions(
+                s_lat, s_lng, ordered[0], ordered[-1], api_key
+            )
+            loop_route_meta.update(dir_meta)
+            su = loop_route_meta.get("static_map_url")
+            loop_route_meta["static_map_url"] = add_attraction_markers_to_static_map(
+                su, enriched, api_key
+            )
+            loop_route_meta["ordered_attraction_ids"] = [
+                str(x.get("id")) for x in ordered if x.get("id")
+            ]
+            loop_route_meta["route_kind_ko"] = (
+                "도착 앵커 → (승용차 기준) 가장 가까운 명소 → 가장 먼 명소 → 앵커로 돌아오는 루프. "
+                "명소 방문 순서는 이 루프의 주 구간(가까운 쪽→먼 쪽)에 사영해 정렬했습니다."
+            )
+    except Exception as e:
+        logger.warning("loop_route_planner failed, falling back to NN: %s", e)
+        ordered = []
+
+    if not ordered:
+        ordered = _nn_order(s_lat, s_lng, enriched)
     if not ordered:
         return route_bundle
 
@@ -303,6 +340,15 @@ async def enrich_route_bundle_with_directions_schedule(
     cut = _first_day_arrival_cut_local_minutes(selected_flight, dates[0] if dates else "")
     seq_idx = 0
     daily_schedule: list[dict[str, Any]] = []
+
+    id_to_coord: dict[str, tuple[float, float]] = {}
+    for o in ordered:
+        oid = str(o.get("id") or "").strip()
+        if not oid:
+            continue
+        alat, alng = o.get("attr_lat"), o.get("attr_lng")
+        if isinstance(alat, (int, float)) and isinstance(alng, (int, float)):
+            id_to_coord[oid] = (float(alat), float(alng))
 
     for di, d in enumerate(dates):
         am_b, pm_b = am_budget, pm_budget
@@ -362,6 +408,24 @@ async def enrich_route_bundle_with_directions_schedule(
 
         route_notes = " · ".join(parts) if parts else ""
 
+        overnight_hint = f"{destination} 인근 (동선·체류 시간 기준)"
+        day_coords: list[tuple[float, float]] = []
+        for pid in (
+            [morning_id, afternoon_id]
+            + ([str(x) for x in extra_ids] if extra_ids else [])
+        ):
+            if not pid:
+                continue
+            key = str(pid)
+            if key in id_to_coord:
+                day_coords.append(id_to_coord[key])
+        if day_coords:
+            clat = sum(c[0] for c in day_coords) / len(day_coords)
+            clng = sum(c[1] for c in day_coords) / len(day_coords)
+            city = await reverse_geocode_city_display_name(clat, clng, api_key)
+            if city:
+                overnight_hint = f"{city} 인근 · 당일 방문 구역 중심"
+
         warn = ""
         if morning_id and afternoon_id:
             m_visit = id_to_visit.get(morning_id, 120)
@@ -378,13 +442,45 @@ async def enrich_route_bundle_with_directions_schedule(
             "morning_attraction_id": morning_id,
             "afternoon_attraction_id": afternoon_id,
             "extra_attraction_ids": extra_ids,
-            "overnight_area_hint": f"{destination} 인근 (동선·체류 시간 기준)",
+            "overnight_area_hint": overnight_hint,
             "route_notes": route_notes,
             "morning_drive_from_previous_minutes": morning_drive,
             "between_am_pm_drive_minutes": between_drive,
             "schedule_pace_warning": warn,
         }
         daily_schedule.append(row)
+
+    def _centroid_for_ids(ids: list[str | None]) -> tuple[float, float] | None:
+        pts: list[tuple[float, float]] = []
+        for i in ids:
+            if not i:
+                continue
+            key = str(i)
+            if key in id_to_coord:
+                pts.append(id_to_coord[key])
+        if not pts:
+            return None
+        return (
+            sum(p[0] for p in pts) / len(pts),
+            sum(p[1] for p in pts) / len(pts),
+        )
+
+    for di in range(1, len(daily_schedule)):
+        prev = daily_schedule[di - 1]
+        cur = daily_schedule[di]
+        prev_ids: list[str | None] = [
+            prev.get("morning_attraction_id"),
+            prev.get("afternoon_attraction_id"),
+            *([str(x) for x in (prev.get("extra_attraction_ids") or [])]),
+        ]
+        cur_ids = [cur.get("morning_attraction_id"), cur.get("afternoon_attraction_id")]
+        pc = _centroid_for_ids(prev_ids)
+        cc = _centroid_for_ids(cur_ids)
+        if not pc or not cc:
+            continue
+        gap = await driving_minutes_between(api_key, pc[0], pc[1], cc[0], cc[1])
+        cur["approx_drive_previous_day_region_to_today_minutes"] = gap
+        cur["suggests_hotel_relocation"] = bool(gap is not None and gap > 60)
 
     rp = dict(route_bundle.get("route_plan") or {})
     rp["daily_schedule"] = daily_schedule
@@ -398,14 +494,22 @@ async def enrich_route_bundle_with_directions_schedule(
             f"선택만으로는 일자별 오전·오후 슬롯(최대 {slot_n}곳)을 채우기에 부족해, "
             f"고르지 않은 후보 중 평점·리뷰 수 순으로 {len(auto_ids)}곳을 자동 포함했습니다. "
         )
+    route_note = (
+        f"{start_label} 도착 후 루프·경로상 정렬로 명소를 순서대로 방문합니다. "
+        if loop_route_meta.get("closest_attraction_id")
+        else f"{start_label} 도착 후 Nearest-Neighbor 동선으로 명소를 순서대로 방문합니다. "
+    )
     rp["lodging_strategy"] = (
         fill_note
-        + f"{start_label} 도착 후 Nearest-Neighbor 동선으로 명소를 순서대로 방문합니다. "
-        f"여행 속도({pace}) 기준 오전·오후 가용 시간을 고려했습니다. "
+        + route_note
+        + f"여행 속도({pace}) 기준 오전·오후 가용 시간을 고려했습니다. "
+        "숙소는 당일 명소까지 승용차 약 60분 이내를 우선합니다(불가 시 완화). "
         + (rp.get("lodging_strategy") or "")
     ).strip()
     rp["route_start_label"] = start_label
     rp["route_start_query"] = anchor_q
+    if loop_route_meta:
+        rp["loop_route"] = loop_route_meta
     out = dict(route_bundle)
     out["route_plan"] = rp
     return out

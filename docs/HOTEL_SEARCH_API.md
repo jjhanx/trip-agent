@@ -36,6 +36,12 @@
 - 일정에 **`daily_schedule`(또는 `daily_plan`)** 이 있으면 **각 날짜에 배정된 명소만** 그날의 Distance Matrix 대상으로 삼고, 응답은 `segment_type: "daily_stay_hint"` **일자별 블록**으로 나뉩니다. 각 숙소 객체에는 `drive_time_scope: "single_day_attractions"` 가 붙습니다.  
 - 일별 세그먼트를 만들 수 없을 때만 **여행 전체 명소**를 한 번에 넣는 레거시 경로를 쓰며, 이때 `drive_time_scope: "all_trip_attractions"` 이고 UI에서 “전체 일정 기준”으로 안내합니다.
 
+### 루프 동선·60분·숙소 이동 힌트
+
+- `route_plan.loop_route`(경로·맛집 단계에서 서버가 채움): 도착 앵커에서 **승용차 시간이 최단·최장**인 명소를 고른 뒤, **앵커 → 최근접 → 최원거리 → 앵커** Directions 루프와 **Static Map URL**, **Google Maps 링크**, 방문 순서 `ordered_attraction_ids`를 제공합니다.  
+- 일자별 숙소 후보는 당일 명소까지 **최장 편도 약 60분 이내**를 우선으로 고릅니다(`max_commute_minutes_one_way=60`). 조건을 만족하는 후보가 없으면 완화하고 `commute_constraint_relaxed`로 표시합니다.  
+- `daily_schedule[].suggests_hotel_relocation`: 전일 방문 구역 중심에서 당일 구역 중심으로의 승용차 시간이 **60분을 넘으면** `true` — 같은 숙소를 유지하기 어려울 수 있음을 뜻합니다(추정).
+
 ## 렌트카를 고른 경우
 
 세션은 숙소 단계 응답에서 **`local_transport`를 빈 배열**로 돌려, 렌트카·대중교통 카드를 다시 붙이지 않습니다. 이동 시간은 **숙소 카드 안의 “숙소 → 일정 명소(승용차)”** 블록에만 반영됩니다.

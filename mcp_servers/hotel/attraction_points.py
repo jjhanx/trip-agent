@@ -65,3 +65,73 @@ def collect_attraction_latlngs(
         return out
 
     return list(by_id.values())
+
+
+def collect_daily_attraction_segments(
+    catalog: list[dict[str, Any]] | None,
+    selected_itinerary: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """일자별 당일 방문 명소 좌표만 묶는다. 숙소 추천은 이 구간마다 별도로 최적화한다.
+
+    각 항목: {\"date\", \"points\": [{id,name,lat,lng},...], \"overnight_area_hint\", \"route_notes\"}
+    """
+    cat = catalog if isinstance(catalog, list) else []
+    if not cat and isinstance(selected_itinerary, dict):
+        nested = selected_itinerary.get("itinerary_attraction_catalog")
+        if isinstance(nested, list):
+            cat = nested
+    by_id: dict[str, dict[str, Any]] = {}
+    for a in cat:
+        if not isinstance(a, dict):
+            continue
+        aid = str(a.get("id") or "").strip()
+        if not aid:
+            continue
+        lat, lng = a.get("attr_lat"), a.get("attr_lng")
+        if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+            continue
+        by_id[aid] = {
+            "id": aid,
+            "name": str(a.get("name") or "").strip() or aid,
+            "lat": float(lat),
+            "lng": float(lng),
+        }
+
+    itin = selected_itinerary if isinstance(selected_itinerary, dict) else {}
+    rows: list[dict[str, Any]] = []
+
+    rp = itin.get("route_plan")
+    if isinstance(rp, dict) and isinstance(rp.get("daily_schedule"), list):
+        rows = [r for r in (rp.get("daily_schedule") or []) if isinstance(r, dict)]
+
+    if not rows and isinstance(itin.get("daily_plan"), list):
+        rows = [r for r in (itin.get("daily_plan") or []) if isinstance(r, dict)]
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        d = str(row.get("date") or "").strip()[:10]
+        if not d:
+            continue
+        ids: list[str] = []
+        for k in ("morning_attraction_id", "afternoon_attraction_id"):
+            v = row.get(k)
+            if v:
+                ids.append(str(v))
+        for eid in row.get("extra_attraction_ids") or []:
+            ids.append(str(eid))
+        pts = [by_id[i] for i in ids if i in by_id]
+        if not pts:
+            continue
+        out.append(
+            {
+                "date": d,
+                "points": pts,
+                "overnight_area_hint": row.get("overnight_area_hint"),
+                "route_notes": row.get("route_notes"),
+                "suggests_hotel_relocation": row.get("suggests_hotel_relocation"),
+                "approx_drive_previous_day_region_to_today_minutes": row.get(
+                    "approx_drive_previous_day_region_to_today_minutes"
+                ),
+            }
+        )
+    return out

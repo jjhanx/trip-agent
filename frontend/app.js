@@ -2860,8 +2860,25 @@ function renderItineraryWorkflow(data) {
     const legs = rp.transit_legs || [];
     const daily = rp.daily_schedule || [];
     const lodging = rp.lodging_strategy || '';
+    const loopRoute = rp.loop_route || {};
     let html = `<div class="itinerary-phase"><h3>동선·추천 동네</h3>`;
     if (lodging) html += `<p>${escapeHtml(lodging)}</p>`;
+    if (loopRoute.static_map_url) {
+      const gmaps = typeof loopRoute.google_maps_directions_url === 'string' ? loopRoute.google_maps_directions_url : '';
+      const rk = loopRoute.route_kind_ko || '';
+      const legs = loopRoute.legs_summary_ko || '';
+      const oc = Array.isArray(loopRoute.ordered_attraction_ids) ? loopRoute.ordered_attraction_ids.join(' → ') : '';
+      html += `<div class="loop-route-block">
+        <h4>추천 루프 경로 (도착 앵커 → 가장 가까운 명소 → 가장 먼 명소 → 도착)</h4>
+        ${rk ? `<p class="muted">${escapeHtml(rk)}</p>` : ''}
+        <div class="loop-route-map-wrap">
+          <img class="loop-static-map" src="${String(loopRoute.static_map_url).replace(/"/g, '%22')}" alt="루프 동선 지도" loading="lazy" width="640" height="400" />
+        </div>
+        ${gmaps ? `<p><a href="${gmaps.replace(/"/g, '%22')}" target="_blank" rel="noopener">Google Maps에서 동선 열기</a></p>` : ''}
+        ${legs ? `<p class="muted">${escapeHtml(legs)}</p>` : ''}
+        ${oc ? `<p class="muted" style="font-size:0.85rem;">명소 방문 순서(동선상): ${escapeHtml(oc)}</p>` : ''}
+      </div>`;
+    }
     if (legs.length) {
       html += '<h4>공항 이동 구간</h4><ul>';
       legs.forEach((leg) => {
@@ -2888,7 +2905,11 @@ function renderItineraryWorkflow(data) {
           ? ` · 추가 ${escapeHtml(row.extra_attraction_ids.join(', '))}` : '';
         const warn = row.schedule_pace_warning ? ` <span class="muted">(${escapeHtml(row.schedule_pace_warning)})</span>` : '';
         const notes = row.route_notes ? `<div class="muted" style="font-size:0.88rem;margin:0.25rem 0 0;">${escapeHtml(row.route_notes)}</div>` : '';
-        html += `<li><strong>${escapeHtml(row.date || '')}</strong>: 오전 ${escapeHtml(row.morning_attraction_id || '—')} · 오후 ${escapeHtml(row.afternoon_attraction_id || '—')}${extra} · ${escapeHtml(row.overnight_area_hint || '')}${warn}${notes}</li>`;
+        const rel = row.suggests_hotel_relocation
+          ? ` <span class="tag-warn">이전 날 구역 대비 이동이 길어 숙소 이동을 검토</span>` : '';
+        const apx = row.approx_drive_previous_day_region_to_today_minutes != null
+          ? ` (전일 구역→당일 구역 승용차 약 ${row.approx_drive_previous_day_region_to_today_minutes}분)` : '';
+        html += `<li><strong>${escapeHtml(row.date || '')}</strong>: 오전 ${escapeHtml(row.morning_attraction_id || '—')} · 오후 ${escapeHtml(row.afternoon_attraction_id || '—')}${extra} · ${escapeHtml(row.overnight_area_hint || '')}${rel}${apx}${warn}${notes}</li>`;
       });
       html += '</ul>';
     }
@@ -3396,6 +3417,39 @@ function accommodationDriveBlockHtml(a, driveScope) {
 }
 
 /** @param {'single_day'|'all_trip'} driveScope */
+function accommodationFacilityAndUrlHtml(a) {
+  const fh = a.facility_hints;
+  let fac = '';
+  if (fh && typeof fh === 'object') {
+    const bits = [];
+    if (fh.swimming_pool) bits.push('수영장(추정)');
+    if (fh.sauna) bits.push('사우나(추정)');
+    if (fh.jacuzzi) bits.push('자쿠지(추정)');
+    if (fh.gym_fitness) bits.push('체력단련/짐(추정)');
+    if (fh.spa) bits.push('스파(추정)');
+    if (fh.bbq) bits.push('바베큐(추정)');
+    if (bits.length) {
+      fac = `<p class="acc-fac"><strong>있으면 좋은 시설</strong> ${bits.join(' · ')} <span class="muted">— ${escapeHtml(fh.notes_ko || '공식 사이트로 확인')}</span></p>`;
+    }
+  }
+  const du = a.detail_urls;
+  let links = '';
+  if (du && typeof du === 'object') {
+    const parts = [];
+    if (du.google_maps && /^https?:\/\//i.test(du.google_maps)) {
+      parts.push(`<a href="${String(du.google_maps).replace(/"/g, '%22')}" target="_blank" rel="noopener">Google Maps</a>`);
+    }
+    if (du.official_website && /^https?:\/\//i.test(du.official_website)) {
+      parts.push(`<a href="${String(du.official_website).replace(/"/g, '%22')}" target="_blank" rel="noopener">공식·예약 웹</a>`);
+    }
+    if (parts.length) links = `<p class="acc-detail-urls"><strong>상세 URL</strong> ${parts.join(' · ')}</p>`;
+  }
+  const cr = a.commute_constraint_relaxed
+    ? '<p class="muted acc-commute-relaxed">당일 명소까지 60분 이내 후보가 없어 조건을 완화했습니다.</p>'
+    : '';
+  return `${fac}${links}${cr}`;
+}
+
 function accommodationCardBodyHtml(a, driveScope) {
   const typeKo = ACCOMMODATION_TYPE_KO[a.accommodation_type] || a.accommodation_type || '';
   const hlRaw = Array.isArray(a.feature_highlights) && a.feature_highlights.length
@@ -3424,8 +3478,9 @@ function accommodationCardBodyHtml(a, driveScope) {
   const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·주행 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
   const driveBlock = accommodationDriveBlockHtml(a, driveScope);
   const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
+  const facUrl = accommodationFacilityAndUrlHtml(a);
   const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
-    ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (URL)</a></p>`
+    ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (기본 링크)</a></p>`
     : '';
   const rating = a.rating != null ? `<span class="acc-rating">★ ${escapeHtml(String(a.rating))}</span>` : '';
   const segNote = a.segment_stay_date
@@ -3443,6 +3498,7 @@ function accommodationCardBodyHtml(a, driveScope) {
         ${chips}
         ${driveBlock}
         ${fit}
+        ${facUrl}
         ${url}`;
 }
 
@@ -3500,6 +3556,12 @@ function renderAccommodations(items) {
       const hint = seg.overnight_area_hint ? `<p class="acc-seg-hint">${escapeHtml(seg.overnight_area_hint)}</p>` : '';
       const route = seg.day_route_summary ? `<p class="acc-seg-route muted">${escapeHtml(seg.day_route_summary)}</p>` : '';
       const party = seg.party_rooms_hint ? `<p class="acc-seg-party muted">${escapeHtml(seg.party_rooms_hint)}</p>` : '';
+      const reloc = seg.suggests_hotel_relocation
+        ? '<p class="acc-seg-reloc"><strong>숙소 이동 검토</strong> 전일 구역과 오늘 방문 구역 사이 승용차 이동이 길어, 같은 숙소를 유지하기 어려울 수 있습니다. 아래 후보는 <strong>오늘 명소</strong> 기준입니다.</p>'
+        : '';
+      const apx = seg.approx_drive_previous_day_region_to_today_minutes != null
+        ? `<p class="muted acc-seg-apx">전일·당일 구역(중심) 간 승용차 약 ${seg.approx_drive_previous_day_region_to_today_minutes}분(추정)</p>`
+        : '';
       const anames = Array.isArray(seg.attraction_names_today) && seg.attraction_names_today.length
         ? `<p class="acc-seg-attr"><strong>이날 방문</strong> ${seg.attraction_names_today.map((x) => escapeHtml(String(x))).join(' · ')}</p>`
         : '';
@@ -3509,6 +3571,8 @@ function renderAccommodations(items) {
       <h2 class="acc-day-title">${escapeHtml(d)} <span class="acc-day-badge">이날 숙소 후보</span></h2>
       ${hint}
       ${anames}
+      ${reloc}
+      ${apx}
       ${route}
       ${party}
     </header>

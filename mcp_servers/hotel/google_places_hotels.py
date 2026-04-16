@@ -97,7 +97,8 @@ def nearby_lodging(
 def place_details_fields(place_id: str, api_key: str) -> dict[str, Any] | None:
     fields = (
         "place_id,name,rating,user_ratings_total,formatted_address,geometry,"
-        "photos,url,price_level,international_phone_number,types"
+        "photos,url,website,price_level,international_phone_number,types,"
+        "editorial_summary,opening_hours,business_status,wheelchair_accessible_entrance"
     )
     q = urlencode(
         {"place_id": place_id, "fields": fields, "key": api_key, "language": "ko"},
@@ -175,6 +176,32 @@ def _max_minutes(pairs: list[tuple[str, int | None]]) -> int:
     return max(vals) if vals else 0
 
 
+def _lodging_facility_hints(det: dict[str, Any]) -> dict[str, Any]:
+    """Places 세부에 없는 시설은 이름·요약 키워드로 추정(오탐 가능 → 확인 권장)."""
+    types = [str(t).lower() for t in (det.get("types") or [])]
+    type_blob = " ".join(types)
+    name = str(det.get("name") or "").lower()
+    ed = det.get("editorial_summary") if isinstance(det.get("editorial_summary"), dict) else {}
+    overview = str((ed or {}).get("overview") or "").lower()
+    blob = f"{name} {overview} {type_blob}"
+
+    def has_kw(*keys: str) -> bool:
+        return any(k in blob for k in keys)
+
+    return {
+        "swimming_pool": has_kw("pool", "수영", "piscina", "schwimmbad"),
+        "sauna": has_kw("sauna", "사우나"),
+        "jacuzzi": has_kw("jacuzzi", "자쿠지", "whirlpool", "hot tub"),
+        "gym_fitness": has_kw("gym", "fitness", "체력", "workout"),
+        "spa": has_kw("spa", "스파"),
+        "bbq": has_kw("bbq", "barbecue", "바베큐", "grill"),
+        "breakfast_included_hint": has_kw("breakfast", "조식", "buffet breakfast"),
+        "kitchenette_hint": has_kw("kitchen", "kitchenette", "주방", "cucina"),
+        "parking_free_hint": has_kw("free parking", "무료 주차", "parcheggio gratuito"),
+        "notes_ko": "시설은 구글 타입·이름·소개 키워드 추정이며, 예약 전 공식 사이트로 확인하세요.",
+    }
+
+
 def rank_hotels_for_attraction_points(
     *,
     location_label: str,
@@ -183,6 +210,8 @@ def rank_hotels_for_attraction_points(
     max_hotels: int = 3,
     top_candidates: int = 8,
     itinerary_scope: str = "single_day",
+    max_commute_minutes_one_way: int | None = 60,
+    travelers_total: int | None = None,
 ) -> list[dict[str, Any]] | None:
     """특정 일(또는 구간)의 명소 집합에 대해서만 주행 분을 계산해 상위 숙소를 고른다."""
     key = (api_key or "").strip()
@@ -248,6 +277,14 @@ def rank_hotels_for_attraction_points(
     if not scored:
         return None
 
+    commute_relaxed = False
+    if dest_for_matrix and max_commute_minutes_one_way and max_commute_minutes_one_way > 0:
+        capped = [x for x in scored if float(x[1]) <= float(max_commute_minutes_one_way)]
+        if capped:
+            scored = capped
+        else:
+            commute_relaxed = True
+
     if dest_for_matrix:
         scored.sort(key=lambda x: (x[0], x[1]))
     else:
@@ -300,6 +337,12 @@ def rank_hotels_for_attraction_points(
             note += " — 명소가 많아 상위 25곳만 반영."
 
         maps_url = det.get("url") or f"https://www.google.com/maps/search/?api=1&query_place_id={pid}"
+        website = (det.get("website") or "").strip()
+        fac = _lodging_facility_hints(det)
+        guests = max(1, int(travelers_total or 2))
+        party_line = (
+            f"일행 {guests}명 수용(실제 객실·침대 구성은 예약 페이지에서 확인)"
+        )
 
         out_hotels.append(
             {
@@ -312,13 +355,35 @@ def rank_hotels_for_attraction_points(
                 "price_per_night_krw": None,
                 "rating": float(det["rating"]) if det.get("rating") is not None else None,
                 "amenities": [],
-                "breakfast_included": None,
-                "kitchen": None,
-                "bedroom_summary": "",
-                "parking_fee_text": "현지 숙소·예약 페이지에서 확인",
-                "feature_highlights": [f"가격대(추정): {plevel_str}"],
-                "fit_notes": note,
-                "booking_url": maps_url,
+                "breakfast_included": fac.get("breakfast_included_hint"),
+                "kitchen": fac.get("kitchenette_hint"),
+                "bedroom_summary": "객실·침실 구성은 공식 예약 페이지에서 선택·확인",
+                "parking_fee_text": (
+                    "무료 주차 가능성 있음(키워드) — 확정은 예약 페이지"
+                    if fac.get("parking_free_hint")
+                    else "주차비·주차 가능 여부는 예약 페이지에서 확인"
+                ),
+                "feature_highlights": [
+                    f"가격대(추정): {plevel_str}",
+                    party_line,
+                ],
+                "facility_hints": fac,
+                "detail_urls": {
+                    "google_maps": maps_url,
+                    "official_website": website or None,
+                },
+                "mandatory_url_note_ko": "구글 지도 URL은 필수 제공됨. 공식 예약·상세는 official_website(있을 때)로 확인하세요.",
+                "commute_target_minutes_one_way": max_commute_minutes_one_way,
+                "commute_constraint_relaxed": commute_relaxed,
+                "fit_notes": note
+                + (
+                    " · 당일 명소까지 최장 편도 "
+                    f"{max_commute_minutes_one_way}분 이내 후보를 우선했으나 "
+                    "해당 조건을 만족하는 후보가 없어 완화했습니다."
+                    if commute_relaxed
+                    else ""
+                ),
+                "booking_url": website or maps_url,
                 "accommodation_type": "hotel",
                 "image_urls": image_urls,
                 "stay_nights": 1,
@@ -361,6 +426,8 @@ def search_route_optimized_hotels(
         max_hotels=5,
         top_candidates=8,
         itinerary_scope="full_trip",
+        max_commute_minutes_one_way=None,
+        travelers_total=travelers_total,
     )
     if not hotels:
         return None
@@ -409,6 +476,9 @@ def search_hotels_per_daily_segments(
             api_key=key,
             max_hotels=3,
             top_candidates=8,
+            itinerary_scope="single_day",
+            max_commute_minutes_one_way=60,
+            travelers_total=guests,
         )
         if not hotels:
             continue
@@ -430,6 +500,10 @@ def search_hotels_per_daily_segments(
                 "attraction_names_today": names,
                 "hotels": hotels,
                 "party_rooms_hint": f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)",
+                "suggests_hotel_relocation": seg.get("suggests_hotel_relocation"),
+                "approx_drive_previous_day_region_to_today_minutes": seg.get(
+                    "approx_drive_previous_day_region_to_today_minutes"
+                ),
             }
         )
 
