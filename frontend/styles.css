@@ -247,6 +247,78 @@ header p {
   opacity: 0.6;
 }
 
+/* 여행 일정(맛집) 단계: 숙소 거점 그룹 + Leaflet 동선 */
+.itinerary-route-map {
+  width: 100%;
+  height: min(52vh, 480px);
+  min-height: 320px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  margin: 0.75rem 0 1rem;
+  z-index: 0;
+}
+.itinerary-map-lead {
+  font-size: 0.9rem;
+  margin: -0.25rem 0 0.5rem;
+}
+.stay-groups-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+.stay-grp-li {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+}
+.stay-grp-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+.stay-grp-dates,
+.stay-grp-names {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.stay-grp-names {
+  margin-top: 0.35rem;
+}
+.stay-grp-date {
+  display: inline-block;
+  margin-right: 0.35rem;
+  margin-bottom: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3px solid var(--sgc, #94a3b8);
+}
+.leaflet-container.itinerary-route-map {
+  font-family: inherit;
+}
+.leaflet-tooltip.itinerary-route-lbl-tooltip {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  color: #f8fafc;
+}
+.itinerary-route-popup {
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.acc-seg-daterange {
+  margin: 0.25rem 0 0.5rem;
+}
+
 /* 맛집 단계: 후보 카드(소개·링크) */
 .meal-day-block .meal-candidate-detail {
   margin-top: 1rem;

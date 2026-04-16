@@ -70,6 +70,7 @@ def search_hotels(
         check_in,
         check_out,
         (os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip() or None,
+        (os.environ.get("TRAVELPAYOUTS_API_TOKEN") or "").strip() or None,
     )
     return json.dumps(hotels, ensure_ascii=False)
 

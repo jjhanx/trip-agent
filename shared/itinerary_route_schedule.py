@@ -18,6 +18,7 @@ from shared.directions_parking import (
     reverse_geocode_city_display_name,
 )
 from shared.loop_route_planner import add_attraction_markers_to_static_map
+from shared.route_map_payload import build_map_payload, compute_stay_groups_from_daily_schedule
 from shared.tour_route_optimizer import fetch_full_tour_directions, optimize_visit_order_driving
 from shared.google_place_details import fetch_place_details_raw
 
@@ -470,8 +471,18 @@ async def enrich_route_bundle_with_directions_schedule(
         cur["approx_drive_previous_day_region_to_today_minutes"] = gap
         cur["suggests_hotel_relocation"] = bool(gap is not None and gap > 60)
 
+    stay_groups = compute_stay_groups_from_daily_schedule(daily_schedule)
+    map_payload = build_map_payload(
+        daily_schedule,
+        id_to_coord,
+        id_to_name,
+        (loop_route_meta or {}).get("overview_polyline") if loop_route_meta else None,
+    )
+
     rp = dict(route_bundle.get("route_plan") or {})
     rp["daily_schedule"] = daily_schedule
+    rp["stay_groups"] = stay_groups
+    rp["map_payload"] = map_payload
     auto_ids = [str(x) for x in (auto_filled_attraction_ids or []) if x]
     if auto_ids:
         rp["auto_filled_attraction_ids"] = auto_ids

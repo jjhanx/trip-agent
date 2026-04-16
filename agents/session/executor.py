@@ -482,6 +482,7 @@ class SessionExecutor(BaseAgentExecutor):
                         travel.start_date.isoformat(),
                         travel.end_date.isoformat(),
                         (self.settings.google_places_api_key or "").strip() or None,
+                        (self.settings.travelpayouts_api_token or "").strip() or None,
                     ),
                     ensure_ascii=False,
                 )

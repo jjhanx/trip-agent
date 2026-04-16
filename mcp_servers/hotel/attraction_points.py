@@ -135,3 +135,17 @@ def collect_daily_attraction_segments(
             }
         )
     return out
+
+
+def collect_stay_group_segments(
+    catalog: list[dict[str, Any]] | None,
+    selected_itinerary: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    """숙소 이동이 필요 없도록 묶인 구간별 명소 좌표(그룹당 하나의 거점 숙소 후보)."""
+    from shared.route_map_payload import compute_stay_groups_from_daily_segments
+
+    daily = collect_daily_attraction_segments(catalog, selected_itinerary)
+    if not daily:
+        return None
+    groups = compute_stay_groups_from_daily_segments(daily)
+    return groups if groups else None

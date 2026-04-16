@@ -256,9 +256,11 @@ def run_hotel_search(
     from mcp_servers.hotel.attraction_points import (
         collect_attraction_latlngs,
         collect_daily_attraction_segments,
+        collect_stay_group_segments,
     )
     from mcp_servers.hotel.google_places_hotels import (
         search_hotels_per_daily_segments,
+        search_hotels_per_stay_groups,
         search_route_optimized_hotels,
     )
 
@@ -268,6 +270,25 @@ def run_hotel_search(
         daily = collect_daily_attraction_segments(
             itinerary_attraction_catalog, selected_itinerary
         )
+        group_segments = collect_stay_group_segments(
+            itinerary_attraction_catalog, selected_itinerary
+        )
+        if group_segments:
+            per_group = search_hotels_per_stay_groups(
+                location_label=location,
+                group_segments=group_segments,
+                check_in=check_in or "",
+                check_out=check_out or "",
+                travelers_total=guests,
+                api_key=google_api_key,
+                hotellook_token=travelpayouts_token,
+                rooms_for_pricing=rooms,
+            )
+            if per_group:
+                return _assign_types_to_daily_segments(
+                    per_group, accommodation_type, accommodation_priority
+                )
+
         if daily:
             per_day = search_hotels_per_daily_segments(
                 location_label=location,

@@ -78,6 +78,7 @@ class AccommodationExecutor(BaseAgentExecutor):
                 check_in,
                 check_out,
                 (self.settings.google_places_api_key or "").strip() or None,
+                (self.settings.travelpayouts_api_token or "").strip() or None,
             )
         await event_queue.enqueue_event(
             new_agent_text_message(json.dumps(hotels[:5], ensure_ascii=False))

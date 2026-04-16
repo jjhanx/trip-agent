@@ -414,6 +414,7 @@ function getFullPlanState() {
     lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
     accommodationSelectionByDate: state.accommodationSelectionByDate || {},
+    accommodationSelectionByGroup: state.accommodationSelectionByGroup || {},
     selectedAccommodation: state.selectedAccommodation,
     localTransport: state.localTransport,
     selectedLocalTransport: state.selectedLocalTransport,
@@ -472,6 +473,9 @@ function loadPlanIntoState(data) {
   state.accommodations = Array.isArray(data.accommodations) ? data.accommodations : [];
   state.accommodationSelectionByDate = data.accommodationSelectionByDate && typeof data.accommodationSelectionByDate === 'object'
     ? data.accommodationSelectionByDate
+    : {};
+  state.accommodationSelectionByGroup = data.accommodationSelectionByGroup && typeof data.accommodationSelectionByGroup === 'object'
+    ? data.accommodationSelectionByGroup
     : {};
   state.selectedAccommodation = data.selectedAccommodation ?? null;
   state.localTransport = normalizeLocalTransport(data.localTransport);
@@ -620,6 +624,7 @@ function newPlan() {
   state.lastCommittedAttractionIds = null;
   state.accommodations = [];
   state.accommodationSelectionByDate = {};
+  state.accommodationSelectionByGroup = {};
   state.selectedAccommodation = null;
   state.localTransport = [];
   state.selectedLocalTransport = null;
@@ -672,6 +677,8 @@ let state = {
   accommodations: [],
   /** 일자별 숙소 후보 선택 { 'YYYY-MM-DD': hotelObj } */
   accommodationSelectionByDate: {},
+  /** 숙소 거점 그룹별 선택 { '0': hotelObj } */
+  accommodationSelectionByGroup: {},
   selectedAccommodation: null,
   localTransport: [],
   selectedLocalTransport: null,
@@ -1327,6 +1334,7 @@ async function runSessionRentalSearchSkipFlight() {
     if (data?.step === 'accommodation_and_transport') {
       state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
       state.accommodationSelectionByDate = {};
+      state.accommodationSelectionByGroup = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
@@ -1795,6 +1803,7 @@ async function advanceToLocalTransportStep() {
     if (data?.step === 'accommodation_and_transport') {
       state.accommodations = Array.isArray(data?.accommodations) ? data.accommodations : [];
       state.accommodationSelectionByDate = {};
+      state.accommodationSelectionByGroup = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
       renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
@@ -2697,6 +2706,111 @@ function finalItineraryMealRankLine(rankLabel, placeId, placeName, destHint) {
   return `${escapeHtml(rankLabel)}: ${linked}`;
 }
 
+/** Google encoded polyline → [lat, lng][] (5 decimal degrees). */
+function decodeGooglePolyline(encoded) {
+  if (!encoded || typeof encoded !== 'string') return [];
+  const coordinates = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const len = encoded.length;
+  while (index < len) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+    coordinates.push([lat / 1e5, lng / 1e5]);
+  }
+  return coordinates;
+}
+
+function destroyItineraryRouteMap() {
+  const prev = state._itineraryRouteMapInst;
+  if (prev && typeof prev.remove === 'function') {
+    try {
+      prev.remove();
+    } catch (_) { /* ignore */ }
+  }
+  state._itineraryRouteMapInst = null;
+}
+
+/** `route_plan.map_payload` — Leaflet 경로·날짜별 마커. */
+function initItineraryRouteMapFromPayload(mapPayload) {
+  destroyItineraryRouteMap();
+  const wrap = document.getElementById('itinerary-route-map');
+  if (!wrap || typeof L === 'undefined' || !mapPayload || typeof mapPayload !== 'object') return;
+
+  const enc = mapPayload.polyline_encoded;
+  const markers = Array.isArray(mapPayload.markers) ? mapPayload.markers : [];
+  const latlngs = enc ? decodeGooglePolyline(enc) : [];
+
+  const map = L.map(wrap, { scrollWheelZoom: false });
+  state._itineraryRouteMapInst = map;
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap',
+  }).addTo(map);
+
+  const boundsPoints = [];
+
+  if (latlngs.length) {
+    L.polyline(latlngs, { color: '#0f172a', weight: 5, opacity: 0.78 }).addTo(map);
+    latlngs.forEach((ll) => boundsPoints.push(ll));
+  }
+
+  markers.forEach((m) => {
+    const lat = Number(m.lat);
+    const lng = Number(m.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const color = (m.color && String(m.color).trim()) || '#e11d48';
+    const circle = L.circleMarker([lat, lng], {
+      radius: 9,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 0.95,
+    }).addTo(map);
+    const tip = (m.label && String(m.label)) || (m.date && String(m.date)) || '';
+    const title = (m.title && String(m.title)) || tip;
+    if (tip) {
+      circle.bindTooltip(escapeHtml(tip), {
+        permanent: true,
+        direction: 'top',
+        offset: [0, -8],
+        className: 'itinerary-route-lbl-tooltip',
+      });
+    }
+    if (title) {
+      circle.bindPopup(`<div class="itinerary-route-popup">${escapeHtml(title).replace(/\n/g, '<br>')}</div>`);
+    }
+    boundsPoints.push([lat, lng]);
+  });
+
+  if (boundsPoints.length === 1) {
+    map.setView(boundsPoints[0], 11);
+  } else if (boundsPoints.length > 1) {
+    map.fitBounds(L.latLngBounds(boundsPoints), { padding: [36, 36], maxZoom: 12 });
+  } else {
+    map.setView([45.5, 12.2], 8);
+  }
+}
+
 function renderFinalDailyPlanTableHtml(fi) {
   const plan = fi && Array.isArray(fi.daily_plan) ? fi.daily_plan : [];
   if (!plan.length) {
@@ -2754,6 +2868,9 @@ function renderItineraryWorkflow(data) {
   const root = $('#itinerary-workflow-root');
   if (!root) return;
   const step = data?.itinerary_step;
+  if (step !== 'select_meals') {
+    destroyItineraryRouteMap();
+  }
   if (step === 'select_attractions') {
     if (selectedItineraryLooksFinal(state.selectedItinerary)) {
       state.itineraryWorkflowStep = 'complete';
@@ -2861,8 +2978,38 @@ function renderItineraryWorkflow(data) {
     const daily = rp.daily_schedule || [];
     const lodging = rp.lodging_strategy || '';
     const loopRoute = rp.loop_route || {};
+    const mapPayload = rp.map_payload || {};
+    const dayColors = mapPayload.day_color_hex_by_date || {};
+    const stayGroups = rp.stay_groups || [];
+    const cat = state.itineraryAttractionCatalog || [];
+    const nameForAttr = (id) => {
+      const a = cat.find((x) => x && String(x.id) === String(id));
+      return (a && a.name) ? String(a.name) : String(id);
+    };
+    let stayHtml = '';
+    if (stayGroups.length) {
+      stayHtml = '<h4>숙소 거점 그룹 (같은 숙소로 묶인 방문일)</h4><ul class="stay-groups-list">';
+      stayGroups.forEach((g) => {
+        const ids = g.attraction_ids || [];
+        const names = ids.slice(0, 10).map(nameForAttr).join(' · ');
+        const restN = ids.length > 10 ? ` 외 ${ids.length - 10}곳` : '';
+        const datesG = g.dates || [];
+        const dateSpans = datesG.map((d) => {
+          const c = dayColors[d] || '#64748b';
+          return `<span class="stay-grp-date" style="--sgc:${c}">${escapeHtml(d)}</span>`;
+        }).join(' ');
+        stayHtml += `<li class="stay-grp-li"><p class="stay-grp-title">${escapeHtml(g.label_ko || '')}</p>
+          <p class="muted stay-grp-dates">일자 ${dateSpans}</p>
+          ${names ? `<p class="muted stay-grp-names">${escapeHtml(names)}${escapeHtml(restN)}</p>` : ''}</li>`;
+      });
+      stayHtml += '</ul>';
+    }
     let html = `<div class="itinerary-phase"><h3>동선·추천 동네</h3>`;
     if (lodging) html += `<p>${escapeHtml(lodging)}</p>`;
+    if (stayHtml) html += stayHtml;
+    html += `<h4>일자별 동선·명소 위치</h4>
+      <p class="muted itinerary-map-lead">날짜마다 색이 다릅니다. 마커에 일자·시간대가 표시됩니다. 굵은 선은 전체 루프 동선(도로 단순화)입니다.</p>
+      <div id="itinerary-route-map" class="itinerary-route-map" role="img" aria-label="일자별 명소와 전체 경로"></div>`;
     if (loopRoute.static_map_url) {
       const gmaps = typeof loopRoute.google_maps_directions_url === 'string' ? loopRoute.google_maps_directions_url : '';
       const rk = loopRoute.route_kind_ko || '';
@@ -2965,6 +3112,9 @@ function renderItineraryWorkflow(data) {
     });
     html += '</div>';
     root.innerHTML = html;
+    requestAnimationFrame(() => {
+      initItineraryRouteMapFromPayload(rp.map_payload);
+    });
     const syncMealCardHighlight = () => {
       root.querySelectorAll('.meal-day-block').forEach((block) => {
         const lunchIds = new Set();
@@ -3225,6 +3375,7 @@ async function skipItineraryToAccommodation() {
     const lt = data?.local_transport || [];
     state.accommodations = Array.isArray(acc) ? acc : [];
     state.accommodationSelectionByDate = {};
+    state.accommodationSelectionByGroup = {};
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
@@ -3280,6 +3431,7 @@ async function proceedFromItineraryCompleteToAccommodation() {
     const lt = data?.local_transport || [];
     state.accommodations = Array.isArray(acc) ? acc : [];
     state.accommodationSelectionByDate = {};
+    state.accommodationSelectionByGroup = {};
     state.localTransport = normalizeLocalTransport(lt);
     renderAccommodations(state.accommodations);
     $('#local-transport-info').innerHTML = state.localTransport.length
@@ -3531,11 +3683,100 @@ function dailyTripFooterInnerHtml(segments) {
   return `<p class="acc-trip-total"><strong>선택 숙소 요금 합산(추정)</strong> 약 ${sum.toLocaleString()}원${pct}<span class="muted"> · 날짜별 1박·객실 수는 상단 안내 및 각 카드 참고</span></p>`;
 }
 
+function sumTripEstimateFromGroupSelections(segments) {
+  const sel = state.accommodationSelectionByGroup || {};
+  let sum = 0;
+  let n = 0;
+  for (const seg of segments) {
+    const g = seg.group_index != null ? String(seg.group_index) : '';
+    const h = sel[g];
+    if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+      sum += h.total_stay_estimate_krw;
+      n++;
+    }
+  }
+  return { sum, n, totalGroups: segments.length };
+}
+
+function groupTripFooterInnerHtml(segments) {
+  const { sum, n, totalGroups } = sumTripEstimateFromGroupSelections(segments);
+  if (n === 0) {
+    return '<p class="acc-trip-total muted">각 거점 구간마다 숙소를 한 곳씩 고르면, 일행·객실 수를 반영한 요금 합산(추정)이 여기에 표시됩니다.</p>';
+  }
+  const pct = n < totalGroups ? ` (${n}/${totalGroups}구간 선택됨)` : '';
+  return `<p class="acc-trip-total"><strong>선택 숙소 요금 합산(추정)</strong> 약 ${sum.toLocaleString()}원${pct}<span class="muted"> · 구간별 숙박 일수·객실 수는 각 카드 참고</span></p>`;
+}
+
 function renderAccommodations(items) {
   const list = $('#accommodations-list');
   if (!list) return;
   const rows = Array.isArray(items) ? items : [];
+  const isStayGroup = rows.length > 0 && rows[0]?.segment_type === 'stay_group_hint';
   const isDaily = rows.length > 0 && rows[0]?.segment_type === 'daily_stay_hint';
+
+  if (isStayGroup) {
+    list.innerHTML = rows.map((seg, si) => {
+      const gi = seg.group_index != null ? String(seg.group_index) : String(si);
+      const df = seg.date_from || '';
+      const dt = seg.date_to || df;
+      const hotels = Array.isArray(seg.hotels) ? seg.hotels : [];
+      const sel = state.accommodationSelectionByGroup?.[gi];
+      const selId = sel?.hotel_id ?? sel?.place_id;
+      const cards = (hotels.length ? hotels : []).map((h, hi) => {
+        const id = h.hotel_id ?? h.place_id;
+        const selected = selId && id && selId === id;
+        const ds = driveScopeFromHotel(h);
+        const inner = accommodationCardInnerHtml(h, ds);
+        return `
+    <div class="option-item accommodation-card acc-card-by-group${selected ? ' selected' : ''}" role="button" tabindex="0" data-seg-idx="${si}" data-group-key="${escapeHtml(gi)}" data-hotel-idx="${hi}" data-hotel-key="${escapeHtml(String(id || ''))}">
+      ${inner}
+    </div>`;
+      }).join('');
+      const hint = seg.overnight_area_hint ? `<p class="acc-seg-hint">${escapeHtml(seg.overnight_area_hint)}</p>` : '';
+      const route = seg.day_route_summary ? `<p class="acc-seg-route muted">${escapeHtml(seg.day_route_summary)}</p>` : '';
+      const party = seg.party_rooms_hint ? `<p class="acc-seg-party muted">${escapeHtml(seg.party_rooms_hint)}</p>` : '';
+      const hNote = seg.hotel_search_note_ko
+        ? `<p class="acc-seg-hotel-note">${escapeHtml(seg.hotel_search_note_ko)}</p>`
+        : '';
+      const datesIn = Array.isArray(seg.dates_in_group) && seg.dates_in_group.length
+        ? seg.dates_in_group.map((x) => escapeHtml(String(x))).join(' · ')
+        : `${escapeHtml(df)} ~ ${escapeHtml(dt)}`;
+      const anames = Array.isArray(seg.attraction_names_in_group) && seg.attraction_names_in_group.length
+        ? `<p class="acc-seg-attr"><strong>이 구간 방문</strong> ${seg.attraction_names_in_group.map((x) => escapeHtml(String(x))).join(' · ')}</p>`
+        : '';
+      return `
+  <section class="acc-day-segment acc-group-segment" aria-labelledby="acc-grp-head-${si}">
+    <header class="acc-day-header" id="acc-grp-head-${si}">
+      <h2 class="acc-day-title">거점 구간 ${si + 1} <span class="acc-day-badge">숙소 후보</span></h2>
+      <p class="muted acc-seg-daterange">포함 일자: ${datesIn}</p>
+      ${hint}
+      ${anames}
+      ${route}
+      ${party}
+      ${hNote}
+    </header>
+    <div class="acc-day-cards">${cards || '<p class="muted acc-seg-empty">이 구간에서 선택 가능한 숙소 후보가 없습니다. 일정·명소 좌표·API 키를 확인하세요.</p>'}</div>
+  </section>`;
+    }).join('') + `<footer class="acc-trip-footer">${groupTripFooterInnerHtml(rows)}</footer>`;
+
+    list.querySelectorAll('.acc-card-by-group').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target?.closest('a')) return;
+        const gk = el.dataset.groupKey;
+        const si = parseInt(el.dataset.segIdx, 10);
+        const hi = parseInt(el.dataset.hotelIdx, 10);
+        const seg = rows[si];
+        const hotel = seg?.hotels?.[hi];
+        if (!hotel || gk == null || gk === '') return;
+        el.closest('.acc-group-segment')?.querySelectorAll('.acc-card-by-group').forEach((x) => x.classList.remove('selected'));
+        el.classList.add('selected');
+        state.accommodationSelectionByGroup[gk] = hotel;
+        const foot = list.querySelector('.acc-trip-footer');
+        if (foot) foot.innerHTML = groupTripFooterInnerHtml(rows);
+      });
+    });
+    return;
+  }
 
   if (isDaily) {
     list.innerHTML = rows.map((seg, si) => {
@@ -3630,8 +3871,32 @@ $('#btn-back-accommodation').addEventListener('click', () => {
 
 $('#btn-confirm-booking').addEventListener('click', async () => {
   const acc = state.accommodations || [];
+  const isStayGroup = acc.length > 0 && acc[0]?.segment_type === 'stay_group_hint';
   const isDaily = acc.length > 0 && acc[0]?.segment_type === 'daily_stay_hint';
-  if (isDaily) {
+  if (isStayGroup) {
+    const missing = acc.filter((s) => {
+      const g = s.group_index != null ? String(s.group_index) : '';
+      return !state.accommodationSelectionByGroup?.[g];
+    });
+    if (missing.length) {
+      alert('각 숙소 거점 구간마다 숙소 후보 중 하나를 선택해 주세요.');
+      return;
+    }
+    let tripTotal = 0;
+    for (const s of acc) {
+      const g = s.group_index != null ? String(s.group_index) : '';
+      const h = state.accommodationSelectionByGroup[g];
+      if (h && typeof h.total_stay_estimate_krw === 'number' && Number.isFinite(h.total_stay_estimate_krw)) {
+        tripTotal += h.total_stay_estimate_krw;
+      }
+    }
+    state.selectedAccommodation = {
+      mode: 'by_stay_group',
+      choices: { ...state.accommodationSelectionByGroup },
+      trip_total_estimate_krw: tripTotal > 0 ? tripTotal : null,
+      nights_count: null,
+    };
+  } else if (isDaily) {
     const missing = acc.filter((s) => !state.accommodationSelectionByDate?.[s.date]);
     if (missing.length) {
       alert('여행일마다 숙소 후보 중 하나를 선택해 주세요.');

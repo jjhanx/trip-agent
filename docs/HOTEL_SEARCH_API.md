@@ -31,9 +31,15 @@
 - **명소 카탈로그**(`itinerary_attraction_catalog`)에 `attr_lat` / `attr_lng`가 있고, 일정에 해당 **명소 id**가 있으면 그 좌표들을 사용합니다.  
 - 명소 좌표가 없으면 **목적지 문자열 지오코드** 주변으로만 검색하고, 주행 분 합산은 생략합니다.
 
+### 숙소 거점 그룹(우선)
+
+- `collect_daily_attraction_segments`로 날짜·명소 좌표가 있으면 `collect_stay_group_segments`가 **`suggests_hotel_relocation`** 이 `true`인 날을 경계로 **연속 방문일**을 묶습니다.  
+- `run_hotel_search`는 이런 구간이 있으면 **`segment_type: "stay_group_hint"`** 를 **먼저** 반환합니다(구간 `date_from`~`date_to`, Hotellook는 체크인~마지막 밤 다음날 체크아웃).  
+- 구간별 검색이 전혀 나오지 않을 때만 아래 **일자별** 또는 레거시로 넘어갑니다.
+
 ### 날짜별 vs 레거시(전체 명소)
 
-- 일정에 **`daily_schedule`(또는 `daily_plan`)** 이 있으면 **각 날짜에 배정된 명소만** 그날의 Distance Matrix 대상으로 삼고, 응답은 `segment_type: "daily_stay_hint"` **일자별 블록**으로 나뉩니다. 각 숙소 객체에는 `drive_time_scope: "single_day_attractions"` 가 붙습니다.  
+- 일정에 **`daily_schedule`(또는 `daily_plan`)** 이 있으면 **각 날짜에 배정된 명소만** 그날의 Distance Matrix 대상으로 삼고, 응답은 `segment_type: "daily_stay_hint"` **일자별 블록**으로 나뉩니다(위 **거점 그룹**이 없거나 실패한 경우). 각 숙소 객체에는 `drive_time_scope: "single_day_attractions"` 가 붙습니다.  
 - 일별 세그먼트를 만들 수 없을 때만 **여행 전체 명소**를 한 번에 넣는 레거시 경로를 쓰며, 이때 `drive_time_scope: "all_trip_attractions"` 이고 UI에서 “전체 일정 기준”으로 안내합니다.
 
 ### 투어 동선·60분·숙소 이동 힌트

@@ -531,6 +531,90 @@ def search_hotels_per_daily_segments(
     return out_segments if out_segments else None
 
 
+def search_hotels_per_stay_groups(
+    *,
+    location_label: str,
+    group_segments: list[dict[str, Any]],
+    check_in: str,
+    check_out: str,
+    travelers_total: int,
+    api_key: str | None,
+    hotellook_token: str | None = None,
+    rooms_for_pricing: int = 1,
+) -> list[dict[str, Any]] | None:
+    """숙소 이동 없이 묶인 구간별로 거점 숙소 후보를 찾는다."""
+    if not group_segments:
+        return None
+    key = (api_key or os.environ.get("GOOGLE_PLACES_API_KEY") or "").strip()
+    guests = max(1, int(travelers_total or 2))
+    out_segments: list[dict[str, Any]] = []
+    for seg in group_segments:
+        pts = seg.get("points") or []
+        gi = int(seg.get("group_index") or 0)
+        df = str(seg.get("date_from") or check_in)[:10]
+        dt = str(seg.get("date_to") or df)[:10]
+        label = str(seg.get("label_ko") or "").strip()
+        names = [str(p.get("name") or "").strip() for p in pts if isinstance(p, dict) and p.get("name")]
+        names = [n for n in names if n][:12]
+        ohint = label or f"그룹 {gi + 1} 구역"
+        rnotes = f"{location_label} · {ohint} · 그룹 일자 {df}~{dt}"
+        try:
+            a0 = datetime.strptime(df, "%Y-%m-%d").date()
+            b0 = datetime.strptime(dt, "%Y-%m-%d").date()
+            ci = a0.isoformat()
+            co = (b0 + timedelta(days=1)).isoformat()
+        except Exception:
+            ci, co = _one_night_around_date(df)
+        hotels = None
+        if key and pts:
+            hotels = rank_hotels_for_attraction_points(
+                location_label=location_label,
+                attraction_points=pts,
+                api_key=key,
+                max_hotels=5,
+                top_candidates=14,
+                itinerary_scope="single_day",
+                max_commute_minutes_one_way=60,
+                travelers_total=guests,
+            )
+        if hotels:
+            for h in hotels:
+                h["segment_stay_date"] = df
+                h["stay_group_index"] = gi
+                h["stay_group_date_from"] = df
+                h["stay_group_date_to"] = dt
+                h["selection_rationale"] = (
+                    f"{df}~{dt} 구간({', '.join(names[:6])}{'…' if len(names) > 6 else ''}) 기준. 일행 {guests}명."
+                )
+                _attach_hotellook_price(h, ci, co, hotellook_token, rooms_for_pricing)
+        out_segments.append(
+            {
+                "segment_type": "stay_group_hint",
+                "group_index": gi,
+                "date_from": df,
+                "date_to": dt,
+                "dates_in_group": seg.get("dates") or seg.get("dates_in_group") or [],
+                "overnight_area_hint": ohint,
+                "day_route_summary": rnotes,
+                "attraction_names_in_group": names,
+                "hotels": hotels or [],
+                "party_rooms_hint": f"일행 {guests}명 기준 객실 {max(1, rooms_for_pricing)}실 추정(가격 곱셈에 반영)",
+                "suggests_hotel_relocation": False,
+                "approx_drive_previous_day_region_to_today_minutes": None,
+                "hotel_search_note_ko": (
+                    None
+                    if hotels
+                    else (
+                        "이 구간 명소 좌표가 없거나 Google Places 키가 없어 숙소 후보를 채우지 못했습니다."
+                        if not key or not pts
+                        else "이 구간 방문 명소 주변에서 조건에 맞는 숙소 후보를 찾지 못했습니다. 반경·조건을 완화했거나 지역 특성상 60분 이내 숙소가 없을 수 있습니다."
+                    )
+                ),
+            }
+        )
+    return out_segments if out_segments else None
+
+
 def _attach_hotellook_price(
     hotel: dict[str, Any],
     check_in: str,
