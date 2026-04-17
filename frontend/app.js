@@ -824,8 +824,8 @@ function goToItinerarySectionForState() {
   const ws = state.itineraryWorkflowStep;
   const hasPlan = !!(state.itineraryRouteBundle || state.selectedItinerary || (state.itineraries?.length > 0));
   if (selectedItineraryLooksFinal(state.selectedItinerary) && ws === 'complete') {
-    renderStepConfirmFromItinerary(state.selectedItinerary);
-    show('step-confirm');
+    renderStepConfirmFromItinerary(state.selectedItinerary, !shouldPreserveBookingGuidancePanel());
+    show('step-confirm', true);
     return;
   }
   if (ws === 'meals' || ws === 'route_plan') {
@@ -943,12 +943,12 @@ function refreshItineraryPlanSection() {
 }
 
 function refreshStepConfirmSection() {
-  if (state.selectedItinerary && selectedItineraryLooksFinal(state.selectedItinerary)) {
-    renderStepConfirmFromItinerary(state.selectedItinerary, !state.bookingGuidanceReceived);
+  if (!state.selectedItinerary || !selectedItineraryLooksFinal(state.selectedItinerary)) {
+    return;
   }
-  if (state.bookingGuidanceReceived) {
-    renderBookingGuidanceIntoDom(state.bookingGuidanceData || { steps: [] });
-  }
+  renderStepConfirmFromItinerary(state.selectedItinerary, !shouldPreserveBookingGuidancePanel());
+  /** received 플래그 없이 저장본에만 bookingGuidanceData가 있어도 체크리스트를 그림 */
+  renderBookingGuidanceIntoDom(state.bookingGuidanceData || { steps: [] });
 }
 
 function refreshStepViewForSection(sectionId) {
@@ -1199,6 +1199,15 @@ function ensureBookingGuidanceSteps(data) {
     summary,
     steps,
   };
+}
+
+/** 일정 확정 화면을 다시 그릴 때 예약 안내 패널을 비울지: 저장본·API 안내가 있으면 유지 */
+function shouldPreserveBookingGuidancePanel() {
+  return !!(
+    state.bookingGuidanceReceived
+    || (state.bookingGuidanceData != null && typeof state.bookingGuidanceData === 'object')
+    || state.bookingGuidanceApiReceived
+  );
 }
 
 function updateBookingGuidanceActionButtons() {
@@ -1532,7 +1541,7 @@ function navigateToStep(stepName) {
   }
   if (stepName === 'itinerary_confirm') {
     if (selectedItineraryLooksFinal(state.selectedItinerary)) {
-      renderStepConfirmFromItinerary(state.selectedItinerary);
+      renderStepConfirmFromItinerary(state.selectedItinerary, !shouldPreserveBookingGuidancePanel());
       show('step-confirm', true);
       return;
     }
@@ -3947,9 +3956,11 @@ function applyItineraryResponse(incoming) {
     state.itineraryWorkflowStep = 'complete';
     state.lastCommittedAttractionIds = sortedAttractionIdsCopy(state.selectedAttractionIds);
     state.bookingGuidanceReceived = false;
-    renderStepConfirmFromItinerary(data.final_itinerary);
+    state.bookingGuidanceData = null;
+    state.bookingGuidanceApiReceived = false;
+    renderStepConfirmFromItinerary(data.final_itinerary, true);
     mountItineraryStepPanel('plan');
-    show('step-confirm');
+    show('step-confirm', true);
     saveItineraryDraft();
     return true;
   }
@@ -4163,7 +4174,7 @@ async function skipAccommodationToConfirm() {
     if (data?.error) throw new Error(data.error);
     renderBookingGuidanceIntoDom(data, { fromApi: true });
     saveItineraryDraft();
-    show('step-confirm');
+    show('step-confirm', true);
   } catch (err) {
     showError(err.message);
   }
@@ -4877,7 +4888,7 @@ $('#btn-request-booking-guidance')?.addEventListener('click', async () => {
     if (data?.error) throw new Error(data.error);
     renderBookingGuidanceIntoDom(data, { fromApi: true });
     saveItineraryDraft();
-    show('step-confirm');
+    show('step-confirm', true);
   } catch (err) {
     showError(err.message);
   }
