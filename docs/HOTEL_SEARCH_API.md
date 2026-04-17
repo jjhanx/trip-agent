@@ -7,13 +7,14 @@
    - **Place Details**: 이름, 주소, 평점, 사진, 구글맵 URL  
    - **Distance Matrix**: 각 숙소에서 일정 **명소 좌표**까지 **승용차(도로) 편도 분** — 합이 작은 순으로 상위 5곳 선정  
 
-2. **Travelpayouts / Hotellook** (선택) — 본 저장소의 숙소 경로는 우선 구글 기반입니다. 캐시 최저가·제휴 링크만 필요하면 [TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) §4를 참고해 별도 확장할 수 있습니다.
+2. **Travelpayouts / Hotellook** (선택, `TRAVELPAYOUTS_API_TOKEN`) — `engine.hotellook.com` **lookup + cache**로 호텔 id를 맞춘 뒤, 캐시에 있는 요금 노드를 모아 **조식(또는 하프보드 등)이 텍스트로 식별되는 옵션 중 최저가**를 우선하고, 없으면 전체 최저가를 씁니다. 합산 금액은 EUR→KRW 표시용 환산·객실 수 곱이며, **실시간 잔여 객실·최종 요금은 아닙니다.** 제휴 예약 딥링크가 오면 `booking_url`로 넣습니다. 상세는 [TRAVELPAYOUTS_API_GUIDE.md](TRAVELPAYOUTS_API_GUIDE.md) 숙소 API 절.
 
 ## 필수 환경 변수
 
 | 변수 | 설명 |
 |------|------|
 | `GOOGLE_PLACES_API_KEY` | Maps Platform API 키 ([발급](GOOGLE_PLACES_API_GUIDE.md)). Hotel MCP 컨테이너/프로세스에도 동일 값 전달 |
+| `TRAVELPAYOUTS_API_TOKEN` | (선택) Hotellook 캐시 요금·조식 포함 여부·예약 링크 보강 |
 
 ## Google Cloud Console에서 켜야 할 API
 

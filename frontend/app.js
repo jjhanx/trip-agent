@@ -3977,7 +3977,7 @@ function accommodationFacilityAndUrlHtml(a) {
     if (fh.spa) bits.push('스파(추정)');
     if (fh.bbq) bits.push('바베큐(추정)');
     if (bits.length) {
-      fac = `<p class="acc-fac"><strong>있으면 좋은 시설</strong> ${bits.join(' · ')} <span class="muted">— ${escapeHtml(fh.notes_ko || '공식 사이트로 확인')}</span></p>`;
+      fac = `<p class="acc-fac"><strong>있으면 좋은 시설</strong> ${bits.join(' · ')} <span class="muted">— ${escapeHtml(fh.notes_ko || '추정')}</span></p>`;
     }
   }
   const du = a.detail_urls;
@@ -4017,10 +4017,16 @@ function accommodationCardBodyHtml(a, driveScope) {
   } else if (a.total_stay_estimate_krw) {
     priceClean = `<p class="acc-price">합계 약 ${a.total_stay_estimate_krw.toLocaleString()}원 (추정)${nights ? ' · ' + nights : ''}${basis}</p>`;
   } else {
-    priceClean = a.location ? '<p class="acc-price muted">가격 추정 미표시 — 예약 링크 또는 Hotellook 연동 시 표시</p>' : '';
+    priceClean = a.location ? '<p class="acc-price muted">가격 추정 미표시 — TRAVELPAYOUTS_API_TOKEN·Hotellook 캐시 또는 예약 링크에서 확인</p>' : '';
   }
   const flags = [a.breakfast_included ? '조식 포함' : (a.breakfast_included === false ? '조식 미포함' : null), a.kitchen ? '주방' : null].filter(Boolean);
   const flagLine = flags.length ? `<p class="acc-flags">${flags.map((t) => escapeHtml(t)).join(' · ')}</p>` : '';
+  const mealPlan = a.meal_plan_summary_ko
+    ? `<p class="acc-meta"><strong>조식·식사 옵션</strong> ${escapeHtml(String(a.meal_plan_summary_ko))}</p>`
+    : '';
+  const availNote = a.availability_note_ko
+    ? `<p class="acc-avail-note muted">${escapeHtml(String(a.availability_note_ko))}</p>`
+    : '';
   const bed = a.bedroom_summary ? `<p class="acc-meta"><strong>침실·구성</strong> ${escapeHtml(a.bedroom_summary)}</p>` : '';
   const park = a.parking_fee_text ? `<p class="acc-meta"><strong>주차</strong> ${escapeHtml(a.parking_fee_text)}</p>` : '';
   const fit = a.fit_notes ? `<p class="acc-fit"><strong>동선·주행 참고</strong> ${escapeHtml(a.fit_notes)}</p>` : '';
@@ -4028,7 +4034,7 @@ function accommodationCardBodyHtml(a, driveScope) {
   const rationale = a.selection_rationale ? `<p class="acc-rationale muted">${escapeHtml(a.selection_rationale)}</p>` : '';
   const facUrl = accommodationFacilityAndUrlHtml(a);
   const url = typeof a.booking_url === 'string' && /^https?:\/\//i.test(a.booking_url)
-    ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·상세 (기본 링크)</a></p>`
+    ? `<p class="acc-booking-row"><a href="${a.booking_url.replace(/"/g, '%22')}" target="_blank" rel="noopener" class="btn-booking acc-booking-link">예약·요금·재고 확인</a></p>`
     : '';
   const rating = a.rating != null ? `<span class="acc-rating">★ ${escapeHtml(String(a.rating))}</span>` : '';
   const segNote = a.segment_stay_date
@@ -4041,6 +4047,8 @@ function accommodationCardBodyHtml(a, driveScope) {
         ${rationale}
         ${priceClean}
         ${flagLine}
+        ${mealPlan}
+        ${availNote}
         ${bed}
         ${park}
         ${chips}

@@ -199,7 +199,16 @@ def _lodging_facility_hints(det: dict[str, Any]) -> dict[str, Any]:
         "breakfast_included_hint": has_kw("breakfast", "조식", "buffet breakfast"),
         "kitchenette_hint": has_kw("kitchen", "kitchenette", "주방", "cucina"),
         "parking_free_hint": has_kw("free parking", "무료 주차", "parcheggio gratuito"),
-        "notes_ko": "시설은 구글 타입·이름·소개 키워드 추정이며, 예약 전 공식 사이트로 확인하세요.",
+        "parking_likely_hint": has_kw(
+            "parking",
+            "주차",
+            "parcheggio",
+            "parkplatz",
+            "car park",
+            "parking lot",
+            "garage",
+        ),
+        "notes_ko": "시설·주차는 구글 Places 소개 키워드 추정이며, 확정은 예약 화면·Hotellook 캐시를 참고하세요.",
     }
 
 
@@ -341,9 +350,13 @@ def rank_hotels_for_attraction_points(
         website = (det.get("website") or "").strip()
         fac = _lodging_facility_hints(det)
         guests = max(1, int(travelers_total or 2))
-        party_line = (
-            f"일행 {guests}명 수용(실제 객실·침대 구성은 예약 페이지에서 확인)"
-        )
+        party_line = f"일행 {guests}명 기준(요금·객실 수는 Hotellook 캐시·예약 링크와 함께 확인)"
+        if fac.get("parking_free_hint"):
+            park_txt = "무료 주차 가능성(Places 키워드 추정) — 유료·대수는 예약 시 확인"
+        elif fac.get("parking_likely_hint"):
+            park_txt = "주차·차고 관련 언급 있음(추정) — 유료·가능 여부는 예약 링크에서 확인"
+        else:
+            park_txt = "주차: Places에서 명확한 정보 없음 — 예약·지도 리뷰에서 확인"
 
         out_hotels.append(
             {
@@ -358,14 +371,10 @@ def rank_hotels_for_attraction_points(
                 "amenities": [],
                 "breakfast_included": fac.get("breakfast_included_hint"),
                 "kitchen": fac.get("kitchenette_hint"),
-                "bedroom_summary": "객실·침실 구성은 공식 예약 페이지에서 선택·확인",
-                "parking_fee_text": (
-                    "무료 주차 가능성 있음(키워드) — 확정은 예약 페이지"
-                    if fac.get("parking_free_hint")
-                    else "주차비·주차 가능 여부는 예약 페이지에서 확인"
-                ),
+                "bedroom_summary": "Hotellook 캐시가 붙으면 객실·식사 옵션명이 표시됩니다.",
+                "parking_fee_text": park_txt,
                 "feature_highlights": [
-                    f"가격대(추정): {plevel_str}",
+                    f"가격대(구글): {plevel_str}",
                     party_line,
                 ],
                 "facility_hints": fac,
@@ -373,7 +382,6 @@ def rank_hotels_for_attraction_points(
                     "google_maps": maps_url,
                     "official_website": website or None,
                 },
-                "mandatory_url_note_ko": "구글 지도 URL은 필수 제공됨. 공식 예약·상세는 official_website(있을 때)로 확인하세요.",
                 "commute_target_minutes_one_way": max_commute_minutes_one_way,
                 "commute_constraint_relaxed": commute_relaxed,
                 "fit_notes": note
@@ -623,15 +631,20 @@ def _attach_hotellook_price(
     rooms: int,
 ) -> None:
     if not token:
+        hotel.setdefault(
+            "availability_note_ko",
+            "요금·재고 요약(캐시)을 보려면 서버에 TRAVELPAYOUTS_API_TOKEN을 설정하세요. "
+            "토큰이 없으면 구글 정보와 동선만으로 후보를 고릅니다.",
+        )
         return
     try:
-        from mcp_servers.hotel.hotellook_prices import fetch_hotellook_min_price
+        from mcp_servers.hotel.hotellook_prices import fetch_hotellook_stay_quote
 
         lat = float(hotel.get("hotel_lat") or 0)
         lng = float(hotel.get("hotel_lng") or 0)
         if lat == 0 and lng == 0:
             return
-        krw, cur_note, _ = fetch_hotellook_min_price(
+        q = fetch_hotellook_stay_quote(
             str(hotel.get("name") or ""),
             lat,
             lng,
@@ -640,9 +653,23 @@ def _attach_hotellook_price(
             token,
             rooms=rooms,
         )
-        if krw:
-            hotel["total_stay_estimate_krw"] = krw
-            hotel["price_basis_note"] = f"Hotellook 캐시 {cur_note} · 객실 수 {rooms}"
+        nights = max(1, int(hotel.get("stay_nights") or _nights_between(check_in, check_out)))
+        tot = q.get("total_krw_estimate")
+        if tot:
+            hotel["total_stay_estimate_krw"] = tot
+            hotel["price_per_night_krw"] = int(round(tot / nights))
+        if q.get("price_basis_note"):
+            hotel["price_basis_note"] = q["price_basis_note"]
+        if q.get("room_meal_label"):
+            hotel["bedroom_summary"] = q["room_meal_label"]
+        if q.get("breakfast_included") is not None:
+            hotel["breakfast_included"] = bool(q["breakfast_included"])
+        if q.get("meal_plan_summary_ko"):
+            hotel["meal_plan_summary_ko"] = q["meal_plan_summary_ko"]
+        if q.get("availability_note_ko"):
+            hotel["availability_note_ko"] = q["availability_note_ko"]
+        if q.get("booking_deep_link"):
+            hotel["booking_url"] = q["booking_deep_link"]
     except Exception as e:
         logger.debug("hotellook attach skipped: %s", e)
 

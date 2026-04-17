@@ -176,6 +176,11 @@ def mock_search_hotels(
             "stay_nights": nights,
             "total_stay_estimate_krw": ppn * nights,
             "selection_rationale": rationale_base,
+            "meal_plan_summary_ko": "목업 데이터 예시입니다.",
+            "availability_note_ko": (
+                "목업(mock) 숙소입니다. 실제 배포에서는 GOOGLE_PLACES_API_KEY와 "
+                "TRAVELPAYOUTS_API_TOKEN으로 동선·Hotellook 캐시 요금을 채웁니다."
+            ),
         }
         out.append(row)
     return out
