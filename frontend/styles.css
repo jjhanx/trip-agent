@@ -1512,6 +1512,20 @@ a.btn-primary:hover { background: var(--accent-hover); }
   font-size: 0.88rem;
   margin-bottom: 0.35rem;
 }
+.booking-guidance-section-title {
+  margin-top: 1.35rem;
+  margin-bottom: 0.25rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.step-confirm-actions {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
 .booking-guidance-error {
   margin: 0;
   padding: 0.65rem 0.85rem;

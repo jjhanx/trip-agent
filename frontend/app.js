@@ -119,6 +119,7 @@ function saveItineraryDraft() {
       itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
       bookingGuidanceReceived: !!state.bookingGuidanceReceived,
       bookingGuidanceData: state.bookingGuidanceData ?? null,
+      bookingGuidanceApiReceived: !!state.bookingGuidanceApiReceived,
     };
     localStorage.setItem(ITINERARY_DRAFT_KEY, JSON.stringify(draft));
   } catch (e) {
@@ -167,6 +168,9 @@ function restoreItineraryDraft() {
     }
     if (draft.bookingGuidanceData != null && typeof draft.bookingGuidanceData === 'object') {
       state.bookingGuidanceData = draft.bookingGuidanceData;
+    }
+    if (typeof draft.bookingGuidanceApiReceived === 'boolean') {
+      state.bookingGuidanceApiReceived = draft.bookingGuidanceApiReceived;
     }
     if (state.itineraryWorkflowStep === 'meals' && state.itineraryMealsUiPhase === 'route') {
       state.itineraryWorkflowStep = 'route_plan';
@@ -429,6 +433,7 @@ function getFullPlanState() {
     itineraryMealsUiPhase: state.itineraryMealsUiPhase || 'route',
     bookingGuidanceReceived: !!state.bookingGuidanceReceived,
     bookingGuidanceData: state.bookingGuidanceData ?? null,
+    bookingGuidanceApiReceived: !!state.bookingGuidanceApiReceived,
     lastCommittedAttractionIds: state.lastCommittedAttractionIds,
     accommodations: state.accommodations,
     accommodationSelectionByDate: state.accommodationSelectionByDate || {},
@@ -477,6 +482,7 @@ function loadPlanIntoState(data) {
   state.bookingGuidanceData = data.bookingGuidanceData != null && typeof data.bookingGuidanceData === 'object'
     ? data.bookingGuidanceData
     : null;
+  state.bookingGuidanceApiReceived = !!data.bookingGuidanceApiReceived;
   state.lastCommittedAttractionIds = Array.isArray(data.lastCommittedAttractionIds)
     ? data.lastCommittedAttractionIds.map(String)
     : null;
@@ -655,6 +661,7 @@ function newPlan() {
   state.itineraryMealsUiPhase = 'route';
   state.bookingGuidanceReceived = false;
   state.bookingGuidanceData = null;
+  state.bookingGuidanceApiReceived = false;
   state.accommodations = [];
   state.accommodationSelectionByDate = {};
   state.accommodationSelectionByGroup = {};
@@ -725,6 +732,8 @@ let state = {
   bookingGuidanceReceived: false,
   /** 예약 안내 본문(읽기 쉬운 UI 재렌더·저장용) */
   bookingGuidanceData: null,
+  /** 세션 API로 예약 안내를 한 번이라도 받은 경우(버튼 라벨·강조용) */
+  bookingGuidanceApiReceived: false,
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -868,6 +877,9 @@ function show(id, fromStepClick = false) {
     refreshAccommodationPanel();
     requestAnimationFrame(() => refreshAccommodationPanel());
   }
+  if (id === 'step-confirm') {
+    updateBookingGuidanceActionButtons();
+  }
 }
 
 function updateStepCompletedState() {
@@ -935,15 +947,7 @@ function refreshStepConfirmSection() {
     renderStepConfirmFromItinerary(state.selectedItinerary, !state.bookingGuidanceReceived);
   }
   if (state.bookingGuidanceReceived) {
-    if (state.bookingGuidanceData) {
-      renderBookingGuidanceIntoDom(state.bookingGuidanceData);
-    } else {
-      const bg = $('#booking-guidance');
-      if (bg) {
-        bg.innerHTML = '<p class="muted">「예약 안내 받기」를 눌러 안내를 불러오세요.</p>';
-      }
-      $('#booking-guidance-heading')?.classList.remove('hidden');
-    }
+    renderBookingGuidanceIntoDom(state.bookingGuidanceData || { steps: [] });
   }
 }
 
@@ -1092,8 +1096,111 @@ function clearBookingGuidancePanel() {
   if (bg) bg.innerHTML = '';
   const gh = $('#booking-guidance-heading');
   if (gh) gh.classList.add('hidden');
+  $('#booking-guidance-intro')?.classList.add('hidden');
   state.bookingGuidanceReceived = false;
   state.bookingGuidanceData = null;
+  state.bookingGuidanceApiReceived = false;
+  updateBookingGuidanceActionButtons();
+}
+
+/** 서버가 steps를 생략하거나 다른 키로 감쌀 때 보정 */
+function normalizeBookingGuidancePayload(data) {
+  if (!data || typeof data !== 'object') return data;
+  if (Array.isArray(data.steps) && data.steps.length) return data;
+  const nested = data.booking_guidance || data.guidance || data.booking?.guidance;
+  if (nested && typeof nested === 'object' && Array.isArray(nested.steps) && nested.steps.length) {
+    return { ...nested };
+  }
+  return data;
+}
+
+/** API에 steps가 없을 때 현재 상태로 예약 체크리스트 구성 */
+function buildBookingGuidanceStepsFromState() {
+  const steps = [];
+  let order = 1;
+  const sf = state.selectedFlight || buildSelectedFlight();
+  if (state.flightSkipped && !sf) {
+    steps.push({
+      order: order++,
+      item: '항공편',
+      details: { skipped: true },
+      action: '항공 단계를 건너뛰었습니다. 필요하면 별도로 항공을 예약하세요.',
+    });
+  } else if (sf) {
+    steps.push({
+      order: order++,
+      item: '항공편',
+      details: sf,
+      action: '항공사·예약 사이트에서 선택한 편과 같은 조건으로 예약·결제하세요.',
+    });
+  } else {
+    steps.push({
+      order: order++,
+      item: '항공편',
+      details: null,
+      action: '항공이 아직 없다면 먼저 항공을 확정한 뒤 예약하세요.',
+    });
+  }
+  const acc = state.selectedAccommodation;
+  if (acc && typeof acc === 'object' && Object.keys(acc).length) {
+    steps.push({
+      order: order++,
+      item: '숙소',
+      details: acc,
+      action: '숙소 공식 사이트·예약 링크에서 일정·인원을 맞춰 재고와 요금을 확인하세요.',
+    });
+  } else {
+    steps.push({
+      order: order++,
+      item: '숙소',
+      details: { skipped: true },
+      action: '숙소를 확정한 뒤 동일 조건으로 예약하세요.',
+    });
+  }
+  const it = typeof enrichSelectedItineraryWithRouteBundle === 'function'
+    ? enrichSelectedItineraryWithRouteBundle(state.selectedItinerary)
+    : state.selectedItinerary;
+  steps.push({
+    order: order++,
+    item: '일정',
+    details: it && typeof it === 'object' ? it : {},
+    action: '일정을 저장하고 입장권·현지 이동을 준비하세요.',
+  });
+  return steps;
+}
+
+function ensureBookingGuidanceSteps(data) {
+  const base = normalizeBookingGuidancePayload(data);
+  if (!base || typeof base !== 'object') {
+    return {
+      status: 'confirmed',
+      summary: '선택한 항공·숙소·일정을 바탕으로 예약 순서를 정리했습니다.',
+      steps: buildBookingGuidanceStepsFromState(),
+    };
+  }
+  const out = { ...base };
+  if (!Array.isArray(out.steps) || !out.steps.length) {
+    out.steps = buildBookingGuidanceStepsFromState();
+  }
+  if (!out.summary) {
+    out.summary = '일정이 확정되었습니다. 아래 순서로 예약을 진행해 주세요.';
+  }
+  return out;
+}
+
+function updateBookingGuidanceActionButtons() {
+  const btn = $('#btn-request-booking-guidance');
+  if (!btn) return;
+  const showRefresh = !!(state.bookingGuidanceApiReceived && state.bookingGuidanceData);
+  if (showRefresh) {
+    btn.textContent = '안내 다시 받기';
+    btn.classList.remove('btn-primary');
+    btn.classList.add('secondary');
+  } else {
+    btn.textContent = '예약 안내 받기';
+    btn.classList.add('btn-primary');
+    btn.classList.remove('secondary');
+  }
 }
 
 function formatGuidanceFlightDetails(d) {
@@ -1249,12 +1356,16 @@ function renderBookingGuidanceHtml(data) {
   return `<div class="booking-guidance-root">${lead || '<p class="muted">구조화된 단계 정보가 없습니다.</p>'}${fallback}</div>`;
 }
 
-function renderBookingGuidanceIntoDom(data) {
+function renderBookingGuidanceIntoDom(data, opts) {
+  const merged = ensureBookingGuidanceSteps(data);
   const bg = $('#booking-guidance');
-  if (bg) bg.innerHTML = renderBookingGuidanceHtml(data);
+  if (bg) bg.innerHTML = renderBookingGuidanceHtml(merged);
   $('#booking-guidance-heading')?.classList.remove('hidden');
-  state.bookingGuidanceData = data && typeof data === 'object' ? data : null;
+  $('#booking-guidance-intro')?.classList.remove('hidden');
+  state.bookingGuidanceData = merged;
   state.bookingGuidanceReceived = true;
+  if (opts && opts.fromApi) state.bookingGuidanceApiReceived = true;
+  updateBookingGuidanceActionButtons();
 }
 
 function showFlightSummaryForEdit(sf) {
@@ -3963,7 +4074,7 @@ async function skipAccommodationToConfirm() {
       selected_accommodation: state.selectedAccommodation,
     }));
     if (data?.error) throw new Error(data.error);
-    renderBookingGuidanceIntoDom(data);
+    renderBookingGuidanceIntoDom(data, { fromApi: true });
     saveItineraryDraft();
     show('step-confirm');
   } catch (err) {
@@ -4677,7 +4788,7 @@ $('#btn-request-booking-guidance')?.addEventListener('click', async () => {
     });
     const data = await callAgent(payload);
     if (data?.error) throw new Error(data.error);
-    renderBookingGuidanceIntoDom(data);
+    renderBookingGuidanceIntoDom(data, { fromApi: true });
     saveItineraryDraft();
     show('step-confirm');
   } catch (err) {
