@@ -3432,8 +3432,83 @@ function renderItineraryWorkflow(data) {
   }
 }
 
-function applyItineraryResponse(data) {
+/** 응답이 문자열·펜스만 온 경우(JSON 파싱 실패 시 callAgent가 { raw }로 넘김) */
+function tryParseJsonLoose(str) {
+  if (!str || typeof str !== 'string') return null;
+  const t = str.trim();
+  const m = t.match(/^```(?:json)?\s*([\s\S]*?)```$/im);
+  const inner = (m ? m[1] : t).trim();
+  try {
+    return JSON.parse(inner);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * LLM/보강 단계에서 itinerary_step이 빠지면 applyItineraryResponse가 레거시 분기로 가
+ * 「일정 1」 빈 카드만 보이는 문제가 난다. route_plan·daily_schedule이 있으면 select_meals로 복구.
+ */
+function normalizeRouteBundleIfMissingStep(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  if (
+    data.itinerary_step === 'select_meals'
+    || data.itinerary_step === 'select_attractions'
+    || data.itinerary_step === 'complete'
+  ) {
+    return data;
+  }
+  const rp = data.route_plan;
+  if (!rp || typeof rp !== 'object') return data;
+  const ds = Array.isArray(rp.daily_schedule) ? rp.daily_schedule : [];
+  if (!ds.length) return data;
+  const tripDatesFromRows = ds.map((r) => r && r.date).filter(Boolean);
+  const next = { ...data, itinerary_step: 'select_meals' };
+  const td = next.trip_dates;
+  if (!Array.isArray(td) || !td.length) {
+    next.trip_dates = tripDatesFromRows.length ? tripDatesFromRows : td;
+  }
+  return next;
+}
+
+function applyItineraryResponse(incoming) {
+  let data = incoming;
   if (data?.error) throw new Error(data.error);
+  if (data && typeof data === 'object' && typeof data.raw === 'string') {
+    const hasCore = !!(data.itinerary_step || data.route_plan || data.attractions || data.final_itinerary);
+    if (!hasCore) {
+      const parsed = tryParseJsonLoose(data.raw);
+      if (parsed && typeof parsed === 'object') data = parsed;
+    }
+  }
+  data = normalizeRouteBundleIfMissingStep(data);
+  if (
+    data
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    && typeof data.raw === 'string'
+    && !data.itinerary_step
+    && !data.route_plan
+    && !data.attractions
+    && !data.itineraries
+  ) {
+    state.itineraryWorkflowStep = 'route_plan';
+    state.itineraries = [];
+    mountItineraryStepPanel('plan');
+    const root = $('#itinerary-workflow-root');
+    if (root) {
+      const snippet = String(data.raw).slice(0, 1200);
+      root.innerHTML = `
+        <div class="itinerary-phase">
+          <p class="error"><strong>동선 응답을 JSON으로 읽지 못했습니다.</strong> 서버 로그·에이전트 응답 형식을 확인하세요.</p>
+          <pre class="muted" style="white-space:pre-wrap;font-size:0.82rem;max-height:280px;overflow:auto;">${escapeHtml(snippet)}</pre>
+        </div>`;
+    }
+    updateItineraryNextButton();
+    show('step-itinerary-plan');
+    saveItineraryDraft();
+    return true;
+  }
   if (data?.itinerary_step === 'select_attractions') {
     const prevCatalog = state.itineraryAttractionCatalog;
     const prevSelected = [...(state.selectedAttractionIds || [])];

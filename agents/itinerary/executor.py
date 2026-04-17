@@ -3083,6 +3083,11 @@ JSON 객체 하나만 출력:
                     )
                 except Exception as e:
                     logger.warning("enrich_restaurant_drives_from_daily_schedule failed: %s", e)
+            # 클라이언트는 itinerary_step·trip_dates로 동선 UI를 고름 — 보강 후에도 누락되면 레거시 「일정 1」만 보일 수 있음
+            out.setdefault("itinerary_step", "select_meals")
+            _td = out.get("trip_dates")
+            if not isinstance(_td, list) or not _td:
+                out["trip_dates"] = dates
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps(out, ensure_ascii=False))
             )
