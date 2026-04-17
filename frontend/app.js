@@ -1103,13 +1103,12 @@ function clearBookingGuidancePanel() {
   updateBookingGuidanceActionButtons();
 }
 
-/** 서버가 steps를 생략하거나 다른 키로 감쌀 때 보정 */
+/** 서버가 다른 키로 감싼 경우 평탄화( steps는 ensure에서 state 기준으로 다시 채움 ) */
 function normalizeBookingGuidancePayload(data) {
   if (!data || typeof data !== 'object') return data;
-  if (Array.isArray(data.steps) && data.steps.length) return data;
   const nested = data.booking_guidance || data.guidance || data.booking?.guidance;
-  if (nested && typeof nested === 'object' && Array.isArray(nested.steps) && nested.steps.length) {
-    return { ...nested };
+  if (nested && typeof nested === 'object') {
+    return { ...data, ...nested };
   }
   return data;
 }
@@ -1170,22 +1169,29 @@ function buildBookingGuidanceStepsFromState() {
 }
 
 function ensureBookingGuidanceSteps(data) {
-  const base = normalizeBookingGuidancePayload(data);
-  if (!base || typeof base !== 'object') {
-    return {
-      status: 'confirmed',
-      summary: '선택한 항공·숙소·일정을 바탕으로 예약 순서를 정리했습니다.',
-      steps: buildBookingGuidanceStepsFromState(),
-    };
+  let base = {};
+  if (data && typeof data === 'object') {
+    base = normalizeBookingGuidancePayload({ ...data });
   }
-  const out = { ...base };
-  if (!Array.isArray(out.steps) || !out.steps.length) {
-    out.steps = buildBookingGuidanceStepsFromState();
-  }
-  if (!out.summary) {
-    out.summary = '일정이 확정되었습니다. 아래 순서로 예약을 진행해 주세요.';
-  }
-  return out;
+  const serverSteps = Array.isArray(base.steps) ? base.steps : [];
+  const fromState = buildBookingGuidanceStepsFromState();
+  const steps = fromState.map((st) => {
+    const match = serverSteps.find((s) => String(s.item || '') === String(st.item || ''));
+    if (match && typeof match.action === 'string' && match.action.trim()) {
+      return { ...st, action: match.action.trim() };
+    }
+    return st;
+  });
+  const summary =
+    typeof base.summary === 'string' && base.summary.trim()
+      ? base.summary.trim()
+      : '일정이 확정되었습니다. 아래 순서로 예약을 진행해 주세요.';
+  return {
+    ...base,
+    status: base.status || 'confirmed',
+    summary,
+    steps,
+  };
 }
 
 function updateBookingGuidanceActionButtons() {
@@ -1329,7 +1335,7 @@ function renderBookingGuidanceHtml(data) {
   if (!data || typeof data !== 'object') {
     return '<p class="muted">응답이 없습니다.</p>';
   }
-  if (data.error && !data.steps) {
+  if (data.error != null && data.error !== '') {
     return `<p class="booking-guidance-error">${escapeHtml(String(data.error))}</p>`;
   }
   if (data.raw != null && !Array.isArray(data.steps) && data.summary == null && data.status == null) {
@@ -1347,7 +1353,12 @@ function renderBookingGuidanceHtml(data) {
       const ord = st.order != null ? `${st.order}. ` : '';
       const item = escapeHtml(String(st.item || '항목'));
       const action = st.action ? `<p class="booking-guidance-action"><strong>안내:</strong> ${escapeHtml(String(st.action))}</p>` : '';
-      const body = formatBookingGuidanceStepDetails(st.item, st.details);
+      let body = '';
+      try {
+        body = formatBookingGuidanceStepDetails(st.item, st.details);
+      } catch (e) {
+        body = `<p class="muted">이 항목을 표시하는 중 오류가 났습니다. (${escapeHtml(String(e && e.message ? e.message : e))})</p>`;
+      }
       return `<section class="booking-guidance-step" aria-label="${item}"><h4 class="booking-guidance-step-h">${ord}${item}</h4>${action}<div class="booking-guidance-step-body">${body}</div></section>`;
     }).join('');
     return `<div class="booking-guidance-root">${lead}${stepsHtml}</div>`;
