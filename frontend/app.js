@@ -853,6 +853,10 @@ function show(id, fromStepClick = false) {
   if (id === 'step-itinerary-plan') {
     mountItineraryStepPanel('plan');
   }
+  if (id === 'step-accommodation') {
+    refreshAccommodationPanel();
+    requestAnimationFrame(() => refreshAccommodationPanel());
+  }
 }
 
 function updateStepCompletedState() {
@@ -954,6 +958,17 @@ function refreshStepViewForSection(sectionId) {
   }
 }
 
+/** 숙소 목록·현지 이동 요약. 섹션이 표시될 때마다 호출해 첫 진입 시 목록이 비어 보이는 문제를 막는다. */
+function refreshAccommodationPanel() {
+  const ltEl = $('#local-transport-info');
+  if (ltEl) {
+    ltEl.innerHTML = state.localTransport?.length
+      ? formatLocalTransportSummaryHtml(state.localTransport)
+      : '';
+  }
+  renderAccommodations(state.accommodations || []);
+}
+
 function refreshStepView(step) {
   if (step === 'input' && state.travelInput) {
     const form = $('#travel-form');
@@ -1017,11 +1032,7 @@ function refreshStepView(step) {
     }
   }
   if (step === 'accommodation') {
-    const ltEl = $('#local-transport-info');
-    if (ltEl) ltEl.innerHTML = state.localTransport?.length
-      ? formatLocalTransportSummaryHtml(state.localTransport)
-      : '';
-    renderAccommodations(state.accommodations || []);
+    refreshAccommodationPanel();
   }
 }
 
@@ -1474,7 +1485,6 @@ async function runSessionRentalSearchSkipFlight() {
       state.accommodationSelectionByDate = {};
       state.accommodationSelectionByGroup = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
-      renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
       show('step-accommodation');
       return;
@@ -1943,7 +1953,6 @@ async function advanceToLocalTransportStep() {
       state.accommodationSelectionByDate = {};
       state.accommodationSelectionByGroup = {};
       state.localTransport = normalizeLocalTransport(data?.local_transport);
-      renderAccommodations(state.accommodations);
       renderRentalOptions(state.localTransport);
       show('step-accommodation');
       return true;
@@ -3748,10 +3757,6 @@ async function skipItineraryToAccommodation() {
     state.accommodationSelectionByDate = {};
     state.accommodationSelectionByGroup = {};
     state.localTransport = normalizeLocalTransport(lt);
-    renderAccommodations(state.accommodations);
-    $('#local-transport-info').innerHTML = state.localTransport.length
-      ? formatLocalTransportSummaryHtml(state.localTransport)
-      : '';
     state.itineraryWorkflowStep = 'pick_lodging';
     show('step-accommodation');
   } catch (err) {
@@ -3805,10 +3810,6 @@ async function proceedFromItineraryCompleteToAccommodation() {
     state.accommodationSelectionByDate = {};
     state.accommodationSelectionByGroup = {};
     state.localTransport = normalizeLocalTransport(lt);
-    renderAccommodations(state.accommodations);
-    $('#local-transport-info').innerHTML = state.localTransport.length
-      ? formatLocalTransportSummaryHtml(state.localTransport)
-      : '';
     state.itineraryWorkflowStep = 'pick_lodging';
     show('step-accommodation');
   } catch (err) {
@@ -3839,10 +3840,6 @@ async function proceedFromRoutePlanToAccommodation() {
     state.accommodationSelectionByDate = {};
     state.accommodationSelectionByGroup = {};
     state.localTransport = normalizeLocalTransport(lt);
-    renderAccommodations(state.accommodations);
-    $('#local-transport-info').innerHTML = state.localTransport.length
-      ? formatLocalTransportSummaryHtml(state.localTransport)
-      : '';
     state.itineraryWorkflowStep = 'pick_lodging';
     show('step-accommodation');
     saveItineraryDraft();
