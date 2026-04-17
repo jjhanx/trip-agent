@@ -1062,29 +1062,35 @@ function refreshStepView(step) {
   }
 }
 
+/** 항공 요약 카드. API 문자열은 반드시 escape — 미이스케이프 시 한 번의 innerHTML로 뒤따르는 마크업(예: 예약 안내 단계 카드)이 파서에서 깨질 수 있음 */
 function formatFlightDetailForSummary(f, label, hidePrice, isRoundTripTotal) {
-  const destL = f.destination_label ? `${f.destination || ''} (${f.destination_label})` : (f.destination || '');
-  const route = `${f.origin || ''} → ${destL}`;
-  const dep = fmtFlightDateTime(f.departure);
-  const arr = fmtFlightDateTime(f.arrival);
-  const dur = f.duration_hours ? `약 ${f.duration_hours}시간` : '';
-  const priceStr = hidePrice ? '' : (f.price_krw ? f.price_krw.toLocaleString() + '원' : (f.miles_required || 0) + '마일');
-  const price = priceStr ? (priceStr + (isRoundTripTotal ? ' (왕복)' : '')) : '';
+  const destL = f.destination_label
+    ? `${escapeHtml(f.destination || '')} (${escapeHtml(f.destination_label)})`
+    : escapeHtml(f.destination || '');
+  const route = `${escapeHtml(f.origin || '')} → ${destL}`;
+  const dep = escapeHtml(fmtFlightDateTime(f.departure));
+  const arr = escapeHtml(fmtFlightDateTime(f.arrival));
+  const dur = f.duration_hours != null ? `약 ${escapeHtml(String(f.duration_hours))}시간` : '';
+  const priceStr = hidePrice ? '' : (f.price_krw ? f.price_krw.toLocaleString() + '원' : `${f.miles_required || 0}마일`);
+  const price = priceStr ? escapeHtml(priceStr + (isRoundTripTotal ? ' (왕복)' : '')) : '';
   let segHtml = '';
   if (f.segments && f.segments.length > 0) {
-    segHtml = f.segments.map((seg, si) => {
-      const dAirport = seg.departure_airport?.name || seg.departure_airport?.id || '';
-      const aAirport = seg.arrival_airport?.name || seg.arrival_airport?.id || '';
-      const dTime = fmtFlightDateTime(seg.departure_airport?.time?.substring(0, 19) || '');
-      const aTime = fmtFlightDateTime(seg.arrival_airport?.time?.substring(0, 19) || '');
-      const segDur = seg.duration ? Math.round(seg.duration / 60) + 'h ' + (seg.duration % 60) + 'm' : '';
-      return `<div class="flight-seg">${seg.airline} ${seg.flight_number} ${dTime} ${dAirport} → ${aTime} ${aAirport} ${segDur ? '(' + segDur + ')' : ''}</div>`;
+    segHtml = f.segments.map((seg) => {
+      const dAirport = escapeHtml(String(seg.departure_airport?.name || seg.departure_airport?.id || ''));
+      const aAirport = escapeHtml(String(seg.arrival_airport?.name || seg.arrival_airport?.id || ''));
+      const dTime = escapeHtml(fmtFlightDateTime(seg.departure_airport?.time?.substring(0, 19) || ''));
+      const aTime = escapeHtml(fmtFlightDateTime(seg.arrival_airport?.time?.substring(0, 19) || ''));
+      const segDurRaw = seg.duration ? `${Math.round(seg.duration / 60)}h ${seg.duration % 60}m` : '';
+      const segDur = segDurRaw ? escapeHtml(segDurRaw) : '';
+      const al = escapeHtml(String(seg.airline || ''));
+      const fn = escapeHtml(String(seg.flight_number || ''));
+      return `<div class="flight-seg">${al} ${fn} ${dTime} ${dAirport} → ${aTime} ${aAirport}${segDur ? ` (${segDur})` : ''}</div>`;
     }).join('');
   }
   return `
     <div class="selected-flight-card">
-      <div class="selected-flight-label">${label}</div>
-      <div class="selected-flight-main">${f.airline || '항공사'} ${f.flight_number || ''} · ${route}</div>
+      <div class="selected-flight-label">${escapeHtml(String(label || ''))}</div>
+      <div class="selected-flight-main">${escapeHtml(f.airline || '항공사')} ${escapeHtml(f.flight_number || '')} · ${route}</div>
       <div class="selected-flight-meta">출발 ${dep} · 도착 ${arr} ${dur ? '· 비행 ' + dur : ''}</div>
       ${price ? `<div class="selected-flight-price">${price}</div>` : ''}
       ${segHtml ? '<div class="selected-flight-segments">' + segHtml + '</div>' : ''}
