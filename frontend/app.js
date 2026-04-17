@@ -1098,12 +1098,9 @@ function formatFlightDetailForSummary(f, label, hidePrice, isRoundTripTotal) {
 }
 
 function clearBookingGuidancePanel() {
-  const lead = $('#booking-guidance-lead');
-  const steps = $('#booking-guidance-steps');
+  const { leadEl: lead, stepsEl: steps } = ensureBookingGuidanceDomStructure();
   if (lead) lead.innerHTML = '';
   if (steps) steps.innerHTML = '';
-  const bg = $('#booking-guidance');
-  if (bg && !lead && !steps) bg.innerHTML = '';
   const gh = $('#booking-guidance-heading');
   if (gh) gh.classList.add('hidden');
   $('#booking-guidance-intro')?.classList.add('hidden');
@@ -1386,19 +1383,70 @@ function renderBookingGuidanceStepSectionsHtml(data) {
   }).join('');
 }
 
+/**
+ * 예전 코드가 #booking-guidance 전체를 innerHTML로 덮어 #booking-guidance-lead / #booking-guidance-steps 가 사라진 경우 복구.
+ * (한 번 사라지면 이후 항상 else 분기만 타며 카드가 비어 보임)
+ */
+function ensureBookingGuidanceDomStructure() {
+  const wrap = $('#booking-guidance');
+  if (!wrap) return { leadEl: null, stepsEl: null };
+  let leadEl = $('#booking-guidance-lead');
+  let stepsEl = $('#booking-guidance-steps');
+  if (!leadEl || !stepsEl) {
+    wrap.textContent = '';
+    wrap.classList.add('booking-guidance-wrap');
+    leadEl = document.createElement('div');
+    leadEl.id = 'booking-guidance-lead';
+    stepsEl = document.createElement('div');
+    stepsEl.id = 'booking-guidance-steps';
+    stepsEl.className = 'booking-guidance-root';
+    wrap.appendChild(leadEl);
+    wrap.appendChild(stepsEl);
+  }
+  return { leadEl, stepsEl };
+}
+
+/** 단계마다 별도 innerHTML — 한 구간의 잘못된 마크업이 나머지 카드를 망가뜨리지 않게 함 */
+function renderBookingGuidanceStepsIntoDom(merged, stepsEl) {
+  if (!stepsEl) return;
+  stepsEl.innerHTML = '';
+  if (!merged || typeof merged !== 'object') return;
+  if (merged.error != null && merged.error !== '') return;
+  if (merged.raw != null && !Array.isArray(merged.steps) && merged.summary == null && merged.status == null) {
+    return;
+  }
+  if (!Array.isArray(merged.steps) || !merged.steps.length) {
+    const fallback = formatGuidanceGenericDetails(merged);
+    stepsEl.innerHTML = `<p class="muted">구조화된 단계 정보가 없습니다.</p>${fallback}`;
+    return;
+  }
+  merged.steps.forEach((st) => {
+    const section = document.createElement('section');
+    const ord = st.order != null ? `${st.order}. ` : '';
+    const itemEsc = escapeHtml(String(st.item || '항목'));
+    const itemLabel = String(st.item || '항목');
+    section.className = 'booking-guidance-step';
+    section.setAttribute('aria-label', itemLabel);
+    let actionHtml = '';
+    if (st.action) {
+      actionHtml = `<p class="booking-guidance-action"><strong>안내:</strong> ${escapeHtml(String(st.action))}</p>`;
+    }
+    let body = '';
+    try {
+      body = formatBookingGuidanceStepDetails(st.item, st.details);
+    } catch (e) {
+      body = `<p class="muted">이 항목을 표시하는 중 오류가 났습니다. (${escapeHtml(String(e && e.message ? e.message : e))})</p>`;
+    }
+    section.innerHTML = `<h4 class="booking-guidance-step-h">${ord}${itemEsc}</h4>${actionHtml}<div class="booking-guidance-step-body">${body}</div>`;
+    stepsEl.appendChild(section);
+  });
+}
+
 function renderBookingGuidanceIntoDom(data, opts) {
   const merged = ensureBookingGuidanceSteps(data);
-  const leadEl = $('#booking-guidance-lead');
-  const stepsEl = $('#booking-guidance-steps');
-  if (leadEl && stepsEl) {
-    leadEl.innerHTML = renderBookingGuidanceLeadHtml(merged);
-    stepsEl.innerHTML = renderBookingGuidanceStepSectionsHtml(merged);
-  } else {
-    const bg = $('#booking-guidance');
-    if (bg) {
-      bg.innerHTML = `${renderBookingGuidanceLeadHtml(merged)}<div class="booking-guidance-root">${renderBookingGuidanceStepSectionsHtml(merged)}</div>`;
-    }
-  }
+  const { leadEl, stepsEl } = ensureBookingGuidanceDomStructure();
+  if (leadEl) leadEl.innerHTML = renderBookingGuidanceLeadHtml(merged);
+  renderBookingGuidanceStepsIntoDom(merged, stepsEl);
   $('#booking-guidance-heading')?.classList.remove('hidden');
   $('#booking-guidance-intro')?.classList.remove('hidden');
   state.bookingGuidanceData = merged;
