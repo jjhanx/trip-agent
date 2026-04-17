@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>여행 일정 설계 | Trip Agent</title>
-  <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="styles.css?v=25">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <!-- Travelpayouts 추적 스크립트 -->
   <script data-noptimize="1" data-cfasync="false" data-wpfc-render="false">
@@ -370,7 +370,10 @@
         <div id="itinerary-confirm-summary"></div>
         <h3 id="booking-guidance-heading" class="booking-guidance-section-title hidden">예약 진행 순서</h3>
         <p id="booking-guidance-intro" class="muted hidden" style="margin: 0 0 0.75rem; font-size: 0.92rem; line-height: 1.45;">선택하신 항공·숙소·일정을 바탕으로 한 체크리스트입니다.</p>
-        <div id="booking-guidance"></div>
+        <div id="booking-guidance" class="booking-guidance-wrap">
+          <div id="booking-guidance-lead"></div>
+          <div id="booking-guidance-steps" class="booking-guidance-root"></div>
+        </div>
         <div class="step-confirm-actions">
           <button type="button" id="btn-request-booking-guidance" class="btn-primary">예약 안내 받기</button>
           <button type="button" id="btn-back-confirm" class="secondary">뒤로 (맛집 선택)</button>
@@ -395,7 +398,7 @@
   </div>
   <script src="airports.js?v=9"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="app.js?v=51"></script>
+  <script src="app.js?v=52"></script>
 </body>
 
 </html>

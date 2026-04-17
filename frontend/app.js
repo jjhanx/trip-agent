@@ -1098,8 +1098,12 @@ function formatFlightDetailForSummary(f, label, hidePrice, isRoundTripTotal) {
 }
 
 function clearBookingGuidancePanel() {
+  const lead = $('#booking-guidance-lead');
+  const steps = $('#booking-guidance-steps');
+  if (lead) lead.innerHTML = '';
+  if (steps) steps.innerHTML = '';
   const bg = $('#booking-guidance');
-  if (bg) bg.innerHTML = '';
+  if (bg && !lead && !steps) bg.innerHTML = '';
   const gh = $('#booking-guidance-heading');
   if (gh) gh.classList.add('hidden');
   $('#booking-guidance-intro')?.classList.add('hidden');
@@ -1337,7 +1341,8 @@ function formatBookingGuidanceStepDetails(item, details) {
   return formatGuidanceGenericDetails(details);
 }
 
-function renderBookingGuidanceHtml(data) {
+/** 요약만 — 단계 카드 HTML과 분리해 한 번의 innerHTML 파싱 오류가 전체를 망가뜨리지 않게 함 */
+function renderBookingGuidanceLeadHtml(data) {
   if (!data || typeof data !== 'object') {
     return '<p class="muted">응답이 없습니다.</p>';
   }
@@ -1345,7 +1350,7 @@ function renderBookingGuidanceHtml(data) {
     return `<p class="booking-guidance-error">${escapeHtml(String(data.error))}</p>`;
   }
   if (data.raw != null && !Array.isArray(data.steps) && data.summary == null && data.status == null) {
-    return `<div class="booking-guidance-root"><p class="muted">응답을 구조화하지 못했습니다. 아래는 수신한 텍스트입니다.</p><pre class="booking-guidance-pre">${escapeHtml(String(data.raw))}</pre></div>`;
+    return `<p class="muted">응답을 구조화하지 못했습니다. 아래는 수신한 텍스트입니다.</p><pre class="booking-guidance-pre">${escapeHtml(String(data.raw))}</pre>`;
   }
   let lead = '';
   if (data.summary) {
@@ -1354,29 +1359,46 @@ function renderBookingGuidanceHtml(data) {
   if (data.status && String(data.status) !== 'confirmed') {
     lead += `<p class="muted booking-guidance-status">상태: ${escapeHtml(String(data.status))}</p>`;
   }
-  if (Array.isArray(data.steps) && data.steps.length) {
-    const stepsHtml = data.steps.map((st) => {
-      const ord = st.order != null ? `${st.order}. ` : '';
-      const item = escapeHtml(String(st.item || '항목'));
-      const action = st.action ? `<p class="booking-guidance-action"><strong>안내:</strong> ${escapeHtml(String(st.action))}</p>` : '';
-      let body = '';
-      try {
-        body = formatBookingGuidanceStepDetails(st.item, st.details);
-      } catch (e) {
-        body = `<p class="muted">이 항목을 표시하는 중 오류가 났습니다. (${escapeHtml(String(e && e.message ? e.message : e))})</p>`;
-      }
-      return `<section class="booking-guidance-step" aria-label="${item}"><h4 class="booking-guidance-step-h">${ord}${item}</h4>${action}<div class="booking-guidance-step-body">${body}</div></section>`;
-    }).join('');
-    return `<div class="booking-guidance-root">${lead}${stepsHtml}</div>`;
+  return lead;
+}
+
+function renderBookingGuidanceStepSectionsHtml(data) {
+  if (!data || typeof data !== 'object') return '';
+  if (data.error != null && data.error !== '') return '';
+  if (data.raw != null && !Array.isArray(data.steps) && data.summary == null && data.status == null) {
+    return '';
   }
-  const fallback = formatGuidanceGenericDetails(data);
-  return `<div class="booking-guidance-root">${lead || '<p class="muted">구조화된 단계 정보가 없습니다.</p>'}${fallback}</div>`;
+  if (!Array.isArray(data.steps) || !data.steps.length) {
+    const fallback = formatGuidanceGenericDetails(data);
+    return `<p class="muted">구조화된 단계 정보가 없습니다.</p>${fallback}`;
+  }
+  return data.steps.map((st) => {
+    const ord = st.order != null ? `${st.order}. ` : '';
+    const item = escapeHtml(String(st.item || '항목'));
+    const action = st.action ? `<p class="booking-guidance-action"><strong>안내:</strong> ${escapeHtml(String(st.action))}</p>` : '';
+    let body = '';
+    try {
+      body = formatBookingGuidanceStepDetails(st.item, st.details);
+    } catch (e) {
+      body = `<p class="muted">이 항목을 표시하는 중 오류가 났습니다. (${escapeHtml(String(e && e.message ? e.message : e))})</p>`;
+    }
+    return `<section class="booking-guidance-step" aria-label="${item}"><h4 class="booking-guidance-step-h">${ord}${item}</h4>${action}<div class="booking-guidance-step-body">${body}</div></section>`;
+  }).join('');
 }
 
 function renderBookingGuidanceIntoDom(data, opts) {
   const merged = ensureBookingGuidanceSteps(data);
-  const bg = $('#booking-guidance');
-  if (bg) bg.innerHTML = renderBookingGuidanceHtml(merged);
+  const leadEl = $('#booking-guidance-lead');
+  const stepsEl = $('#booking-guidance-steps');
+  if (leadEl && stepsEl) {
+    leadEl.innerHTML = renderBookingGuidanceLeadHtml(merged);
+    stepsEl.innerHTML = renderBookingGuidanceStepSectionsHtml(merged);
+  } else {
+    const bg = $('#booking-guidance');
+    if (bg) {
+      bg.innerHTML = `${renderBookingGuidanceLeadHtml(merged)}<div class="booking-guidance-root">${renderBookingGuidanceStepSectionsHtml(merged)}</div>`;
+    }
+  }
   $('#booking-guidance-heading')?.classList.remove('hidden');
   $('#booking-guidance-intro')?.classList.remove('hidden');
   state.bookingGuidanceData = merged;
